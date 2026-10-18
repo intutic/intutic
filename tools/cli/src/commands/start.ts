@@ -28,6 +28,12 @@
  * gates not installed, one line names the recorded harnesses that have none.
  * `--no-gates` skips both.
  *
+ * Decide. When the policy snapshot carries decide rules and a decide engine
+ * is configured, start warms the engine's model (Ollama's `keep_alive`) and
+ * runs the known-answer canary, storing its result where the gates read it.
+ * Both run beside the proxy's start-up: each result is reported, and none
+ * stops or delays the proxy.
+ *
  * @module
  */
 
@@ -36,7 +42,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { watch } from 'chokidar'
 import { gateKindForHarness, type HarnessType } from '@intutic/shared-types'
-import { findGateFile } from '@intutic/sync-daemon'
+import { findGateFile, pruneDecideLogs } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
 import { loadConfig, loadCredentials } from '../config/store.js'
 import { installLocalGates, localGatesInstalled } from '../lib/localGates.js'
@@ -74,6 +80,8 @@ async function prepareLocalGates(): Promise<(() => Promise<void>) | null> {
     try {
       const result = await installLocalGates({ workspaceRoot: root, harnesses, routing: false, warn: (line) => log.warn(line) })
       log.info(`Local gates ${why} (${result.snapshot.ruleCount} snapshot rules, ${result.gates.length} harness(es)).`)
+      // Decide logs past their 30 days go with each refresh; never throws.
+      await pruneDecideLogs()
     } catch (err) {
       log.warn(`Could not refresh the local gates: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -95,6 +103,24 @@ async function prepareLocalGates(): Promise<(() => Promise<void>) | null> {
     if (timer) clearTimeout(timer)
     await watcher.close()
   }
+}
+
+/**
+ * Warms the decide engine and runs its canary in the background
+ * (`decideStartChecks`), reporting each line. Never throws, never waited on.
+ */
+function startDecideEngine(): void {
+  void (async () => {
+    try {
+      const { decideStartChecks } = await import('./decide.js')
+      for (const c of await decideStartChecks()) {
+        if (c.passed) log.info(`${c.name}: ${c.detail}`)
+        else log.warn(`${c.name}: ${c.detail}${c.remediation ? ` ${c.remediation}` : ''}`)
+      }
+    } catch (err) {
+      log.warn(`Could not check the decide engine: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  })()
 }
 
 export async function runStart(opts: {
@@ -124,6 +150,8 @@ export async function runStart(opts: {
   }
 
   const stopWatching = opts.gates === false ? null : await prepareLocalGates()
+  // After the gates' refresh, so it reads the snapshot they now enforce.
+  startDecideEngine()
 
   // Prefer the binary the proxy launcher already downloaded; fall back to the
   // `intutic-proxy` shim on PATH, which downloads on first run.

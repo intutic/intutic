@@ -90,7 +90,7 @@ try {
   });
 } catch {}
 
-${emitJsGate({ harness: 'github-copilot', contract: 'exit2' })}
+${emitJsGate({ harness: 'github-copilot', contract: 'exit2', ask: 'copilot-decision' })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -128,7 +128,7 @@ function logEvent(verdict, toolName, reason) {
 
 let raw = '';
 process.stdin.on('data', (c) => { raw += c; });
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || '';
@@ -153,7 +153,7 @@ process.stdin.on('end', () => {
       input.target || input.notebook_path || '';
     const command = input.command || input.cmd || input.script || '';
 
-    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
+    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
     // Allow
     logEvent('tool_allowed', toolName, '');

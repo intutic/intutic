@@ -148,6 +148,8 @@ class TestEmit:
         # Mirrors HookEventSchema in control-plane routes/hookEvents.ts.
         assert "tool_would_block" in VALID_EVENTS
         assert "snapshot_empty" in VALID_EVENTS
+        # Reported once when the snapshot's format is newer than the gate reads.
+        assert "snapshot_format_newer" in VALID_EVENTS
 
 
 class TestJudgeFinalize:

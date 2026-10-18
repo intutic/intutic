@@ -265,17 +265,21 @@ class TestDecideRecords:
         assert [r.id for r in s.rules] == ["d.rm"]
         assert snap.evaluate("Bash", "", "ls -la", s).severity is None
 
-    def test_a_gate_that_does_not_evaluate_decide_rules_refuses_through_the_fallback_line(self, tmp_path, monkeypatch):
+    def test_a_gate_evaluates_decide_rules_and_with_no_engine_refuses_governance_unavailable(self, tmp_path, monkeypatch):
         from intutic_clawde.gate import gate as gate_mod
 
-        assert gate_mod.CAN_EVALUATE_DECIDE is False
+        assert gate_mod.CAN_EVALUATE_DECIDE is True
         monkeypatch.setenv("INTUTIC_SNAPSHOT_RULES", _rules_file(tmp_path, ["@format\t2", self.RECORD, self.FALLBACK, self.OTHER]))
+        # No engine.json under this HOME and no model: the engine is not configured.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("INTUTIC_DECIDE_MODEL", raising=False)
         g = gate_mod.Gate(gate_mod.GateConfig(repo_root=str(tmp_path), workspace_id=WS, use_hook_gate=False, use_sop_rules=False))
         assert len(g.snapshot().decide_rules) == 1
-        assert [r.id for r in g.snapshot().rules] == [self.FB, "d.rm"]
+        assert [r.id for r in g.snapshot().rules] == ["d.rm"]
         with pytest.raises(gate_mod.IntuticGateRefusal) as refused:
             g.guard("Bash", {"command": "ls -la"})
-        assert f"[{self.FB}]" in refused.value.reason
+        assert refused.value.code == "GOVERNANCE_UNAVAILABLE"
+        assert f"[{self.FB}]" not in refused.value.reason
 
     def test_keeps_the_fallback_line_when_the_record_does_not_decode(self, tmp_path):
         s = snap.load_snapshot(WS, _rules_file(tmp_path, ["@format\t2", self.DAMAGED, self.FALLBACK, self.OTHER]),

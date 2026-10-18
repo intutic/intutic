@@ -90,6 +90,12 @@ describe('describePolicySnapshot', () => {
     expect(result.detail).toContain('9 rule(s)')
   })
 
+  it('counts decide rules on their own, since their fallback lines are not in the rule count', () => {
+    expect(describePolicySnapshot(health({ ruleCount: 8, decideRules: 1 })).detail).toContain('8 rule(s) and 1 decide rule(s),')
+    expect(describePolicySnapshot(health({ state: 'stale', ageDays: 31, ruleCount: 8, decideRules: 2 })).detail).toContain('(8 rule(s) and 2 decide rule(s))')
+    expect(describePolicySnapshot(health()).detail).not.toContain('decide')
+  })
+
   it('surfaces uncompilable rules alongside an otherwise healthy snapshot', () => {
     const result = describePolicySnapshot(health({ droppedRules: 2 }))
     expect(result.passed).toBe(true)

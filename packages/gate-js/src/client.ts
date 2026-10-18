@@ -59,8 +59,11 @@ const VALID_EVENTS = new Set([
   'snapshot_stale',
   'snapshot_invalid',
   'snapshot_empty',
+  'snapshot_format_newer',
   'tool_held',
   'hold_approved_bypass_used',
+  // `intutic rollback` writes it; listed so a caller reporting a restore of its own is not dropped.
+  'tool_reverted',
 ])
 
 export interface GateResponse {

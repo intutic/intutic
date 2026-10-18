@@ -17,8 +17,8 @@
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import { homedir } from 'node:os'
-import { gateKindForHarness, HarnessType, parseDecideLines } from '@intutic/shared-types'
-import type { GateKind } from '@intutic/shared-types'
+import { DECIDE_MAX_RULES_PER_CALL, gateKindForHarness, HarnessType, parseDecideLines, splitFrontMatter } from '@intutic/shared-types'
+import type { GateKind, SyncSopEntry } from '@intutic/shared-types'
 import {
   buildSnapshotRules,
   findGateFile,
@@ -27,7 +27,6 @@ import {
   localHoldTokensFor,
   localResolvedPolicy,
   noteProxyUrl,
-  type ServedDecideRule,
   SNAPSHOT_JSON,
   SNAPSHOT_RULES,
   updatePreToolUseHooks,
@@ -38,6 +37,7 @@ import { getAdapter } from '../harness/detector.js'
 import { writeHarnessConfigs } from '../harness/writeHarnessConfigs.js'
 import { loadCredentials } from '../config/store.js'
 import { localProxyPort } from './localProxy.js'
+import { decideRuleNotes } from './decideLocal.js'
 
 /** The hook events log is rotated past this size; nothing drains it without a control plane. */
 export const HOOK_EVENTS_ROTATE_BYTES = 10 * 1024 * 1024
@@ -125,20 +125,62 @@ async function rotateHookEvents(workspaceRoot: string, dryRun: boolean): Promise
 
 /**
  * One warning per `decide:` line that does not read, naming its SOP file and
- * its place among that file's decide lines. The snapshot refuses the tools
- * such a line names until it is fixed.
+ * line number. The snapshot refuses the tools such a line names until it is
+ * fixed. A bare or non-JSON line gets the one-rule-per-line hint.
  */
-function unreadableDecideLines(rules: readonly ServedDecideRule[]): string[] {
-  const bySop = new Map<string, string[]>()
-  for (const r of rules) bySop.set(r.sopId, [...(bySop.get(r.sopId) ?? []), String(r.ir)])
+function unreadableDecideLines(entries: readonly SyncSopEntry[]): string[] {
   const out: string[] = []
-  for (const [sopId, lines] of bySop) {
-    const file = `.intutic/sops/${sopId.replace(/^local:/, '').replace(':', '/')}`
-    parseDecideLines(lines).forEach((d, i) => {
-      if (d.kind === 'unreadable') out.push(`${file}: decide line ${i + 1} does not read, so its tools are refused: ${d.error}`)
+  for (const entry of entries) {
+    const numbered = splitFrontMatter(entry.content)
+      .front.split('\n')
+      .map((l, k) => ({ text: l.trim(), line: k + 1 }))
+      .filter((l) => l.text.startsWith('decide:'))
+    if (numbered.length === 0) continue
+    const file = `.intutic/sops/${entry.sopId.replace(/^local:/, '').replace(':', '/')}`
+    parseDecideLines(numbered.map((l) => l.text.slice('decide:'.length))).forEach((d, i) => {
+      if (d.kind === 'unreadable') out.push(`${file}:${numbered[i]!.line}: decide line ${i + 1} does not read, so its tools are refused: ${d.error}`)
     })
   }
   return out
+}
+
+/**
+ * One warning per readable `decide:` rule 3.0 does not carry out as written
+ * (`decideRuleNotes`: an `on: response` rule, a reserved `context`), naming
+ * its SOP file and line number.
+ */
+function notedDecideRules(entries: readonly SyncSopEntry[]): string[] {
+  const out: string[] = []
+  for (const entry of entries) {
+    const numbered = splitFrontMatter(entry.content)
+      .front.split('\n')
+      .map((l, k) => ({ text: l.trim(), line: k + 1 }))
+      .filter((l) => l.text.startsWith('decide:'))
+    if (numbered.length === 0) continue
+    const file = `.intutic/sops/${entry.sopId.replace(/^local:/, '').replace(':', '/')}`
+    parseDecideLines(numbered.map((l) => l.text.slice('decide:'.length))).forEach((d, i) => {
+      if (d.kind === 'rule') for (const note of decideRuleNotes(d.rule)) out.push(`${file}:${numbered[i]!.line}: ${note}`)
+    })
+  }
+  return out
+}
+
+/** Tools more than {@link DECIDE_MAX_RULES_PER_CALL} local decide rules name: a call evaluates only that many. */
+function crowdedDecideTools(entries: readonly SyncSopEntry[]): string[] {
+  const byTool = new Map<string, number>()
+  for (const entry of entries) {
+    const values = splitFrontMatter(entry.content)
+      .front.split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('decide:'))
+      .map((l) => l.slice('decide:'.length))
+    for (const d of parseDecideLines(values)) {
+      if (d.kind === 'rule' && d.rule.on === 'tool_call') for (const t of new Set(d.rule.tools ?? [])) byTool.set(t, (byTool.get(t) ?? 0) + 1)
+    }
+  }
+  return [...byTool]
+    .filter(([, n]) => n > DECIDE_MAX_RULES_PER_CALL)
+    .map(([tool, n]) => `${n} decide rules name ${tool}; a call evaluates at most ${DECIDE_MAX_RULES_PER_CALL}, and an enforcing rule past that refuses the call`)
 }
 
 /**
@@ -163,8 +205,9 @@ export async function installLocalGates(opts: LocalGatesOptions): Promise<LocalG
   const holdTokens = await localHoldTokensFor(root, [], undefined, harnesses as HarnessType[])
   // Every local SOP's decide: rules, whatever the session selected, as for
   // the holds: the selection narrows the rules files, never what is enforced.
-  const decideRules = await localDecideRules(await loadLocalSopEntries(root, harnesses as HarnessType[], { ignoreSelection: true }))
-  for (const line of unreadableDecideLines(decideRules)) warn(line)
+  const allSops = await loadLocalSopEntries(root, harnesses as HarnessType[], { ignoreSelection: true })
+  const decideRules = await localDecideRules(allSops, { decideDir: node_path.join(homedir(), '.intutic', 'decide') })
+  for (const line of [...unreadableDecideLines(allSops), ...notedDecideRules(allSops), ...crowdedDecideTools(allSops)]) warn(line)
 
   let snapshot: { digest: string; ruleCount: number }
   if (dryRun) {

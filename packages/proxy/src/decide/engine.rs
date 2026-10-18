@@ -22,8 +22,13 @@ use tokio::time::Instant;
 
 pub const DECIDE_DEFAULT_ENGINE_URL: &str = "http://127.0.0.1:11434";
 pub const DECIDE_DEFAULT_TIMEOUT_MS: u64 = 5_000;
-/// Above this the rule is unknown (it escalates); a state is never truncated.
+/// Above this a tool call's state is unknown (the rule escalates); a state is never truncated.
 pub const DECIDE_MAX_STATE_BYTES: usize = 16_384;
+/// The default limit for an `on: response` state, the rule text and the
+/// response together: about the 8,192-token context a judge model serves.
+/// `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` changes it. Above it the rule is
+/// unknown; a response is never truncated either.
+pub const DECIDE_MAX_RESPONSE_STATE_BYTES: usize = 32_768;
 pub const DECIDE_RULE_TEXT_MAX_BYTES: usize = 4_096;
 pub const DECIDE_LAST_USER_TURN_MAX_CHARS: usize = 2_000;
 /// A call with less time than this left is not sent.
@@ -34,6 +39,7 @@ pub const DECIDE_UNAVAILABLE_REFUSAL: &str = "GOVERNANCE_UNAVAILABLE";
 const OLLAMA_PORT: &str = "11434";
 const MAX_TIMEOUT_MS: u64 = 60_000;
 const MAX_PARALLEL: u64 = 64;
+const MAX_RESPONSE_STATE_BYTES: u64 = 1_048_576;
 /// Single-token option labels; vLLM caps top_logprobs at 20.
 const LABELS: &[&str] = &[
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
@@ -85,6 +91,9 @@ pub struct DecideEngineConfig {
     pub model_digest: Option<String>,
     /// `INTUTIC_SELF_HOSTED_DECISION_HOSTS`.
     pub self_hosted_hosts: Option<String>,
+    /// `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES`: the limit for an `on: response`
+    /// state; [`DECIDE_MAX_RESPONSE_STATE_BYTES`] when unset.
+    pub max_response_state_bytes: Option<usize>,
 }
 
 impl std::fmt::Debug for DecideEngineConfig {
@@ -100,6 +109,7 @@ impl std::fmt::Debug for DecideEngineConfig {
             .field("ollama", &self.ollama)
             .field("model_digest", &self.model_digest)
             .field("self_hosted_hosts", &self.self_hosted_hosts)
+            .field("max_response_state_bytes", &self.max_response_state_bytes)
             .finish()
     }
 }
@@ -296,6 +306,25 @@ fn url_port(url: &str) -> Option<String> {
 /// `None`) and the environment (`env(name)`), which overrides it. The API key,
 /// the model digest and the listed hosts come from the environment only. An
 /// empty model is allowed here; [`DecideEngine::new`] refuses it.
+/// `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` from `env`: `None` when unset,
+/// `NotConfigured` when it is not a whole number from 1 to 1,048,576.
+pub fn max_response_state_bytes_from(
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<usize>, DecideEngineError> {
+    match env("INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES")
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        None => Ok(None),
+        Some(v) => Ok(Some(int_setting(
+            Some(v),
+            None,
+            DECIDE_MAX_RESPONSE_STATE_BYTES as u64,
+            MAX_RESPONSE_STATE_BYTES,
+        )? as usize)),
+    }
+}
+
 pub fn resolve_config(
     file: Option<&Value>,
     env: &dyn Fn(&str) -> Option<String>,
@@ -355,6 +384,7 @@ pub fn resolve_config(
         ollama,
         model_digest: e("INTUTIC_DECIDE_MODEL_DIGEST"),
         self_hosted_hosts: e("INTUTIC_SELF_HOSTED_DECISION_HOSTS"),
+        max_response_state_bytes: max_response_state_bytes_from(env)?,
     })
 }
 
@@ -453,8 +483,8 @@ fn utf8_prefix(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
-fn sized(state: String) -> Result<String, DecideEngineError> {
-    if state.len() > DECIDE_MAX_STATE_BYTES {
+fn sized(state: String, max: usize) -> Result<String, DecideEngineError> {
+    if state.len() > max {
         return Err(DecideEngineError::TooLarge);
     }
     Ok(state)
@@ -498,16 +528,25 @@ pub fn build_tool_call_state(input: &ToolCallStateInput<'_>) -> Result<String, D
         state.push_str(&turn);
         state.push_str(">>>");
     }
-    sized(state)
+    sized(state, DECIDE_MAX_STATE_BYTES)
 }
 
-/// The state for an `on: response` rule, the judge's layout.
-pub fn build_response_state(rule_text: &str, content: &str) -> Result<String, DecideEngineError> {
-    sized(format!(
-        "ACTIVE SOP CONSTRAINTS:\n{}\n\nASSISTANT RESPONSE:\n{}",
-        utf8_prefix(rule_text, DECIDE_RULE_TEXT_MAX_BYTES),
-        content
-    ))
+/// The state for an `on: response` rule, the judge's layout. `TooLarge`
+/// above `max_bytes`: the engine's `max_response_state_bytes`, or
+/// [`DECIDE_MAX_RESPONSE_STATE_BYTES`].
+pub fn build_response_state(
+    rule_text: &str,
+    content: &str,
+    max_bytes: usize,
+) -> Result<String, DecideEngineError> {
+    sized(
+        format!(
+            "ACTIVE SOP CONSTRAINTS:\n{}\n\nASSISTANT RESPONSE:\n{}",
+            utf8_prefix(rule_text, DECIDE_RULE_TEXT_MAX_BYTES),
+            content
+        ),
+        max_bytes,
+    )
 }
 
 /// A choice's orders: identity and reversed, plus a half rotation past three options.
@@ -1085,7 +1124,13 @@ impl DecideEngine {
         deadline: Instant,
     ) -> Result<EngineResult, DecideEngineError> {
         let started = Instant::now();
-        if state.len() > DECIDE_MAX_STATE_BYTES {
+        // The builders hold each kind of state to its own limit; the engine
+        // takes nothing over the larger of the two.
+        let response_limit = self
+            .cfg
+            .max_response_state_bytes
+            .unwrap_or(DECIDE_MAX_RESPONSE_STATE_BYTES);
+        if state.len() > DECIDE_MAX_STATE_BYTES.max(response_limit) {
             return Err(DecideEngineError::TooLarge);
         }
         if questions

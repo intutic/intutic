@@ -203,7 +203,7 @@ ${emitJsGate({ harness: 'cline', contract: 'stdout-cancel', reviewRequestFile: p
 
 let raw = '';
 process.stdin.on('data', (c) => { raw += c; });
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.taskId || ctx.task_id || ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || '';
@@ -250,7 +250,7 @@ process.stdin.on('end', () => {
     const targetPath = input.path || input.file_path || input.filePath ||
       input.target || input.source || input.notebook_path || firstFile || '';
     const command = input.command || input.cmd || input.script || commands || '';
-    intuticGate(rawToolName, targetPath, command, logEvent, _intuticWsId, input);
+    await intuticGateWithDecide(rawToolName, targetPath, command, logEvent, _intuticWsId, input);
 
     // Allow all other tool calls
     logEvent('tool_allowed', tool || 'unknown', '');

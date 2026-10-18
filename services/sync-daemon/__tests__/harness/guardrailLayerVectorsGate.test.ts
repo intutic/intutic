@@ -20,7 +20,7 @@
  * is attributable to the rule under test rather than to the static floor.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,7 +28,9 @@ import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { GATES, type GateEntry } from './gateRegistry.js'
 import { toRulesLine } from '../../src/harness/gateBody.js'
-import { buildSnapshotRules, type ResolvedPolicy } from '../../src/lib/policySnapshot.js'
+import { buildSnapshotRules, writeLocalPolicySnapshot, type ResolvedPolicy } from '../../src/lib/policySnapshot.js'
+// @ts-expect-error -- a plain ESM fixture without types
+import { startDecideMockEngine } from '../../../../packages/shared-types/fixtures/decide-mock-engine.mjs'
 import type { GuardPattern } from '../../src/harness/protectedPaths.js'
 
 const VECTORS_PATH = join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/shared-types/fixtures/guardrail-layer-vectors.json')
@@ -131,11 +133,11 @@ function runProcess(cmd: string, args: string[], opts: { input: string; env: Nod
   })
 }
 
-async function runGate(g: GateEntry, tool: string, toolInput: Record<string, unknown>, snapshot: string): Promise<RunResult> {
+async function runGate(g: GateEntry, tool: string, toolInput: Record<string, unknown>, snapshot: string, env: NodeJS.ProcessEnv = {}): Promise<RunResult> {
   const root = roots.get(g.name)!
-  return runProcess(g.runner, [join(root, g.artifact)], {
+  return runProcess(g.runner === 'node' ? process.execPath : g.runner, [join(root, g.artifact)], {
     input: JSON.stringify({ tool_name: tool, tool_input: toolInput, session_id: 'sess_layer_vectors' }),
-    env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot },
+    env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot, ...env },
     timeoutMs: 20_000,
   })
 }
@@ -153,7 +155,9 @@ function hookEventLines(g: GateEntry): string[] {
     for (const e of entries) {
       const full = join(dir, e.name)
       if (e.isDirectory()) walk(full)
-      else if (e.name.endsWith('.jsonl')) out.push(...readFileSync(full, 'utf8').split('\n').filter((l) => l.trim()))
+      // The decide log (`~/.intutic/logs/decide-<date>.jsonl`) holds no hook
+      // events, and lines appended to it would shift the slices taken here.
+      else if (e.name.endsWith('.jsonl') && !e.name.startsWith('decide-')) out.push(...readFileSync(full, 'utf8').split('\n').filter((l) => l.trim()))
     }
   }
   walk(roots.get(g.name)!)
@@ -224,6 +228,93 @@ describe('guardrail layer vectors through the emitted gates', () => {
             expect(flagged.join('\n'), `${label}: no tool_flagged named the shadow rule`).toContain(`[sop.${ruleId}]`)
           }
         }
+      }
+    }, 180_000)
+  }
+})
+
+/**
+ * The same vectors with an enforcing decide rule on the call's tool beside
+ * the guardrails, whose engine (the mock engine for the node gate, a stand-in
+ * `intutic decide check` for the bash gate) says the rule covers the call.
+ * The decide tier runs only after the deterministic tiers allowed the call: a
+ * vector a guardrail blocks is refused by that guardrail and asks the engine
+ * nothing; a vector it warns on or allows is flagged as before and then
+ * refused by the decide rule.
+ */
+describe('guardrail layer vectors with a decide rule beside them', () => {
+  const DECIDE_REFUSED = 'Decide rule layer-check (Layer check) refused this call [decide.local:layer.md#layer-check]'
+  const DIGEST = 'sha256:5f1c0e2a9b7d'
+  const ask = 'Does this call change anything the team cannot undo?'
+
+  /** The vector's guardrail lines with a decide rule on `tool` (its record and fallback line), digest recomputed. */
+  async function withDecide(i: number, tool: string): Promise<string> {
+    const dir = mkdtempSync(join(home, `decide-${i}-`))
+    await writeLocalPolicySnapshot({
+      snapshotDir: dir,
+      decideRules: [{
+        sopId: 'local:layer.md',
+        sopTitle: 'Layer check',
+        ruleText: 'Nothing irreversible without a person.',
+        ir: JSON.stringify({ id: 'layer-check', on: 'tool_call', tools: [tool], questions: { irreversible: { type: 'yes_no', ask } }, when: 'irreversible', rollout: 'enforce' }),
+        pins: [{ modelDigest: DIGEST, evalRunId: 'eval_local_01', source: 'local' }],
+      }],
+    })
+    const decide = readFileSync(join(dir, 'policy-snapshot.rules'), 'utf8')
+      .split('\n')
+      .filter((l) => l.startsWith('@format\t') || l.startsWith('@decide\t') || l.startsWith('decide-fallback:'))
+    const lines = [...decide, ...shipped[i]!.map(toRulesLine)]
+    const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
+    const target = join(home, `decide-vector-${i}.rules`)
+    writeFileSync(target, `#digest ${digest}\n#workspace ws_test\n#generated ${new Date().toISOString()}\n${lines.join('\n')}\n`)
+    return target
+  }
+
+  const top = (t: Array<[string, number]>) => ({ choices: [{ logprobs: { content: [{ top_logprobs: t.map(([token, logprob]) => ({ token, logprob })) }] } }] })
+  const replay = (match: string, t: Array<[string, number]>) => ({ method: 'POST', path: '/v1/chat/completions', match, status: 200, times: 1000, body: top(t) })
+
+  for (const g of gates) {
+    it(`${g.name} (${g.runner}): a guardrail's refusal asks the engine nothing; past the guardrails, the decide rule decides`, async () => {
+      expect(roots.get(`${g.name}:error`), `the ${g.name} writer failed`).toBeUndefined()
+      const engine = await startDecideMockEngine([
+        replay(`QUESTION: ${ask}`, [['yes', -0.01], ['no', -5]]),
+        replay('--no-preserve-root\\"}\\n\\nQUESTION: Does', [['yes', -0.01], ['no', -5]]),
+        replay('ls -la\\"}\\n\\nQUESTION: Does', [['no', -0.01], ['yes', -5]]),
+        replay('A) delete_files', [['A', -0.02], ['C', -4]]),
+        replay('A) none_of_these', [['C', -0.02], ['A', -4]]),
+      ])
+      // The bash gate's stand-in CLI records each call it is asked about.
+      const cli = mkdtempSync(join(home, `cli-${g.name}-`))
+      writeFileSync(
+        join(cli, 'intutic'),
+        `#!/bin/sh\ncat >> '${cli}/asked.jsonl'\necho >> '${cli}/asked.jsonl'\n` +
+          `printf '%s\\n' '${JSON.stringify({ v: 1, outcome: 'refuse', code: 'DECIDE_REFUSED', ruleId: 'decide.local:layer.md#layer-check', reason: 'Decide rule layer-check (Layer check) refused this call' })}'\n`,
+        { mode: 0o755 },
+      )
+      const env = { INTUTIC_DECIDE_ENGINE_URL: engine.url, INTUTIC_DECIDE_MODEL: 'm', INTUTIC_DECIDE_MODEL_DIGEST: DIGEST, PATH: `${cli}:${process.env.PATH ?? ''}` }
+      const asked = () => (g.runner === 'node' ? engine.requests.length : existsSync(join(cli, 'asked.jsonl')) ? readFileSync(join(cli, 'asked.jsonl'), 'utf8').split('\n').filter((l) => l.trim()).length : 0)
+      try {
+        for (const [i, v] of vectors.entries()) {
+          const snap = await withDecide(i, v.toolCall.tool)
+          const before = hookEventLines(g).length
+          const was = asked()
+          const r = await runGate(g, v.toolCall.tool, v.toolCall.toolInput, snap, env)
+          const label = `${g.name}: ${v.name}`
+          expect(r.status, `${label}: expected a refusal.\nstderr: ${r.stderr.slice(0, 400)}`).toBe(2)
+          if (v.expected.decision === 'block') {
+            expect(r.stderr, `${label}: the guardrail did not refuse first`).toContain(`[sop.${v.expected.ruleId}]`)
+            expect(r.stderr).not.toContain(DECIDE_REFUSED)
+            expect(asked(), `${label}: the engine was asked about a call a guardrail refused`).toBe(was)
+          } else {
+            expect(r.stderr, `${label}: the decide rule did not decide`).toContain(DECIDE_REFUSED)
+            expect(asked(), `${label}: the decide rule was not asked`).toBeGreaterThan(was)
+            if (v.expected.decision === 'warn') {
+              expect(flaggedReasons(hookEventLines(g).slice(before)).join('\n'), `${label}: the shadow guardrail was not flagged`).toContain(`[sop.${v.expected.ruleId}]`)
+            }
+          }
+        }
+      } finally {
+        await engine.close()
       }
     }, 180_000)
   }

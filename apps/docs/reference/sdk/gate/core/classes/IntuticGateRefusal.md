@@ -15,6 +15,7 @@ human-readable, prefix-recognisable one.
 ## Extended by
 
 - [`IntuticWorkflowRefusal`](../../workflow/classes/IntuticWorkflowRefusal.md)
+- [`IntuticGateEscalation`](IntuticGateEscalation.md)
 - [`IntuticGateHold`](IntuticGateHold.md)
 
 ## Constructors

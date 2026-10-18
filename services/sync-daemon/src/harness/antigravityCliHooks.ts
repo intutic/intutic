@@ -109,7 +109,7 @@ try {
   });
 } catch {}
 
-${emitJsGate({ harness: 'antigravity', contract: 'stdout-decision-deny', documentedFieldsOnly: true })}
+${emitJsGate({ harness: 'antigravity', contract: 'stdout-decision-deny', documentedFieldsOnly: true, ask: 'antigravity-force-ask' })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -145,7 +145,7 @@ function logEvent(verdict, toolName, reason) {
 
 let raw = '';
 process.stdin.on('data', (c) => { raw += c; });
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.conversationId || ctx.session_id || '';
@@ -161,7 +161,7 @@ process.stdin.on('end', () => {
       input.filePath || input.target || '';
     const command = input.CommandLine || input.command || input.cmd || '';
 
-    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
+    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
     // Allow: a result with no decision in it, so the user's own permission
     // settings decide (see the module doc).

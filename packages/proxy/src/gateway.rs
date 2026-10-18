@@ -62,7 +62,7 @@ pub struct GatewayConfig {
     pub provisioned_key_paid_only: bool,
     /// Local judge for self-hosted gateways. When true,
     /// finalize-time judge evaluation is answered by a LOCAL LiteLLM
-    /// instance (`LITELLM_LOCAL_URL`, see `judge_local.rs`) instead of
+    /// instance (`LITELLM_LOCAL_URL`, see `decide/local_judge.rs`) instead of
     /// `{CONTROL_PLANE_URL}/api/v1/judge/finalize` — so the content being
     /// judged never leaves the org's own infrastructure. Off by default:
     /// the SaaS judge path (richer — mid-stream chunk grading, personal

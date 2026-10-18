@@ -26,6 +26,10 @@
       {
         "text": "ControlPlaneClient",
         "link": "/reference/sdk/clawde/classes/ControlPlaneClient.md"
+      },
+      {
+        "text": "DecideEngineError",
+        "link": "/reference/sdk/clawde/classes/DecideEngineError.md"
       }
     ]
   }

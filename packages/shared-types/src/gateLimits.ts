@@ -119,3 +119,34 @@ export function gateDeadlineMs(harness: HookGateHarness): number {
   const timeoutMs: number | null = HOOK_GATE_TIMEOUTS[harness].timeoutMs
   return Math.min(timeoutMs ?? CONNECT_MS, CONNECT_MS) - GATE_DEADLINE_MARGIN_MS
 }
+
+/**
+ * The deterministic tiers' worst case, by gate family: a call at the size
+ * limits on the loaded machine above ({@link gateDeadlineMs}).
+ */
+export const DETERMINISTIC_WORST_CASE_MS = { bash: 4600, js: 1200 } as const
+
+/** What a gate keeps back from its decide budget to write its decision and exit. */
+export const DECIDE_BUDGET_MARGIN_MS = 500
+
+/**
+ * The decide budget of an SDK gate (`Gate.guard`) when
+ * `INTUTIC_DECIDE_BUDGET_MS` does not set one: a JavaScript hook gate's under
+ * a 10 s timeout.
+ */
+export const DECIDE_SDK_BUDGET_MS = 7300
+
+/**
+ * How long the decide tier of a hook gate may spend, at most, on one call:
+ * the gate's deadline less the deterministic tiers' worst case for its family
+ * and {@link DECIDE_BUDGET_MARGIN_MS}. `harness` null is a gate the host
+ * waits on without a limit and whose deadline is not a hook's (the n8n
+ * workflow gate), treated as {@link HOOK_TIMEOUT_SECONDS}. A gate also caps
+ * the budget at runtime by what is left of its deadline, less the margin.
+ * The bash gates and the n8n gate spend it through `intutic decide check`,
+ * whose cold start comes out of it.
+ */
+export function decideBudgetMs(family: keyof typeof DETERMINISTIC_WORST_CASE_MS, harness: HookGateHarness | null): number {
+  const deadline = harness === null ? CONNECT_MS - GATE_DEADLINE_MARGIN_MS : gateDeadlineMs(harness)
+  return deadline - DETERMINISTIC_WORST_CASE_MS[family] - DECIDE_BUDGET_MARGIN_MS
+}

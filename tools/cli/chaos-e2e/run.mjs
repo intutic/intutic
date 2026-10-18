@@ -13,6 +13,13 @@
 // component that should have loaded the plan said so, and each probe's
 // outcome. Exits non-zero on the first experiment that does not match.
 //
+// The decide experiments run the same way with a snapshot carrying a decide
+// rule (shadow or enforcing, the enforcing one pinned to the engine's model
+// digest), a scripted decide engine on loopback inside the sandbox, and
+// check what the gate did with the call the rule judges: the agent's view of
+// it, the gate's event log, the engine's questions and the run's
+// gate_decision event.
+//
 // Needs, already built (tools/scripts/chaos-e2e.sh does all of it):
 //   - the CLI (tools/cli/dist) and the sync daemon (services/sync-daemon/dist);
 //   - `intutic-proxy` on PATH;
@@ -22,6 +29,7 @@
 //
 // Usage: node tools/cli/chaos-e2e/run.mjs --mcp-proxy <dir> [--only <name>] [--work <dir>] [--runtime docker]
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -51,6 +59,16 @@ if (!mcpProxyDir || !fs.existsSync(path.join(mcpProxyDir, 'dist/index.js'))) {
 // retries the failed lookup, but its next get_record call (another key)
 // succeeds, and that counts.
 const ALL = ['proxy', 'mcp-proxy', 'gate']
+
+// The decide experiments' rule, as the gate names it: decide.<sopId>#<rule id>.
+const DECIDE_SOP_ID = 'local:chaos-decide.md'
+const DECIDE_RULE = `decide.${DECIDE_SOP_ID}#no-push`
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** A line of the gate's hook-events log: this event on Bash, its reason starting `reason`. */
+const hookEvent = (event, reason) => new RegExp(escapeRe(`"event":"${event}","toolName":"Bash","reason":${JSON.stringify(reason).slice(0, -1)}`))
+/** The agent's report of a push the gate refused (exit 2) with `reason`. */
+const refusedPush = (reason) => new RegExp(escapeRe(`\`git push origin main\` was refused: [Intutic Governance] BLOCKED: ${reason}`))
+
 const EXPECT = {
   'mcp-tool-error': {
     components: ALL,
@@ -97,6 +115,92 @@ const EXPECT = {
     resilient: { verdict: 'scored', score: 100, probes: { task_success: 1, failure_surfaced: 1, recovered_within: 1 } },
     fragile: { verdict: 'scored', score: 0, probes: { task_success: 0, failure_surfaced: 0, recovered_within: 0 } },
   },
+  // The decide tier. Each runs with a policy snapshot carrying the decide rule
+  // `no-push` on Bash (DECIDE_RULE below) at the rollout `decide` names, the
+  // scripted engine in the sandbox, and the get_record fault of
+  // mcp-tool-error, whose probes it shares; no_policy_hits is the decide
+  // tier's. Both personalities ask to push once the result is written.
+  'decide-shadow': {
+    components: ALL,
+    decide: 'shadow',
+    // The engine says yes; the shadow rule records what it would have
+    // refused, and the push goes ahead.
+    artifacts: {
+      'agent.out': /`git push origin main` was allowed$/m,
+      'decide-engine.jsonl': /"question":"Does this command send the repository's changes to a remote server\?","pYes":0\.97/,
+      'hook-events.jsonl': hookEvent('tool_would_block', `Decide rule no-push (Pushes need a person) refused this call [${DECIDE_RULE}]`),
+    },
+    gateDecision: { tool: 'Bash', decision: 'allow', policyHit: false },
+    resilient: { verdict: 'scored', score: 100, probes: { task_success: 1, failure_surfaced: 1, recovered_within: 1, no_policy_hits: 1 } },
+    fragile: { verdict: 'scored', score: 28.6, probes: { task_success: 0, failure_surfaced: 0, recovered_within: 1, no_policy_hits: 1 } },
+  },
+  'decide-enforce': {
+    components: ALL,
+    decide: 'enforce',
+    // The engine says yes (DECIDE_REFUSED): Claude Code's refusal, exit 2
+    // with the reason on stderr.
+    artifacts: {
+      'agent.out': refusedPush(`Decide rule no-push (Pushes need a person) refused this call [${DECIDE_RULE}]`),
+      'decide-engine.jsonl': /"question":"Does this command send the repository's changes to a remote server\?","pYes":0\.97/,
+      'hook-events.jsonl': hookEvent('tool_blocked', `Decide rule no-push (Pushes need a person) refused this call [${DECIDE_RULE}]`),
+    },
+    gateDecision: { tool: 'Bash', decision: 'deny', ruleId: DECIDE_RULE, policyHit: true },
+    resilient: { verdict: 'scored', score: 85.7, probes: { task_success: 1, failure_surfaced: 1, recovered_within: 1, no_policy_hits: 0 } },
+    fragile: { verdict: 'scored', score: 14.3, probes: { task_success: 0, failure_surfaced: 0, recovered_within: 1, no_policy_hits: 0 } },
+  },
+  'decide-ask': {
+    components: ALL,
+    decide: 'enforce',
+    // The engine cannot tell (p 0.5, between the bands): the gate exits 0 with
+    // Claude Code's ask on stdout, exactly these bytes.
+    artifacts: {
+      'agent.out': new RegExp(
+        '^\\[agent \\w+\\] the gate asked the user before `git push origin main`; its stdout: ' +
+          escapeRe(
+            JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'ask',
+                permissionDecisionReason: `Needs a person: Pushes need a person — Does this command send the repository's changes to a remote server? [${DECIDE_RULE}]`,
+              },
+            }),
+          ) +
+          '$',
+        'm',
+      ),
+      'decide-engine.jsonl': /"question":"Does this command send the repository's changes to a remote server\?","pYes":0\.5/,
+      'hook-events.jsonl': hookEvent('tool_flagged', `DECIDE_ESCALATED — asked a person: Needs a person: Pushes need a person — `),
+    },
+    // Every gate records a call it put to a person as held.
+    gateDecision: { tool: 'Bash', decision: 'hold', ruleId: DECIDE_RULE, policyHit: true },
+    resilient: { verdict: 'scored', score: 85.7, probes: { task_success: 1, failure_surfaced: 1, recovered_within: 1, no_policy_hits: 0 } },
+    fragile: { verdict: 'scored', score: 14.3, probes: { task_success: 0, failure_surfaced: 0, recovered_within: 1, no_policy_hits: 0 } },
+  },
+  'decide-engine-stopped': {
+    components: ALL,
+    decide: 'enforce',
+    // Nothing answers: the enforcing rule refuses with GOVERNANCE_UNAVAILABLE.
+    artifacts: {
+      'agent.out': refusedPush('GOVERNANCE_UNAVAILABLE — the decide engine could not evaluate rule no-push (Pushes need a person): '),
+      'hook-events.jsonl': hookEvent('tool_blocked', 'GOVERNANCE_UNAVAILABLE — the decide engine could not evaluate rule no-push'),
+    },
+    gateDecision: { tool: 'Bash', decision: 'deny', ruleId: DECIDE_RULE, policyHit: true },
+    resilient: { verdict: 'scored', score: 85.7, probes: { task_success: 1, failure_surfaced: 1, recovered_within: 1, no_policy_hits: 0 } },
+    fragile: { verdict: 'scored', score: 14.3, probes: { task_success: 0, failure_surfaced: 0, recovered_within: 1, no_policy_hits: 0 } },
+  },
+  'decide-engine-stopped-shadow': {
+    components: ALL,
+    decide: 'shadow',
+    // Nothing answers, and the rule is shadow: the push goes ahead, and the
+    // unavailability is recorded.
+    artifacts: {
+      'agent.out': /`git push origin main` was allowed$/m,
+      'hook-events.jsonl': hookEvent('tool_would_block', 'GOVERNANCE_UNAVAILABLE — the decide engine could not evaluate rule no-push'),
+    },
+    gateDecision: { tool: 'Bash', decision: 'allow', policyHit: false },
+    resilient: { verdict: 'scored', score: 100, probes: { task_success: 1, failure_surfaced: 1, recovered_within: 1, no_policy_hits: 1 } },
+    fragile: { verdict: 'scored', score: 28.6, probes: { task_success: 0, failure_surfaced: 0, recovered_within: 1, no_policy_hits: 1 } },
+  },
 }
 const EXIT = { scored: 0, aborted: 1, invalid: 2 }
 
@@ -131,8 +235,12 @@ fs.mkdirSync(work, { recursive: true })
 const home = path.join(work, 'home')
 const fixture = path.join(work, 'repo')
 const reports = path.join(work, 'reports')
+// The CLI's home for the decide experiments, one per rollout of their rule.
+const decideHome = (rollout) => path.join(work, `home-decide-${rollout}`)
 // A reused --work starts over, except for what the caller put there.
-for (const dir of [home, fixture, reports, path.join(work, 'gate-gen')]) fs.rmSync(dir, { recursive: true, force: true })
+for (const dir of [home, fixture, reports, path.join(work, 'gate-gen'), decideHome('shadow'), decideHome('enforce')]) {
+  fs.rmSync(dir, { recursive: true, force: true })
+}
 for (const dir of [home, reports]) fs.mkdirSync(dir, { recursive: true })
 console.log(`chaos e2e: working in ${work}`)
 
@@ -165,7 +273,7 @@ await must(runtime, ['build', '-q', '-f', path.join(HERE, 'Dockerfile'), '--buil
 //    sync daemon emits it for Claude Code, with a policy snapshot it wrote.
 fs.mkdirSync(path.join(fixture, 'agent'), { recursive: true })
 fs.mkdirSync(path.join(fixture, 'gate'), { recursive: true })
-for (const f of ['harness.mjs', 'records-server.mjs']) fs.copyFileSync(path.join(HERE, 'agent', f), path.join(fixture, 'agent', f))
+for (const f of ['harness.mjs', 'records-server.mjs', 'decide-engine.mjs']) fs.copyFileSync(path.join(HERE, 'agent', f), path.join(fixture, 'agent', f))
 
 process.env.INTUTIC_SKIP_GLOBAL_HOOKS = '1' // never touch this machine's ~/.claude
 const { updatePreToolUseHooks } = await import(path.join(REPO, 'services/sync-daemon/dist/harness/claudeCodeHooks.js'))
@@ -179,15 +287,52 @@ fs.writeFileSync(path.join(fixture, 'gate/claude-code-check.js'), gateSource)
 // The snapshot where the sync daemon keeps it: the CLI's home, which the
 // runner carries into each repetition.
 const snapshotDir = path.join(home, '.intutic', 'hooks')
-await writePolicySnapshot(
-  { workspaceId: WORKSPACE_ID, interventionMode: 'TRANSPARENT', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false },
-  snapshotDir,
-)
+const basePolicy = { workspaceId: WORKSPACE_ID, interventionMode: 'TRANSPARENT', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false }
+await writePolicySnapshot(basePolicy, snapshotDir)
 fs.copyFileSync(path.join(snapshotDir, SNAPSHOT_RULES), path.join(fixture, 'gate/policy-snapshot.rules'))
 // And the gate as `intutic connect` leaves it in a project: written for the
 // fixture's own (host) path, registered in .claude/settings.json, untracked.
 await updatePreToolUseHooks(fixture, [], {}, undefined, WORKSPACE_ID)
 fs.writeFileSync(path.join(fixture, '.gitignore'), '.intutic/\n')
+
+// 3. The decide experiments' homes: the same snapshot plus a local SOP's
+//    decide rule on Bash, written as the CLI writes it with that home. The
+//    enforcing one needs a pin for the engine's model digest, which the
+//    scripted engine reports as `id:chaos-decide` (its model name): the file
+//    a passing `intutic decide eval` leaves, evals/<ruleHash>/<digest>.json.
+//    The rollout is not in the rule hash, so one pin serves both homes.
+const { localDecideRules } = await import(path.join(REPO, 'services/sync-daemon/dist/lib/policySnapshot.js'))
+const { decideRuleHash, validateDecideRule } = await import(path.join(REPO, 'packages/shared-types/dist/index.js'))
+const sha256Hex = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
+for (const rollout of ['shadow', 'enforce']) {
+  const rule = {
+    id: 'no-push',
+    title: 'Pushes need a person',
+    on: 'tool_call',
+    tools: ['Bash'],
+    questions: { pushes: { type: 'yes_no', ask: "Does this command send the repository's changes to a remote server?" } },
+    when: 'pushes',
+    rollout,
+  }
+  const v = validateDecideRule(rule)
+  if (!v.ok) throw new Error(`the decide experiments' rule does not validate: ${v.reason}`)
+  const decideDir = path.join(decideHome(rollout), '.intutic', 'decide')
+  const pins = path.join(decideDir, 'evals', decideRuleHash(v.rule, sha256Hex))
+  fs.mkdirSync(pins, { recursive: true })
+  fs.writeFileSync(path.join(pins, 'id-chaos-decide.json'), JSON.stringify({ modelDigest: 'id:chaos-decide', evalRunId: 'eval_local_chaos_e2e', source: 'local' }) + '\n')
+  const content = `---\ndecide: ${JSON.stringify(rule)}\n---\n# Pushes need a person\n\nChanges leave this machine only after a person has looked at them.\n`
+  const sop = { sopId: DECIDE_SOP_ID, title: 'Pushes need a person', content, contentHash: sha256Hex(content), harnessTargets: ['claude-code'] }
+  // `intutic decide disable` is read from the home directory at write time.
+  const hostHome = process.env.HOME
+  process.env.HOME = decideHome(rollout)
+  try {
+    const decideRules = await localDecideRules([sop], { decideDir })
+    if (rollout === 'enforce' && decideRules[0]?.pins.length !== 1) throw new Error('the enforcing decide rule did not pick up its pin')
+    await writePolicySnapshot({ ...basePolicy, decideRules }, path.join(decideHome(rollout), '.intutic', 'hooks'))
+  } finally {
+    process.env.HOME = hostHome
+  }
+}
 
 const git = (...a) => must('git', ['-c', 'user.name=chaos-e2e', '-c', 'user.email=chaos-e2e@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd: fixture, logFile: path.join(work, 'git.log') })
 await git('init', '-q')
@@ -250,6 +395,21 @@ function check(name, mode, report, exitCode, cliLog) {
       problems.push(`repetition ${r.repetition}: the agent output has no ${EXPECT[name].agentOut}`)
     }
   }
+  // The decide tier does not depend on the faults: every repetition, the
+  // baseline too, must show it.
+  for (const r of report.repetitions) {
+    const dir = path.dirname(r.eventsPath)
+    for (const [file, re] of Object.entries(EXPECT[name].artifacts ?? {})) {
+      const p = path.join(dir, file)
+      if (!re.test(fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '')) problems.push(`repetition ${r.repetition}: ${file} has no ${re}`)
+    }
+    const want = EXPECT[name].gateDecision
+    if (want) {
+      const decisions = readEvents(r.eventsPath).filter((e) => e.type === 'gate_decision' && e.tool === want.tool)
+      const ok = decisions.some((e) => Object.entries(want).every(([k, v]) => (e[k] ?? null) === v))
+      if (!ok) problems.push(`repetition ${r.repetition}: no gate_decision ${JSON.stringify(want)}; ${want.tool}: ${JSON.stringify(decisions)}`)
+    }
+  }
   if (EXPECT[name].cliLog && !EXPECT[name].cliLog.test(cliLog)) problems.push(`the runner output has no ${EXPECT[name].cliLog}`)
   return problems
 }
@@ -273,7 +433,8 @@ for (const name of names) {
     const t0 = Date.now()
     const exitCode = await run(process.execPath, [CLI, 'chaos', 'run', file, '--out', out, '--sandbox-image', image], {
       cwd: fixture,
-      env: cliEnv,
+      // A decide experiment's CLI carries the snapshot with its rule.
+      env: EXPECT[name].decide ? { ...cliEnv, HOME: decideHome(EXPECT[name].decide) } : cliEnv,
       logFile: path.join(reports, `${label}.log`),
     })
     const secs = ((Date.now() - t0) / 1000).toFixed(1)

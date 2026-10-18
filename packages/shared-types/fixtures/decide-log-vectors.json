@@ -1,0 +1,2933 @@
+{
+  "$comment": "Decide log vectors: file names, the redacted arguments excerpt and the drift alarm (protection 8). Generated from packages/shared-types/src/decideLog.ts; the TypeScript test (decideLog.test.ts) and the Python port (tests/test_decide_log.py) run every case.",
+  "redactionSources": [
+    "(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]",
+    "sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*",
+    "gh[pousr]_[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]",
+    "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    "sk-or-v1-[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]*",
+    "vk_[a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9]",
+    "gwk_[a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9]",
+    "sk_live_[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]",
+    "[0-9]{4}[ -][0-9]{4}[ -][0-9]{4}[ -][0-9]{4}|[0-9]{4}[ -][0-9]{6}[ -][0-9]{4,5}|[0-9]{13,19}",
+    "[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]){11,30}",
+    "[0-9]{3}-[0-9]{2}-[0-9]{4}",
+    "[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){1,8}",
+    "\\+[1-9][0-9]{0,2}(?:[ .-]?\\([0-9]{1,4}\\)|[ .-]?[0-9]{1,4}){2,7}|(?:1[ .-])?(?:\\([2-9][0-9]{2}\\) ?|[2-9][0-9]{2}[ .-])[2-9][0-9]{2}[ .-][0-9]{4}"
+  ],
+  "fileNames": [
+    {
+      "atMs": 1792486800000,
+      "kind": "decide",
+      "name": "decide-2026-10-20.jsonl"
+    },
+    {
+      "atMs": 1798761599999,
+      "kind": "decide",
+      "name": "decide-2026-12-31.jsonl"
+    },
+    {
+      "atMs": 1792486800000,
+      "kind": "decide-state",
+      "name": "decide-state-2026-10-20.jsonl"
+    }
+  ],
+  "excerpt": [
+    {
+      "name": "canonical JSON, keys sorted",
+      "toolInput": {
+        "command": "ls",
+        "cwd": "/repo"
+      },
+      "maxBytes": 2048,
+      "excerpt": "{\"command\":\"ls\",\"cwd\":\"/repo\"}"
+    },
+    {
+      "name": "an email address is redacted",
+      "toolInput": {
+        "command": "mail dev.one@example.com < report.txt"
+      },
+      "maxBytes": 2048,
+      "excerpt": "{\"command\":\"mail [REDACTED] < report.txt\"}"
+    },
+    {
+      "name": "a card number is redacted",
+      "toolInput": {
+        "command": "echo 4111 1111 1111 1111"
+      },
+      "maxBytes": 2048,
+      "excerpt": "{\"command\":\"echo [REDACTED]\"}"
+    },
+    {
+      "name": "a social security number is redacted",
+      "toolInput": {
+        "command": "grep 078-05-1120 people.csv"
+      },
+      "maxBytes": 2048,
+      "excerpt": "{\"command\":\"grep [REDACTED] people.csv\"}"
+    },
+    {
+      "name": "cut on a character boundary",
+      "toolInput": {
+        "command": "éééééééééééééééééééééééééééééééééééééééé"
+      },
+      "maxBytes": 33,
+      "excerpt": "{\"command\":\"éééééééééé"
+    },
+    {
+      "name": "no input is an empty object",
+      "toolInput": null,
+      "maxBytes": 2048,
+      "excerpt": "{}"
+    }
+  ],
+  "drift": [
+    {
+      "name": "escalation rate crosses the run’s by more than 0.15 once in a day",
+      "baseline": {
+        "evalRunId": "run_a",
+        "escalationRate": 0.2,
+        "questions": {
+          "exports": {
+            "p10": 0.1,
+            "p90": 0.9
+          }
+        }
+      },
+      "stream": [
+        {
+          "atMs": 1792486800000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486860000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486920000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486980000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487040000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487100000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487160000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487220000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487280000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487340000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487400000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487460000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487520000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487580000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487640000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487700000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487760000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487820000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487880000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487940000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488000000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488060000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488120000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488180000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488240000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488300000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488360000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488420000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488480000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488540000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488600000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488660000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488720000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488780000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488840000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488900000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488960000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489020000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489080000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489140000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489200000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489260000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489320000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489380000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489440000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489500000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489560000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489620000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489680000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489740000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489800000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489860000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489920000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489980000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490040000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490100000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490160000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490220000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490280000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490340000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        }
+      ],
+      "fires": [
+        {
+          "index": 36,
+          "measure": "escalation_rate",
+          "question": null,
+          "n": 37
+        }
+      ]
+    },
+    {
+      "name": "nothing fires before 20 decisions are kept",
+      "baseline": {
+        "evalRunId": "run_b",
+        "escalationRate": 0,
+        "questions": {}
+      },
+      "stream": [
+        {
+          "atMs": 1792486800000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792486860000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792486920000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792486980000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487040000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487100000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487160000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487220000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487280000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487340000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487400000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487460000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487520000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487580000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487640000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487700000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487760000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487820000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487880000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487940000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488000000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488060000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488120000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488180000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488240000,
+          "outcome": "escalate",
+          "p": {}
+        }
+      ],
+      "fires": [
+        {
+          "index": 19,
+          "measure": "escalation_rate",
+          "question": null,
+          "n": 20
+        }
+      ]
+    },
+    {
+      "name": "a question’s median leaves the run’s [p10, p90] once",
+      "baseline": {
+        "evalRunId": "run_c",
+        "escalationRate": 0,
+        "questions": {
+          "exports": {
+            "p10": 0.1,
+            "p90": 0.9
+          }
+        }
+      },
+      "stream": [
+        {
+          "atMs": 1792486800000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486860000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486920000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486980000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487040000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487100000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487160000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487220000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487280000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487340000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487400000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487460000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487520000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487580000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487640000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487700000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487760000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487820000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487880000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487940000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488000000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488060000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488120000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488180000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488240000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488300000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488360000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488420000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488480000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488540000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488600000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488660000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488720000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488780000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488840000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488900000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792488960000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489020000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489080000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489140000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489200000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489260000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489320000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489380000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489440000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489500000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489560000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489620000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489680000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489740000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489800000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489860000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489920000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792489980000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490040000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490100000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490160000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490220000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490280000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490340000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490400000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490460000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490520000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490580000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        },
+        {
+          "atMs": 1792490640000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.97
+          }
+        }
+      ],
+      "fires": [
+        {
+          "index": 50,
+          "measure": "median_p",
+          "question": "exports",
+          "n": 51
+        }
+      ]
+    },
+    {
+      "name": "a drift still present a day later fires again",
+      "baseline": {
+        "evalRunId": "run_d",
+        "escalationRate": 0,
+        "questions": {}
+      },
+      "stream": [
+        {
+          "atMs": 1792486800000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792486860000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792486920000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792486980000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487040000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487100000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487160000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487220000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487280000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487340000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487400000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487460000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487520000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487580000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487640000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487700000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487760000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487820000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487880000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792487940000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488000000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488060000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488120000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792488180000,
+          "outcome": "escalate",
+          "p": {}
+        },
+        {
+          "atMs": 1792574340000,
+          "outcome": "escalate",
+          "p": {}
+        }
+      ],
+      "fires": [
+        {
+          "index": 19,
+          "measure": "escalation_rate",
+          "question": null,
+          "n": 20
+        },
+        {
+          "index": 24,
+          "measure": "escalation_rate",
+          "question": null,
+          "n": 25
+        }
+      ]
+    },
+    {
+      "name": "only the last 200 decisions count",
+      "baseline": {
+        "evalRunId": "run_e",
+        "escalationRate": 0,
+        "questions": {
+          "exports": {
+            "p10": 0.2,
+            "p90": 0.8
+          }
+        }
+      },
+      "stream": [
+        {
+          "atMs": 1792486800000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486860000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486920000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792486980000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487040000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487100000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487160000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487220000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487280000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487340000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487400000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487460000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487520000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487580000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487640000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487700000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487760000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487820000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487880000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792487940000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488000000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488060000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488120000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488180000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488240000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488300000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488360000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488420000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488480000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488540000,
+          "outcome": "escalate",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488600000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488660000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488720000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488780000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488840000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488900000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792488960000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489020000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489080000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489140000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489200000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489260000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489320000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489380000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489440000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489500000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489560000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489620000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489680000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489740000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489800000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489860000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489920000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792489980000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490040000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490100000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490160000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490220000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490280000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490340000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490400000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490460000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490520000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490580000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490640000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490700000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490760000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490820000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490880000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792490940000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491000000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491060000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491120000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491180000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491240000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491300000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491360000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491420000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491480000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491540000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491600000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491660000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491720000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491780000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491840000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491900000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792491960000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492020000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492080000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492140000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492200000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492260000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492320000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492380000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492440000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492500000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492560000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492620000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492680000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492740000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492800000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492860000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492920000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792492980000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493040000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493100000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493160000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493220000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493280000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493340000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493400000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493460000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493520000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493580000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493640000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493700000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493760000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493820000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493880000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792493940000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494000000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494060000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494120000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494180000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494240000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494300000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494360000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494420000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494480000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494540000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494600000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494660000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494720000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494780000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494840000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494900000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792494960000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495020000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495080000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495140000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495200000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495260000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495320000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495380000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495440000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495500000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495560000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495620000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495680000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495740000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495800000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495860000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495920000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792495980000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496040000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496100000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496160000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496220000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496280000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496340000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496400000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496460000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496520000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496580000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496640000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496700000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496760000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496820000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496880000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792496940000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497000000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497060000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497120000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497180000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497240000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497300000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497360000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497420000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497480000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497540000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497600000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497660000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497720000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497780000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497840000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497900000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792497960000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498020000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498080000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498140000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498200000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498260000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498320000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498380000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498440000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498500000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498560000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498620000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498680000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498740000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498800000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498860000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498920000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792498980000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499040000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499100000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499160000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499220000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499280000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499340000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499400000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499460000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499520000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499580000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499640000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499700000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499760000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499820000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499880000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792499940000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500000000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500060000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500120000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500180000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500240000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500300000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500360000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500420000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500480000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        },
+        {
+          "atMs": 1792500540000,
+          "outcome": "allow",
+          "p": {
+            "exports": 0.5
+          }
+        }
+      ],
+      "fires": [
+        {
+          "index": 19,
+          "measure": "escalation_rate",
+          "question": null,
+          "n": 20
+        }
+      ],
+      "kept": 200
+    }
+  ]
+}

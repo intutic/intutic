@@ -157,7 +157,7 @@ try {
   });
 } catch {}
 
-${emitJsGate({ harness: 'cursor', contract: 'exit2' })}
+${emitJsGate({ harness: 'cursor', contract: 'exit2', ask: 'cursor-permission' })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -195,7 +195,7 @@ function logEvent(verdict, toolName, reason) {
 
 let raw = '';
 process.stdin.on('data', (c) => { raw += c; });
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.session_id || ctx.sessionId || ctx.conversation_id || ctx.conversationId || ctx.task_id || ctx.taskId || '';
@@ -242,7 +242,10 @@ process.stdin.on('end', () => {
     // || input.path\`, so a shell command naming a protected path was only
     // caught if it also carried a path argument. The shared gate tests the
     // command and the target independently.
-    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
+    // Cursor enforces an ask on its shell and MCP hooks only; on preToolUse
+    // it accepts one and runs the call, so an escalation there refuses.
+    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input, '',
+      { canAsk: event === 'beforeshellexecution' || event === 'beforemcpexecution' });
 
     // Allow — explicitly: with failClosed set, Cursor treats a hook that
     // prints nothing as a failure and blocks the call.

@@ -114,7 +114,7 @@ try {
   });
 } catch {}
 
-${emitJsGate({ harness: 'openclaw', contract: 'throw', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
+${emitJsGate({ harness: 'openclaw', contract: 'throw', ask: 'throw-ask', reviewRequestFile: path.join(workspaceRoot, '.intutic', 'events', REVIEW_REQUESTS_BASENAME) })}
 
 let _intuticSessionId = '';
 function logEvent(verdict, toolName, reason) {
@@ -152,12 +152,13 @@ function logEvent(verdict, toolName, reason) {
 }
 
 /**
- * One tool call. Returns to allow; throws '[Intutic Governance] …' to refuse.
+ * One tool call. Resolves to allow; throws '[Intutic Governance] …' to refuse,
+ * or an error carrying \`intuticAsk\` to ask a person.
  * Params that are not an object are refused outright: the gate reads paths
  * and commands out of them, and a shape it cannot read is not one it can
  * allow. apply_patch names its files in derivedPaths, and each is checked.
  */
-function intuticEvaluate(event, ctx) {
+async function intuticEvaluate(event, ctx) {
   _intuticSessionId = String((ctx && (ctx.sessionId || ctx.sessionKey)) || '');
   let tool = String((event && event.toolName) || 'tool');
   // OpenClaw names an MCP tool <server>__<tool>; the allowlist reads
@@ -175,17 +176,27 @@ function intuticEvaluate(event, ctx) {
   const derived = event && Array.isArray(event.derivedPaths) ? event.derivedPaths.filter((p) => typeof p === 'string' && p) : [];
   const targets = derived.length > 0 ? (direct ? [direct].concat(derived) : derived) : [direct];
   // One call: every target but the last tells the gate more of it follows, so
-  // a chaos run reports and faults the call once.
-  targets.forEach((target, i) => intuticGate(tool, target, command, logEvent, _intuticWsId, params, _intuticSessionId, i < targets.length - 1));
+  // a chaos run reports and faults the call once; the decide tier runs once,
+  // with the last.
+  for (let i = 0; i < targets.length - 1; i++) intuticGate(tool, targets[i], command, logEvent, _intuticWsId, params, _intuticSessionId, true);
+  await intuticGateWithDecide(tool, targets[targets.length - 1], command, logEvent, _intuticWsId, params, _intuticSessionId);
   logEvent('tool_allowed', tool, '');
 }
 
-/** Fail closed: a fault inside the gate is a refusal, never an allow. */
-function beforeToolCall(event, ctx) {
+/**
+ * Fail closed: a fault inside the gate is a refusal, never an allow. A decide
+ * rule that could not decide asks a person through OpenClaw's plugin
+ * approval, once only (no "allow always").
+ */
+async function beforeToolCall(event, ctx) {
   try {
-    intuticEvaluate(event, ctx);
+    await intuticEvaluate(event, ctx);
     return undefined;
   } catch (err) {
+    if (err && err.intuticAsk) {
+      return { requireApproval: { title: 'Intutic: a person must decide this call', description: String(err.intuticAsk.reason),
+        severity: 'warning', allowedDecisions: ['allow-once', 'deny'] } };
+    }
     let reason = String((err && err.message) || err);
     if (reason.indexOf('[Intutic Governance]') !== 0) {
       reason = '[Intutic Governance] BLOCKED: gate fault (failing closed): ' + reason;

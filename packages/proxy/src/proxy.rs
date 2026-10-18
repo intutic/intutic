@@ -1623,12 +1623,17 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
 
-        return match crate::judge_local::local_judge(p.http_client, p.full_content, &sop_text).await
+        return match crate::decide::local_judge::local_judge(
+            p.http_client,
+            p.full_content,
+            &sop_text,
+        )
+        .await
         {
             Ok(outcome) => match outcome.verdict {
-                crate::judge_local::LocalVerdict::Compliant => None,
-                crate::judge_local::LocalVerdict::Violation
-                | crate::judge_local::LocalVerdict::Ambiguous => Some(format!(
+                crate::decide::local_judge::LocalVerdict::Compliant => None,
+                crate::decide::local_judge::LocalVerdict::Violation
+                | crate::decide::local_judge::LocalVerdict::Ambiguous => Some(format!(
                     "\n\n--- Intutic LLM-as-a-Judge (local) final Security Synthesis ---\n\n{}\n\n",
                     outcome.reasoning
                 )),
@@ -7372,7 +7377,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             macro_rules! judge_chunk_scan {
                 () => {
                     // Local judge is finalize-only, by
-                    // design -- no mid-stream chunk grading (see judge_local.rs's
+                    // design -- no mid-stream chunk grading (see decide/local_judge.rs's
                     // module doc for why). Skipping here, not merely routing
                     // elsewhere, means a local-judge gateway sends zero
                     // per-chunk calls anywhere, not a redirected one.

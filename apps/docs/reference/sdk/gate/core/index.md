@@ -4,10 +4,12 @@
 
 ## Classes
 
+- [DecideEngineError](classes/DecideEngineError.md)
 - [Gate](classes/Gate.md)
 - [GateClient](classes/GateClient.md)
 - [GateConnectionError](classes/GateConnectionError.md)
 - [GateError](classes/GateError.md)
+- [IntuticGateEscalation](classes/IntuticGateEscalation.md)
 - [IntuticGateHold](classes/IntuticGateHold.md)
 - [IntuticGateRefusal](classes/IntuticGateRefusal.md)
 - [Snapshot](classes/Snapshot.md)
@@ -22,6 +24,26 @@
 | ------ | ------ |
 | <a id="property-no_below"></a> `no_below` | `number` |
 | <a id="property-yes_at"></a> `yes_at` | `number` |
+
+***
+
+### DecideEngineConfig
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-adapter"></a> `adapter` | `DecideAdapter` | - |
+| <a id="property-apikey"></a> `apiKey?` | `string` | From `INTUTIC_DECIDE_API_KEY` only; never written to engine.json or logged. |
+| <a id="property-maxresponsestatebytes"></a> `maxResponseStateBytes?` | `number` | `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES`: the limit for an `on: response` state; `DECIDE_MAX_RESPONSE_STATE_BYTES` (32,768) when unset. |
+| <a id="property-model"></a> `model` | `string` | - |
+| <a id="property-modeldigest"></a> `modelDigest?` | `string` | `INTUTIC_DECIDE_MODEL_DIGEST`: a weights digest for servers that cannot report one. |
+| <a id="property-ollama"></a> `ollama` | `boolean` | An Ollama server: reasoning is switched off with `reasoning_effort`, and the digest comes from `/api/tags`. |
+| <a id="property-parallel"></a> `parallel` | `number` | The most requests in flight at once. |
+| <a id="property-selfhostedhosts"></a> `selfHostedHosts?` | `string` | `INTUTIC_SELF_HOSTED_DECISION_HOSTS`: names the host guard allows. |
+| <a id="property-structured"></a> `structured` | `boolean` | Send `structured_outputs: {choice}` (logprobs only); some proxies refuse unknown fields. |
+| <a id="property-timeoutms"></a> `timeoutMs` | `number` | - |
+| <a id="property-url"></a> `url` | `string` | - |
 
 ***
 
@@ -40,7 +62,7 @@ A calibration a rule may enforce under: the model digest it was evaluated on, an
 | `combiner.bias` | `number` |
 | `combiner.weights` | `Record`\<`string`, `number`\> |
 | <a id="property-evalrunid"></a> `evalRunId` | `string` |
-| <a id="property-modeldigest"></a> `modelDigest` | `string` |
+| <a id="property-modeldigest-1"></a> `modelDigest` | `string` |
 | <a id="property-source"></a> `source` | `"local"` \| `"server"` |
 | <a id="property-temperature"></a> `temperature?` | `Record`\<`string`, `number`\> |
 
@@ -101,6 +123,42 @@ A rule as its front-matter line carries it: the IR without `kind`.
 
 ***
 
+### DecideSdkOptions
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-band-3"></a> `band?` | [`DecideBand`](#decideband) | The band for every question without its own (default `{yes_at: 0.85, no_below: 0.15}`). |
+| <a id="property-budgetms"></a> `budgetMs?` | `number` | Milliseconds for the whole call (default `INTUTIC_DECIDE_BUDGET_MS`, else 7,300). |
+| <a id="property-engine"></a> `engine?` | [`DecideEngineConfig`](#decideengineconfig) | The engine's configuration. Without it, `engineFile` and `env` give it. |
+| <a id="property-enginefile"></a> `engineFile?` | `unknown` | The parsed `engine.json`, or null when there is none. |
+| <a id="property-env"></a> `env?` | `Record`\<`string`, `string` \| `undefined`\> | The environment, which overrides `engineFile`. |
+| <a id="property-escalate-1"></a> `escalate?` | `"ask"` \| `"review"` \| `"refuse"` | What an unknown `when` does (default `ask`). |
+| <a id="property-when-1"></a> `when?` | `string` | A `when` over the questions. With it, the result carries the rule's outcome. |
+
+***
+
+### DecideSdkResult
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-adapter-1"></a> `adapter` | `DecideAdapter` | - |
+| <a id="property-answers"></a> `answers` | `Record`\<`string`, [`DecideSdkAnswer`](#decidesdkanswer)\> | - |
+| <a id="property-code"></a> `code` | `"DECIDE_REFUSED"` \| `"DECIDE_ESCALATED"` \| `null` | - |
+| <a id="property-digeststrength"></a> `digestStrength` | `"strong"` \| `"weak"` \| `null` | - |
+| <a id="property-error"></a> `error` | `"too_large"` \| `null` | `too_large` when the state was over 16,384 bytes, a tool call's limit, and nothing was asked. |
+| <a id="property-latencyms"></a> `latencyMs` | `number` | - |
+| <a id="property-model-1"></a> `model` | `string` \| `null` | - |
+| <a id="property-modeldigest-2"></a> `modelDigest` | `string` \| `null` | - |
+| <a id="property-outcome"></a> `outcome` | `"allow"` \| `"refuse"` \| `"escalate"` \| `null` | - |
+| <a id="property-value"></a> `value` | `Tri` \| `null` | `when`'s value, or null without a `when`. |
+| <a id="property-via"></a> `via` | `"ask"` \| `"review"` \| `null` | - |
+
+***
+
 ### Decision
 
 #### Properties
@@ -140,12 +198,12 @@ Options for a [GateClient](classes/GateClient.md). Every field is optional.
 
 | Property | Type | Default value | Description |
 | ------ | ------ | ------ | ------ |
-| <a id="property-apikey"></a> `apiKey?` | `string` | `''` | The API key. Without one the client is [local-only](classes/GateClient.md#localonly). |
+| <a id="property-apikey-1"></a> `apiKey?` | `string` | `''` | The API key. Without one the client is [local-only](classes/GateClient.md#localonly). |
 | <a id="property-baseurl"></a> `baseUrl?` | `string` | `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane | The control plane's address. A client with an `apiKey` needs one: with none the constructor throws rather than skip the hook gate unannounced. |
 | <a id="property-failclosed"></a> `failClosed?` | `boolean` | `true` | Block a call when the hook gate gives no verdict: the control plane cannot be reached, answers without one, or answers `GOVERNANCE_UNAVAILABLE`. `false` lets such a call go ahead. |
 | <a id="property-harness"></a> `harness?` | `string` | `'generic'` | Attributes incidents to the right adapter. Sent as `harnessType` on every gate call and event. |
 | <a id="property-sessionid"></a> `sessionId?` | `string` | `''` | - |
-| <a id="property-timeoutms"></a> `timeoutMs?` | `number` | `2000` | How long one control-plane request may take. |
+| <a id="property-timeoutms-1"></a> `timeoutMs?` | `number` | `2000` | How long one control-plane request may take. |
 | <a id="property-workspaceid"></a> `workspaceId?` | `string` | `''` | - |
 
 ***
@@ -179,7 +237,7 @@ How a [Gate](classes/Gate.md) evaluates calls. Every field is optional.
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-allowed"></a> `allowed` | `boolean` | - |
-| <a id="property-code"></a> `code?` | `string` | The code the hook gate names, when it names one: the MCP registry's on its refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run, `INVALID_REQUEST` when it could not read the request, and `INSUFFICIENT_SCOPE` when the API key lacks the scope it needs. |
+| <a id="property-code-1"></a> `code?` | `string` | The code the hook gate names, when it names one: the MCP registry's on its refusals, `GOVERNANCE_UNAVAILABLE` when its checks could not run, `INVALID_REQUEST` when it could not read the request, and `INSUFFICIENT_SCOPE` when the API key lacks the scope it needs. |
 | <a id="property-decisionid"></a> `decisionId?` | `string` | The hook gate's id for this decision, when this answer is its own verdict: every verdict it gives names one, and a `GOVERNANCE_UNAVAILABLE` refusal keeps it only while `failClosed` refuses too. The gate reports the call with it (`gateDecisionId`), so the control plane exports the decision to SIEM once and files its incident once. |
 | <a id="property-incidentid"></a> `incidentId?` | `string` | - |
 | <a id="property-reached"></a> `reached` | `boolean` | False when the hook gate gave no verdict and `failClosed` decided it. |
@@ -369,6 +427,73 @@ type AnyFn = (...args) => any;
 #### Returns
 
 `any`
+
+***
+
+### DecideEngineErrorCode
+
+```ts
+type DecideEngineErrorCode = 
+  | "not_configured"
+  | "host_refused"
+  | "timeout"
+  | "upstream"
+  | "no_logprobs"
+  | "bad_response"
+  | "too_large"
+  | "canary_failed";
+```
+
+***
+
+### DecideSdkAnswer
+
+```ts
+type DecideSdkAnswer = 
+  | {
+  p: number | null;
+  type: "yes_no";
+  value: Tri;
+}
+  | {
+  choice: string | null;
+  options: Record<string, ChoiceAtom>;
+  perOrder: Record<string, number>[] | null;
+  type: "choice";
+};
+```
+
+#### Union Members
+
+##### Type Literal
+
+```ts
+{
+  p: number | null;
+  type: "yes_no";
+  value: Tri;
+}
+```
+
+***
+
+##### Type Literal
+
+```ts
+{
+  choice: string | null;
+  options: Record<string, ChoiceAtom>;
+  perOrder: Record<string, number>[] | null;
+  type: "choice";
+}
+```
+
+| Name | Type | Description |
+| ------ | ------ | ------ |
+| `choice` | `string` \| `null` | The option whose atom is T, or null. At most one can be, because `yes_at` is above 0.5. |
+| `options` | `Record`\<`string`, `ChoiceAtom`\> | Each option's atom `q == o`: the mean over the orders, their spread, and its value. |
+| `perOrder` | `Record`\<`string`, `number`\>[] \| `null` | - |
+| `type` | `"choice"` | - |
 
 ***
 
@@ -739,6 +864,36 @@ sequence.
 #### Returns
 
 `string`[]
+
+***
+
+### decide()
+
+```ts
+function decide(
+   state, 
+   questions, 
+   opts?
+): Promise<DecideSdkResult>;
+```
+
+Asks `questions` (written as a decide rule's `questions`) about `state`.
+With `opts.when` the result carries the outcome the rule would reach.
+Throws a `TypeError` for questions a decide rule would refuse, and a
+`DecideEngineError` when the engine is not configured, its host is
+refused, or it cannot answer in time.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `state` | `string` |
+| `questions` | `Record`\<`string`, [`DecideQuestion`](#decidequestion)\> |
+| `opts` | [`DecideSdkOptions`](#decidesdkoptions) |
+
+#### Returns
+
+`Promise`\<[`DecideSdkResult`](#decidesdkresult)\>
 
 ***
 

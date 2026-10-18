@@ -54,8 +54,6 @@ pub mod gateway;
 /// Self-hosted gateway heartbeat client
 pub mod heartbeat;
 pub mod hostname_filter;
-/// Local judge for self-hosted gateways
-pub mod judge_local;
 pub mod k8s_token_writer;
 /// Local `~/.intutic/config.json` reader — cached daily-budget cap and
 /// approved-models allowlist for standalone deployments (Wave 6.3,

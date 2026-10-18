@@ -1,0 +1,25 @@
+# The decide tier, enforcing. The snapshot carries the decide rule no-push
+# on Bash, enforcing under a pin for the engine's model digest; the scripted
+# engine answers the canary correctly and the rule's question with p(yes)
+# 0.97, above yes_at. The push the agent asks for once the result is written
+# is refused (DECIDE_REFUSED): exit 2, the reason on stderr. The fault is
+# mcp-tool-error's, so the run is a chaos run like any other.
+name: decide-enforce
+description: An enforcing decide rule refuses the call the engine judges a violation.
+agent: node agent/harness.mjs --mode resilient --gate-from-settings --decide-engine 0.97
+verify: grep -qx 'color=teal' .intutic-chaos/result.txt && grep -qx 'size=large' .intutic-chaos/result.txt
+repeat: 1
+faults:
+  - id: tool.error
+    match: { tool: get_record }
+    times: 1
+    message: records backend unavailable
+probes:
+  - { id: task_success, weight: 3 }
+  - { id: failure_surfaced, weight: 2 }
+  - { id: recovered_within, weight: 1, value: 2 }
+  - { id: no_policy_hits, weight: 1 }
+abort:
+  - destructive_attempt
+  - cost_usd_above: 0.01
+  - wall_clock_s_above: 120

@@ -9,18 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Groundwork for decide rules.** SOP front matter now accepts `decide:`
-  lines, one JSON rule per line. A rule asks a self-hosted decision model a
-  few yes/no or multiple-choice questions about a proposed tool call, and
-  combines the answers: true refuses, false allows, unknown escalates.
-  - **Readers:** the TypeScript, Python, Rust and Terraform readers parse,
-    validate and hash these rules identically.
-  - **Engine client:** reaches a self-hosted engine (an OpenAI-compatible
-    server with token log-probabilities, a System One server, or an
-    OpenAI Decisions-format server) and refuses hosted decision APIs.
-  - **Not enforced yet:** no gate evaluates a decide rule yet. Each rule
-    reaches the policy snapshot with a fallback line, which every gate, old
-    and new, enforces as a plain refusal of the tools the rule names.
+- **Decide rules: decision guardrails on a self-hosted model.** SOP front
+  matter accepts `decide:` lines, one JSON rule per line. A rule asks a
+  self-hosted decision model a few yes/no or multiple-choice questions about
+  a proposed tool call and combines the answers: true refuses, false allows,
+  unknown escalates. See the Decide guide.
+  - **Every gate evaluates them,** after its deterministic rules and only on a
+    call those rules allow, so a decision can add friction but never lift a
+    refusal. The exception is OpenCode 2.x, whose gate refuses the tools an
+    enforcing rule names.
+  - **Escalation asks the person where the harness can ask:** Claude Code,
+    Cursor (shell and MCP hooks), GitHub Copilot, Antigravity 2.0, Hermes,
+    OpenClaw and dsh. Everywhere else it refuses with `DECIDE_ESCALATED`.
+  - **Shadow until proven:** a rule enforces only after a pre-registered
+    `intutic decide eval` passes and pins it to the engine's model digest.
+    A known-answer canary must also pass. Otherwise the rule runs in shadow
+    and says why.
+  - **`intutic decide`:** `test`, `eval` (with `--preregister` and
+    `--adversarial`), `calibrate`, `models`, `check --stdin`, `configure`,
+    `disable`/`enable` and `lint`.
+  - **`doctor` and `start`:** `intutic doctor` checks the engine, its model,
+    the canary and each harness's time budget. `intutic start` warms the
+    model and runs the canary.
+  - **The decide log and its drift alarm,** kept on the machine: 30 days,
+    uploaded only when switched on.
+  - **The engine is always self-hosted:** an OpenAI-compatible server with
+    token log-probabilities, a System One server, or an OpenAI
+    Decisions-format server. Hosted decision APIs are refused. No default
+    model ships, because no laptop-sized model passed our evaluation.
+  - **SDK `decide()`** in `@intutic/gate`, `@intutic/clawde` and
+    `intutic-clawde`, through the same guard.
+  - **New refusal codes:** `DECIDE_REFUSED`, `DECIDE_ESCALATED` and
+    `GOVERNANCE_UNAVAILABLE`. An enforcing rule whose engine is unavailable
+    refuses.
+  - **Older gates:** a gate older than this release refuses the tools a decide
+    rule names, through a fallback line in the policy snapshot.
+  - **Read but not enforced yet:** `on: response` rules, and the
+    `last_user_turn` context.
+
+### Deprecated
+
+- **The local judge environment variables:** `INTUTIC_GATEWAY_LOCAL_JUDGE`,
+  `LITELLM_LOCAL_URL`, `LITELLM_LOCAL_API_KEY`, `LITELLM_LOCAL_JUDGE_MODEL`,
+  `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`/`_HI` and
+  `LITELLM_LOCAL_TYPED_JUDGE_MODEL`. They are read until 4.0.
+  - **With a typed band,** the gateway maps them to an equivalent decide rule.
+    It decides inside the band as `AMBIGUOUS`, without asking the free-text
+    judge.
+  - **`intutic judge configure`** now writes the decide engine
+    configuration.
 
 ### Fixed
 

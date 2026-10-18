@@ -246,13 +246,16 @@ function logEvent(verdict, toolName, reason) {
 }
 
 /**
- * One tool call. Returns to allow; throws '[Intutic Governance] BLOCKED: …'
- * to refuse. \`args\` is the tool's argument object (1.x: output.args; 2.x:
+ * One tool call. Returns (or resolves) to allow; throws '[Intutic Governance]
+ * BLOCKED: …' to refuse. \`awaited\` says the host awaits the hook (1.x): only
+ * then does the decide tier ask the engine, and the result is a promise.
+ * Otherwise the synchronous gate runs, which refuses a call an enforcing
+ * decide rule names rather than throw a refusal the host may never await. \`args\` is the tool's argument object (1.x: output.args; 2.x:
  * event.input). Anything that is not an object is refused outright — the
  * gate reads paths and commands out of it, and an argument shape it cannot
  * read is the same anomaly the stdin gates' envelope guard refuses.
  */
-function intuticEvaluate(toolName, args, sessionID) {
+function intuticEvaluate(toolName, args, sessionID, awaited) {
   _intuticSessionId = sessionID || '';
   let tool = String(toolName || 'tool');
   // OpenCode's MCP ids are <server>_<tool>; compose them into the
@@ -266,14 +269,32 @@ function intuticEvaluate(toolName, args, sessionID) {
   }
   const targetPath = args.filePath || args.path || args.file_path || args.file || args.target || args.notebook_path || '';
   const command = args.command || args.cmd || args.script || '';
+  if (awaited) {
+    return intuticGateWithDecide(tool, targetPath, command, logEvent, _intuticWsId, args).then(function () {
+      logEvent('tool_allowed', tool, '');
+    });
+  }
   intuticGate(tool, targetPath, command, logEvent, _intuticWsId, args);
   logEvent('tool_allowed', tool, '');
 }
 
 /** Fail CLOSED: a fault inside the gate is a refusal, never an allow. */
-function intuticGuarded(toolName, args, sessionID) {
+async function intuticGuarded(toolName, args, sessionID) {
   try {
-    intuticEvaluate(toolName, args, sessionID);
+    await intuticEvaluate(toolName, args, sessionID, true);
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (msg.indexOf('[Intutic Governance]') === 0) throw err;
+    const reason = '[Intutic Governance] BLOCKED: gate fault (failing closed): ' + msg;
+    try { logEvent('tool_blocked', String(toolName || 'unknown'), reason); } catch (e) {}
+    throw new Error(reason);
+  }
+}
+
+/** As intuticGuarded, synchronously: the deterministic tiers only (see intuticEvaluate). */
+function intuticGuardedSync(toolName, args, sessionID) {
+  try {
+    intuticEvaluate(toolName, args, sessionID, false);
   } catch (err) {
     const msg = String((err && err.message) || err);
     if (msg.indexOf('[Intutic Governance]') === 0) throw err;
@@ -302,7 +323,7 @@ async function intuticServer(input) {
   if (!globalThis.__intuticOpencode) { globalThis.__intuticOpencode = true; intuticAnnounce(); }
   return {
     'tool.execute.before': async (input, output) => {
-      intuticGuarded(input && input.tool, output && output.args, input && input.sessionID);
+      await intuticGuarded(input && input.tool, output && output.args, input && input.sessionID);
     },
   };
 }
@@ -310,8 +331,11 @@ async function intuticServer(input) {
 // ── 2.x: plugin.setup(ctx) registering a tool execute.before hook ─────────
 async function intuticSetup(ctx) {
   if (!globalThis.__intuticOpencode) { globalThis.__intuticOpencode = true; intuticAnnounce(); }
+  // Whether 2.x awaits a hook that returns a promise is not verified, so
+  // this one stays synchronous: the decide tier needs the engine, and a call
+  // an enforcing decide rule names is refused here instead.
   await ctx.tool.hook('execute.before', (event) => {
-    intuticGuarded(event && event.tool, event && event.input, event && event.sessionID);
+    intuticGuardedSync(event && event.tool, event && event.input, event && event.sessionID);
   });
 }
 

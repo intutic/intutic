@@ -1,6 +1,6 @@
-//! End-to-end: `judge_local::local_judge` reads its typed-stage config from
+//! End-to-end: `decide::local_judge::local_judge` reads its typed-stage config from
 //! the environment and wires the free-text judge in behind it. The
-//! cascade's own branches are unit-tested in `judge_local.rs`
+//! cascade's own branches are unit-tested in `decide/local_judge.rs`
 //! with injected config; this file checks the env wiring against one
 //! wiremock LiteLLM that answers both kinds of request.
 //!
@@ -10,7 +10,7 @@
 //! ONE `#[tokio::test]` in this file: the env vars are process-global, so the
 //! scenarios run in sequence within it rather than racing as separate tests.
 
-use intutic_proxy::judge_local::{local_judge, LocalVerdict};
+use intutic_proxy::decide::local_judge::{local_judge, LocalVerdict};
 use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -8,6 +8,7 @@
 - [ClawdeError](classes/ClawdeError.md)
 - [ClawdeVerdictError](classes/ClawdeVerdictError.md)
 - [ControlPlaneClient](classes/ControlPlaneClient.md)
+- [DecideEngineError](classes/DecideEngineError.md)
 
 ## Interfaces
 
@@ -466,6 +467,86 @@ Options for a [ControlPlaneClient](classes/ControlPlaneClient.md).
 
 ***
 
+### DecideBand
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-no_below"></a> `no_below` | `number` |
+| <a id="property-yes_at"></a> `yes_at` | `number` |
+
+***
+
+### DecideEngineConfig
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-adapter"></a> `adapter` | `DecideAdapter` | - |
+| <a id="property-apikey-2"></a> `apiKey?` | `string` | From `INTUTIC_DECIDE_API_KEY` only; never written to engine.json or logged. |
+| <a id="property-maxresponsestatebytes"></a> `maxResponseStateBytes?` | `number` | `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES`: the limit for an `on: response` state; `DECIDE_MAX_RESPONSE_STATE_BYTES` (32,768) when unset. |
+| <a id="property-model-2"></a> `model` | `string` | - |
+| <a id="property-modeldigest"></a> `modelDigest?` | `string` | `INTUTIC_DECIDE_MODEL_DIGEST`: a weights digest for servers that cannot report one. |
+| <a id="property-ollama"></a> `ollama` | `boolean` | An Ollama server: reasoning is switched off with `reasoning_effort`, and the digest comes from `/api/tags`. |
+| <a id="property-parallel"></a> `parallel` | `number` | The most requests in flight at once. |
+| <a id="property-selfhostedhosts"></a> `selfHostedHosts?` | `string` | `INTUTIC_SELF_HOSTED_DECISION_HOSTS`: names the host guard allows. |
+| <a id="property-structured"></a> `structured` | `boolean` | Send `structured_outputs: {choice}` (logprobs only); some proxies refuse unknown fields. |
+| <a id="property-timeoutms"></a> `timeoutMs` | `number` | - |
+| <a id="property-url"></a> `url` | `string` | - |
+
+***
+
+### DecideQuestion
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-ask"></a> `ask` | `string` | - |
+| <a id="property-band"></a> `band?` | [`DecideBand`](#decideband) | - |
+| <a id="property-options"></a> `options?` | `string`[] | `choice` only, as written; decideOptions places `none_of_these`. |
+| <a id="property-type"></a> `type` | `"yes_no"` \| `"choice"` | - |
+
+***
+
+### DecideSdkOptions
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-band-1"></a> `band?` | [`DecideBand`](#decideband) | The band for every question without its own (default `{yes_at: 0.85, no_below: 0.15}`). |
+| <a id="property-budgetms"></a> `budgetMs?` | `number` | Milliseconds for the whole call (default `INTUTIC_DECIDE_BUDGET_MS`, else 7,300). |
+| <a id="property-engine"></a> `engine?` | [`DecideEngineConfig`](#decideengineconfig) | The engine's configuration. Without it, `engineFile` and `env` give it. |
+| <a id="property-enginefile"></a> `engineFile?` | `unknown` | The parsed `engine.json`, or null when there is none. |
+| <a id="property-env"></a> `env?` | `Record`\<`string`, `string` \| `undefined`\> | The environment, which overrides `engineFile`. |
+| <a id="property-escalate"></a> `escalate?` | `"ask"` \| `"review"` \| `"refuse"` | What an unknown `when` does (default `ask`). |
+| <a id="property-when"></a> `when?` | `string` | A `when` over the questions. With it, the result carries the rule's outcome. |
+
+***
+
+### DecideSdkResult
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-adapter-1"></a> `adapter` | `DecideAdapter` | - |
+| <a id="property-answers"></a> `answers` | `Record`\<`string`, [`DecideSdkAnswer`](#decidesdkanswer)\> | - |
+| <a id="property-code"></a> `code` | `"DECIDE_REFUSED"` \| `"DECIDE_ESCALATED"` \| `null` | - |
+| <a id="property-digeststrength"></a> `digestStrength` | `"strong"` \| `"weak"` \| `null` | - |
+| <a id="property-error"></a> `error` | `"too_large"` \| `null` | `too_large` when the state was over 16,384 bytes, a tool call's limit, and nothing was asked. |
+| <a id="property-latencyms"></a> `latencyMs` | `number` | - |
+| <a id="property-model-3"></a> `model` | `string` \| `null` | - |
+| <a id="property-modeldigest-1"></a> `modelDigest` | `string` \| `null` | - |
+| <a id="property-outcome-1"></a> `outcome` | `"allow"` \| `"refuse"` \| `"escalate"` \| `null` | - |
+| <a id="property-value"></a> `value` | `Tri` \| `null` | `when`'s value, or null without a `when`. |
+| <a id="property-via"></a> `via` | `"ask"` \| `"review"` \| `null` | - |
+
+***
+
 ### DecisionReviewResult
 
 #### Properties
@@ -571,7 +652,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-algorithm"></a> `algorithm` | `string` |
 | <a id="property-keyid-2"></a> `keyId` | `string` |
 | <a id="property-preimagedomain"></a> `preimageDomain` | `string` |
-| <a id="property-value"></a> `value` | `string` |
+| <a id="property-value-1"></a> `value` | `string` |
 
 ***
 
@@ -601,7 +682,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-cap"></a> `cap` | \| \{ `cap`: `number`; `count`: `number`; \} \| `null` |
 | <a id="property-chunks"></a> `chunks` | `number` |
 | <a id="property-docid"></a> `docId` | `string` |
-| <a id="property-error"></a> `error` | `string` \| `null` |
+| <a id="property-error-1"></a> `error` | `string` \| `null` |
 | <a id="property-extractor"></a> `extractor` | `string` |
 | <a id="property-guardrails"></a> `guardrails` | `object` |
 | `guardrails.existing` | `number` |
@@ -646,7 +727,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-finding_id"></a> `finding_id` | `string` |
 | <a id="property-harness"></a> `harness` | `string` \| `null` |
 | <a id="property-loop_run_id"></a> `loop_run_id` | `string` \| `null` |
-| <a id="property-outcome-1"></a> `outcome` | [`FindingOutcome`](#findingoutcome) \| `null` |
+| <a id="property-outcome-2"></a> `outcome` | [`FindingOutcome`](#findingoutcome) \| `null` |
 | <a id="property-outcome_at"></a> `outcome_at` | `string` \| `null` |
 | <a id="property-outcome_by"></a> `outcome_by` | `string` \| `null` |
 | <a id="property-outcome_note"></a> `outcome_note` | `string` \| `null` |
@@ -665,7 +746,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | Property | Type |
 | ------ | ------ |
 | <a id="property-finding_id-1"></a> `finding_id` | `string` |
-| <a id="property-outcome-2"></a> `outcome` | [`FindingOutcome`](#findingoutcome) |
+| <a id="property-outcome-3"></a> `outcome` | [`FindingOutcome`](#findingoutcome) |
 
 ***
 
@@ -847,7 +928,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | <a id="property-createdat-5"></a> `createdAt` | `string` \| `null` |
 | <a id="property-lastdeliveryat"></a> `lastDeliveryAt` | `string` \| `null` |
 | <a id="property-secretrotatedat"></a> `secretRotatedAt` | `string` \| `null` |
-| <a id="property-url"></a> `url` | `string` \| `null` |
+| <a id="property-url-1"></a> `url` | `string` \| `null` |
 
 ***
 
@@ -858,7 +939,7 @@ An evidence archive: the parts verification reads. Everything else is covered by
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-secret"></a> `secret` | `string` | Shown once: not retrievable again after this response. |
-| <a id="property-url-1"></a> `url` | `string` | - |
+| <a id="property-url-2"></a> `url` | `string` | - |
 
 ***
 
@@ -1080,7 +1161,7 @@ One governance incident, with the route's snake_case keys.
 | <a id="property-page"></a> `page?` | `number` | From 1; default 1. |
 | <a id="property-severity-2"></a> `severity?` | `string` | `CRITICAL`, `HIGH`, `MEDIUM` or `LOW`. |
 | <a id="property-status-8"></a> `status?` | `string` | `OPEN`, `RESOLVED` or `AUTO_RESOLVED`. |
-| <a id="property-type"></a> `type?` | `string` | An anomaly category such as `SCOPE_VIOLATION`, or a system incident type: `WASM_RULE_REFUSED` or `SYSTEM_ANOMALY`. The control plane refuses one it does not know with a 400. |
+| <a id="property-type-1"></a> `type?` | `string` | An anomaly category such as `SCOPE_VIOLATION`, or a system incident type: `WASM_RULE_REFUSED` or `SYSTEM_ANOMALY`. The control plane refuses one it does not know with a 400. |
 
 ***
 
@@ -1430,7 +1511,7 @@ One spend budget of a key.
 | Property | Type |
 | ------ | ------ |
 | <a id="property-ok-9"></a> `ok` | `boolean` |
-| <a id="property-outcome-3"></a> `outcome?` | `string` |
+| <a id="property-outcome-4"></a> `outcome?` | `string` |
 | <a id="property-status-13"></a> `status?` | `string` |
 
 ***
@@ -1820,7 +1901,7 @@ What `updateOptimizerSettings` sends.
 | ------ | ------ | ------ |
 | <a id="property-inputtext"></a> `inputText?` | `string` | - |
 | <a id="property-inputtokencount"></a> `inputTokenCount?` | `number` | - |
-| <a id="property-model-2"></a> `model` | `string` | - |
+| <a id="property-model-4"></a> `model` | `string` | - |
 | <a id="property-workspaceid-5"></a> `workspaceId` | `string` | Must be the key's own workspace. |
 
 ***
@@ -1872,7 +1953,7 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="property-code"></a> `code` | `string` | - |
+| <a id="property-code-1"></a> `code` | `string` | - |
 | <a id="property-message"></a> `message` | `string` | - |
 | <a id="property-ruleid-3"></a> `ruleId?` | `string` | The rule that decided, for a refusal the proxy answered in band. |
 | <a id="property-verdict-2"></a> `verdict` | [`RefusalVerdict`](#refusalverdict) | - |
@@ -1936,7 +2017,7 @@ list, such as Azure OpenAI, whose list names base models, not deployments).
 | <a id="property-totaloutputtokens-3"></a> `totalOutputTokens` | `number` | [`UsageTotals`](#usagetotals).[`totalOutputTokens`](#property-totaloutputtokens-5) |
 | <a id="property-totalrawcostusd-3"></a> `totalRawCostUsd` | `number` | [`UsageTotals`](#usagetotals).[`totalRawCostUsd`](#property-totalrawcostusd-5) |
 | <a id="property-tracecount-3"></a> `traceCount` | `number` | [`UsageTotals`](#usagetotals).[`traceCount`](#property-tracecount-5) |
-| <a id="property-url-2"></a> `url` | `string` | - |
+| <a id="property-url-3"></a> `url` | `string` | - |
 
 ***
 
@@ -2417,7 +2498,7 @@ A Jira Cloud, Linear or PagerDuty connection. Its API token is never returned.
 | ------ | ------ | ------ |
 | <a id="property-enforcement-1"></a> `enforcement?` | `"BYPASS"` \| `"ENHANCE"` \| `"HIJACK"` \| `"KILL"` | - |
 | <a id="property-limit-3"></a> `limit?` | `number` | 1 to 100; default 20. |
-| <a id="property-model-3"></a> `model?` | `string` | - |
+| <a id="property-model-5"></a> `model?` | `string` | - |
 | <a id="property-offset"></a> `offset?` | `number` | - |
 | <a id="property-since-1"></a> `since?` | `string` | ISO 8601, or a relative duration such as `24h` or `7d`. |
 
@@ -2600,6 +2681,73 @@ type CoverageFormat = "json" | "md" | "csv" | "pdf";
 ```
 
 The coverage report formats: `md` is markdown.
+
+***
+
+### DecideEngineErrorCode
+
+```ts
+type DecideEngineErrorCode = 
+  | "not_configured"
+  | "host_refused"
+  | "timeout"
+  | "upstream"
+  | "no_logprobs"
+  | "bad_response"
+  | "too_large"
+  | "canary_failed";
+```
+
+***
+
+### DecideSdkAnswer
+
+```ts
+type DecideSdkAnswer = 
+  | {
+  p: number | null;
+  type: "yes_no";
+  value: Tri;
+}
+  | {
+  choice: string | null;
+  options: Record<string, ChoiceAtom>;
+  perOrder: Record<string, number>[] | null;
+  type: "choice";
+};
+```
+
+#### Union Members
+
+##### Type Literal
+
+```ts
+{
+  p: number | null;
+  type: "yes_no";
+  value: Tri;
+}
+```
+
+***
+
+##### Type Literal
+
+```ts
+{
+  choice: string | null;
+  options: Record<string, ChoiceAtom>;
+  perOrder: Record<string, number>[] | null;
+  type: "choice";
+}
+```
+
+| Name | Type | Description |
+| ------ | ------ | ------ |
+| `choice` | `string` \| `null` | The option whose atom is T, or null. At most one can be, because `yes_at` is above 0.5. |
+| `options` | `Record`\<`string`, `ChoiceAtom`\> | Each option's atom `q == o`: the mean over the orders, their spread, and its value. |
+| `perOrder` | `Record`\<`string`, `number`\>[] \| `null` | - |
+| `type` | `"choice"` | - |
 
 ***
 
@@ -2941,6 +3089,36 @@ const UPSTREAM_FALLBACK_HEADER: "x-intutic-upstream-fallback-from" = 'x-intutic-
 Set by the proxy when a fallback answered: the model whose retries ran out.
 
 ## Functions
+
+### decide()
+
+```ts
+function decide(
+   state, 
+   questions, 
+   opts?
+): Promise<DecideSdkResult>;
+```
+
+Asks `questions` (written as a decide rule's `questions`) about `state`.
+With `opts.when` the result carries the outcome the rule would reach.
+Throws a `TypeError` for questions a decide rule would refuse, and a
+`DecideEngineError` when the engine is not configured, its host is
+refused, or it cannot answer in time.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `state` | `string` |
+| `questions` | `Record`\<`string`, [`DecideQuestion`](#decidequestion)\> |
+| `opts` | [`DecideSdkOptions`](#decidesdkoptions) |
+
+#### Returns
+
+`Promise`\<[`DecideSdkResult`](#decidesdkresult)\>
+
+***
 
 ### normalizeRequest()
 

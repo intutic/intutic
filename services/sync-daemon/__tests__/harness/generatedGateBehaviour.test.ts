@@ -43,6 +43,8 @@ import {
   encodeMcpAllowlistRecord,
   mcpSnapshotUnverifiedRefusal,
   holdApprovalHint,
+  decideRuleHash,
+  validateDecideRule,
 } from '@intutic/shared-types'
 import {
   UNIVERSAL_PROTECTED_PATHS,
@@ -59,6 +61,8 @@ import {
 } from '../../src/harness/protectedPaths.js'
 import { toRulesLine, REVIEW_REQUESTS_LOG, GATE_PY_LIB, GATE_EVALUATES_DECIDE } from '../../src/harness/gateBody.js'
 import { buildSnapshotRules, writeLocalPolicySnapshot, type ServedDecideRule } from '../../src/lib/policySnapshot.js'
+// @ts-expect-error -- a plain ESM fixture without types
+import { closedPort, startDecideMockEngine } from '../../../../packages/shared-types/fixtures/decide-mock-engine.mjs'
 import { createHash } from 'node:crypto'
 
 /**
@@ -137,6 +141,135 @@ function tamperDecidePayload(lines: string[], change: (record: Record<string, un
     change(record)
     return [...cols.slice(0, 4), Buffer.from(JSON.stringify(record), 'utf8').toString('base64')].join('\t')
   })
+}
+
+/** The model digest the decide rules above are pinned to, which the mock engine reports. */
+const DECIDE_DIGEST = 'sha256:5f1c0e2a9b7d'
+const DECIDE_RULE_ID = 'decide.local:data.md#prod-data-export'
+const DECIDE_FALLBACK_REASON = 'Decide rule prod-data-export (Production data handling): upgrade to Intutic 3.0 to evaluate this rule'
+const DECIDE_REFUSED_REASON = `Decide rule prod-data-export (Production data handling) refused this call [${DECIDE_RULE_ID}]`
+const DECIDE_ASK_REASON = `Needs a person: Production data handling — Does this command copy customer data out of the production database? [${DECIDE_RULE_ID}]`
+/** A call the decide rule is about; nothing deterministic refuses it. */
+const DECIDE_COMMAND = 'pg_dump -h prod > /tmp/x.sql'
+
+/** A shadow copy of {@link enforcedDecideRule}: it logs, and never refuses. */
+function shadowDecideRule(tools: string[]): ServedDecideRule {
+  const r = enforcedDecideRule(tools)
+  return { ...r, ir: r.ir.replace('"rollout":"enforce"', '"rollout":"shadow"') }
+}
+
+function logprobs(top: Array<[string, number]>): unknown {
+  return { choices: [{ logprobs: { content: [{ top_logprobs: top.map(([token, logprob]) => ({ token, logprob })) }] } }] }
+}
+
+/**
+ * The mock engine's replay: the rule's question answered `answer`, and the
+ * known-answer canary answered as a healthy model answers it.
+ */
+function decideEngineReplay(answer: 'yes' | 'no' | 'unsure'): unknown[] {
+  const rule: Array<[string, number]> =
+    answer === 'yes' ? [['yes', -0.01], ['no', -5]] : answer === 'no' ? [['no', -0.01], ['yes', -5]] : [['yes', Math.log(0.5)], ['no', Math.log(0.5)]]
+  const r = (match: string, top: Array<[string, number]>) => ({ method: 'POST', path: '/v1/chat/completions', match, status: 200, times: 1000, body: logprobs(top) })
+  return [
+    r('QUESTION: Does this command copy customer data', rule),
+    r('--no-preserve-root\\"}\\n\\nQUESTION: Does', [['yes', -0.01], ['no', -5]]),
+    r('ls -la\\"}\\n\\nQUESTION: Does', [['no', -0.01], ['yes', -5]]),
+    r('A) delete_files', [['A', -0.02], ['C', -4]]),
+    r('A) none_of_these', [['C', -0.02], ['A', -4]]),
+  ]
+}
+
+type MockEngine = Awaited<ReturnType<typeof startDecideMockEngine>>
+
+/** Runs `fn` against a mock engine answering `answer`, closing it after. */
+async function withDecideEngine<T>(answer: 'yes' | 'no' | 'unsure', fn: (env: NodeJS.ProcessEnv, engine: MockEngine) => Promise<T>): Promise<T> {
+  const engine = await startDecideMockEngine(decideEngineReplay(answer))
+  try {
+    return await fn({ INTUTIC_DECIDE_ENGINE_URL: engine.url, INTUTIC_DECIDE_MODEL: 'm', INTUTIC_DECIDE_MODEL_DIGEST: DECIDE_DIGEST }, engine)
+  } finally {
+    await engine.close()
+  }
+}
+
+/** PATH without any directory that holds an `intutic` executable: the decide CLI is missing. */
+const PATH_WITHOUT_CLI = (process.env.PATH ?? '')
+  .split(':')
+  .filter((d) => d && !existsSync(join(d, 'intutic')))
+  .join(':')
+
+/**
+ * A stand-in for `intutic decide check --stdin` speaking its JSON contract:
+ * it saves the request it was given to `input.json` beside itself and prints
+ * `stdout` (after `sleepS`), exiting `exit`. Returns the PATH that finds it.
+ */
+function fakeDecideCli(name: string, out: { stdout: string; exit?: number; sleepS?: number }): { path: string; dir: string } {
+  const dir = mkdtempSync(join(home, `fake-cli-${name}-`))
+  writeFileSync(
+    join(dir, 'intutic'),
+    [
+      '#!/bin/sh',
+      '[ "$1 $2 $3" = "decide check --stdin" ] || { echo "unexpected arguments: $*" >&2; exit 64; }',
+      `cat > '${dir}/input.json'`,
+      out.sleepS ? `sleep ${out.sleepS}` : ':',
+      `printf '%s\\n' '${out.stdout.replace(/'/g, `'\\''`)}'`,
+      `exit ${out.exit ?? 0}`,
+    ].join('\n') + '\n',
+    { mode: 0o755 },
+  )
+  return { path: `${dir}:${PATH_WITHOUT_CLI}`, dir }
+}
+
+/** The CLI's answer, as `intutic decide check` prints it. */
+function cliAnswer(outcome: 'allow' | 'refuse' | 'escalate', code: string | null, reason: string): string {
+  return JSON.stringify({ v: 1, outcome, code, ruleId: outcome === 'allow' ? null : DECIDE_RULE_ID, reason })
+}
+
+/** The JSON objects a gate printed on stdout. */
+function stdoutObjects(r: RunResult): Array<Record<string, unknown>> {
+  return r.stdout
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => { try { return JSON.parse(l) as Record<string, unknown> } catch { return null } })
+    .filter((o): o is Record<string, unknown> => o !== null)
+}
+
+/**
+ * The ask each gate makes on an escalation, as the exact stdout it writes
+ * (exit 0), or null where its harness cannot ask and the escalation refuses
+ * with DECIDE_ESCALATED. Codex accepts an ask in its schema and then runs the
+ * call, so it must never be given one.
+ */
+const ASK_STDOUT: Record<string, string | null> = {
+  claudeCode: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: DECIDE_ASK_REASON } }) + '\n',
+  githubCopilot:
+    JSON.stringify({
+      permissionDecision: 'ask',
+      permissionDecisionReason: DECIDE_ASK_REASON,
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: DECIDE_ASK_REASON },
+    }) + '\n',
+  antigravityCli: JSON.stringify({ decision: 'force_ask', reason: DECIDE_ASK_REASON }) + '\n',
+  // Cursor asks only on its shell and MCP hooks; the matrix payload names neither.
+  cursor: null,
+  hermes: JSON.stringify({ action: 'approve', message: DECIDE_ASK_REASON }) + '\n',
+  codex: null,
+  windsurf: null,
+  museCode: null,
+  cline: null,
+  grok: null,
+  goose: null,
+  openhands: null,
+  antigravity: null,
+}
+
+/** The refusal code a gate's decision carries: the JSON field, or the reason text where the harness reads only that. */
+function refusalCode(g: GateEntry, r: RunResult): string | null {
+  for (const o of stdoutObjects(r)) {
+    if (typeof o.code === 'string') return o.code
+    const m = typeof o.reason === 'string' ? /\(refusal code ([A-Z_]+)\)/.exec(o.reason) : null
+    if (m) return m[1]!
+  }
+  const m = /\(refusal code ([A-Z_]+)\)/.exec(r.stderr)
+  return m ? m[1]! : null
 }
 
 /**
@@ -353,17 +486,19 @@ function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
 async function runGate(
   g: GateEntry,
   toolInput: Record<string, string>,
-  opts: { tool?: string; snapshot?: boolean | string } = {},
+  opts: { tool?: string; snapshot?: boolean | string; env?: NodeJS.ProcessEnv; extra?: Record<string, unknown> } = {},
 ): Promise<RunResult & { signal: NodeJS.Signals | null }> {
   const artifact = join(roots.get(g.name)!, g.artifact)
   const payload = JSON.stringify({
     tool_name: opts.tool ?? 'Bash',
     tool_input: toolInput,
     session_id: 'sess_test',
+    ...opts.extra,
   })
-  return runProcess(g.runner, [artifact], {
+  // node by its own path: a test may hand the gate a PATH without the CLI's directory, node's too.
+  return runProcess(g.runner === 'node' ? process.execPath : g.runner, [artifact], {
     input: payload,
-    env: gateEnv(g, opts.snapshot),
+    env: { ...gateEnv(g, opts.snapshot), ...opts.env },
     timeoutMs: 20_000,
   })
 }
@@ -394,6 +529,18 @@ function auditLogText(g: GateEntry): string {
   }
   walk(root)
   return out.join('\n')
+}
+
+/** Every line of the decide log a gate wrote under its HOME (`~/.intutic/logs/decide-<date>.jsonl`). */
+function decideLogLines(g: GateEntry): Array<Record<string, unknown>> {
+  const logs = join(roots.get(g.name)!, '.intutic', 'logs')
+  let names: string[]
+  try {
+    names = readdirSync(logs).filter((n) => /^decide-\d{4}-\d\d-\d\d\.jsonl$/.test(n))
+  } catch {
+    return []
+  }
+  return names.flatMap((n) => readFileSync(join(logs, n), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>))
 }
 
 /** The hook events (`{event, toolName, …}` lines) in a gate's audit logs. */
@@ -1020,36 +1167,45 @@ for (const g of GATES) {
       ).toBe(false)
     })
 
-    it('refuses through a decide rule\'s fallback line, its record decoded or not, while it evaluates no decide rule (gate body v22)', async () => {
-      // No v22 gate evaluates a decide rule yet, so each keeps every fallback
-      // line in force and refuses the rule's tools exactly as a v21 gate does:
-      // a decoded @decide record alone must never open the call.
-      expect(GATE_EVALUATES_DECIDE[g.runner === 'node' ? 'js' : 'bash']).toBe(false)
-      const reason = 'Decide rule prod-data-export (Production data handling): upgrade to Intutic 3.0 to evaluate this rule'
+    it('skips a decide rule\'s fallback line only when its record decodes, and then decides the call itself (gate body v22)', async () => {
+      // Every family evaluates decide rules, so a decoded @decide record
+      // stands in for its fallback line. With no engine configured (JS) or no
+      // CLI on PATH (bash), the enforcing rule cannot be evaluated: refused
+      // GOVERNANCE_UNAVAILABLE, never through the fallback line and never
+      // allowed.
+      expect(GATE_EVALUATES_DECIDE[g.runner === 'node' ? 'js' : 'bash']).toBe(true)
+      const noEngine = { PATH: PATH_WITHOUT_CLI, INTUTIC_DECIDE_ENGINE_URL: '', INTUTIC_DECIDE_MODEL: '' }
       const decoded = await decideSnapshotFixture(`ok-${g.name}`, [enforcedDecideRule(['Bash'])])
-      const r = await runGate(g, { command: 'ls -la' }, { snapshot: decoded })
-      assertCleanExit(g, r, 'Bash under a decoded decide record')
-      expect(wasBlocked(g, r), `${g.name} skipped a fallback line while it evaluates no decide rule:\n${r.stderr}`).toBe(true)
-      expect(r.stderr + r.stdout).toContain(reason)
-      expect(r.stderr + r.stdout).toContain('decide-fallback:prod-data-export@')
-      // A tool no decide rule names still runs.
-      const read = await runGate(g, { file_path: '/tmp/notes.txt' }, { snapshot: decoded, tool: 'Read' })
+      const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: decoded, env: noEngine })
+      assertCleanExit(g, r, 'Bash under a decoded decide record and no engine')
+      expect(wasBlocked(g, r), `${g.name} allowed a call an enforcing decide rule names, with no engine:\n${r.stderr}`).toBe(true)
+      expect(r.stderr + r.stdout).toContain('GOVERNANCE_UNAVAILABLE')
+      expect(r.stderr + r.stdout).not.toContain(DECIDE_FALLBACK_REASON)
+      // A tool no decide rule names still runs, and asks nothing.
+      const read = await runGate(g, { file_path: '/tmp/notes.txt' }, { snapshot: decoded, tool: 'Read', env: noEngine })
       assertCleanExit(g, read, 'Read under a decide record on Bash')
       expect(wasBlocked(g, read), `${g.name} refused a tool no decide rule names:\n${read.stderr}`).toBe(false)
+      // A rule stamped shadow has no fallback line; an engine that cannot
+      // answer is recorded and the call goes on.
+      const shadow = await decideSnapshotFixture(`shadow-${g.name}`, [shadowDecideRule(['Bash'])])
+      const sh = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: shadow, env: noEngine })
+      assertCleanExit(g, sh, 'Bash under a shadow decide rule and no engine')
+      expect(wasBlocked(g, sh), `${g.name} refused a call only a shadow decide rule names:\n${sh.stderr}`).toBe(false)
 
-      // Four columns: no record decodes, in any gate.
+      // Four columns: no record decodes, in any gate, so the fallback line refuses.
       const short = await decideSnapshotFixture(`short-${g.name}`, [enforcedDecideRule(['Bash'])], (lines) =>
         lines.map((l) => (l.startsWith('@decide\t') ? l.split('\t').slice(0, 4).join('\t') : l)),
       )
-      const s = await runGate(g, { command: 'ls -la' }, { snapshot: short })
+      const s = await runGate(g, { command: 'ls -la' }, { snapshot: short, env: noEngine })
       assertCleanExit(g, s, 'Bash under a decide record without its payload')
       expect(wasBlocked(g, s), `${g.name} skipped a fallback line whose record has no payload`).toBe(true)
+      expect(s.stderr + s.stdout).toContain(DECIDE_FALLBACK_REASON)
 
       // A line that does not read has a fallback line and no record.
       const unreadable = await decideSnapshotFixture(`unreadable-${g.name}`, [
         { ...enforcedDecideRule(['Bash']), ir: '{"id":"half-written","on":"tool_call","tools":["Bash"]}' },
       ])
-      const u = await runGate(g, { command: 'ls -la' }, { snapshot: unreadable })
+      const u = await runGate(g, { command: 'ls -la' }, { snapshot: unreadable, env: noEngine })
       assertCleanExit(g, u, 'Bash under an unreadable decide line')
       expect(wasBlocked(g, u), `${g.name} allowed a call an unreadable decide line covers`).toBe(true)
 
@@ -1057,11 +1213,208 @@ for (const g of GATES) {
         const edited = await decideSnapshotFixture(`edited-${g.name}`, [enforcedDecideRule(['Bash'])], (lines) =>
           tamperDecidePayload(lines, (rec) => { (rec.ir as { when: string }).when = 'NOT exports' }),
         )
-        const e = await runGate(g, { command: 'ls -la' }, { snapshot: edited })
+        const e = await runGate(g, { command: 'ls -la' }, { snapshot: edited, env: noEngine })
         assertCleanExit(g, e, 'Bash under a decide record whose rule does not match its hash')
         expect(wasBlocked(g, e), `${g.name} skipped a fallback line whose record does not decode`).toBe(true)
+        expect(e.stderr + e.stdout).toContain(DECIDE_FALLBACK_REASON)
       }
-    })
+    }, 60_000)
+
+    if (g.runner === 'node') {
+      it('evaluates a decide rule against the engine after its deterministic tiers: refuses, allows, asks or refuses DECIDE_ESCALATED (gate body v22)', async () => {
+        const snap = await decideSnapshotFixture(`engine-${g.name}`, [enforcedDecideRule(['Bash'])])
+
+        await withDecideEngine('yes', async (env, engine) => {
+          const logged = decideLogLines(g).length
+          const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+          assertCleanExit(g, r, 'a call the engine says the rule covers')
+          expect(wasBlocked(g, r), `${g.name} allowed a call its decide rule refused:\n${r.stderr}`).toBe(true)
+          expect(r.stderr + r.stdout).toContain(DECIDE_REFUSED_REASON)
+          expect([null, 'DECIDE_REFUSED']).toContain(refusalCode(g, r))
+          expect(engine.unmatched).toEqual([])
+          // The decision is in the decide log, as `intutic decide check` writes it for the shell gates.
+          const added = decideLogLines(g).slice(logged)
+          expect(added.map((l) => l.event), `${g.name} did not write the decide log`).toEqual(['decide.decision'])
+          expect(added[0]).toMatchObject({ v: 1, harness: emittedHarness(readFileSync(join(roots.get(g.name)!, g.artifact), 'utf8')), tool: 'Bash', outcome: 'refuse', code: 'DECIDE_REFUSED' })
+          expect(added[0]!.engine).toMatchObject({ adapter: 'logprobs', model: 'm', digest: DECIDE_DIGEST })
+          expect((added[0]!.rules as Array<Record<string, unknown>>)[0]).toMatchObject({ ref: 'local:data.md#prod-data-export', effective: 'enforce', when: 'T', outcome: 'refuse' })
+          // Protection 1: a call a deterministic tier refuses asks the engine nothing.
+          const asked = engine.requests.length
+          const bypass = GOVERNANCE_BYPASS_PATTERNS[0]!.matches[0]!
+          const d = await runGate(g, { command: bypass }, { snapshot: snap, env })
+          assertCleanExit(g, d, 'a call the floor refuses, under a decide rule')
+          expect(wasBlocked(g, d)).toBe(true)
+          expect(engine.requests.length, `${g.name} asked the engine about a call a deterministic tier refused`).toBe(asked)
+        })
+
+        await withDecideEngine('no', async (env) => {
+          const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+          assertCleanExit(g, r, 'a call the engine says the rule does not cover')
+          expect(wasBlocked(g, r), `${g.name} refused a call its decide rule allowed:\n${r.stderr}`).toBe(false)
+        })
+
+        await withDecideEngine('unsure', async (env) => {
+          const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+          assertCleanExit(g, r, 'a call the decide rule cannot decide')
+          const ask = ASK_STDOUT[g.name]
+          expect(ask, `${g.name} has no row in ASK_STDOUT`).not.toBeUndefined()
+          if (ask) {
+            expect(r.status, `${g.name} asked with a non-zero exit:\n${r.stderr}`).toBe(0)
+            expect(r.stdout).toBe(ask)
+          } else {
+            // No ask on this path: the escalation refuses, and never asks.
+            expect(wasBlocked(g, r), `${g.name} let an escalation through:\n${r.stdout}${r.stderr}`).toBe(true)
+            expect(r.stderr + r.stdout).toContain(DECIDE_ASK_REASON)
+            expect([null, 'DECIDE_ESCALATED']).toContain(refusalCode(g, r))
+            expect(r.stdout).not.toMatch(/"ask"|force_ask|"approve"/)
+          }
+        })
+
+        // The per-call p95 `intutic doctor` stored does not fit the budget:
+        // the enforcing rule escalates, and the engine is never asked.
+        const engineJson = join(roots.get(g.name)!, '.intutic', 'decide', 'engine.json')
+        mkdirSync(join(engineJson, '..'), { recursive: true })
+        writeFileSync(engineJson, JSON.stringify({ q95Ms: 60_000, q95MeasuredAt: '2026-10-17T09:00:00.000Z' }))
+        try {
+          await withDecideEngine('yes', async (env, engine) => {
+            const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+            assertCleanExit(g, r, 'a decide rule the stored p95 cannot fit')
+            expect(engine.requests, `${g.name} asked an engine the budget cannot wait for`).toEqual([])
+            expect(r.stderr + r.stdout).toContain('cannot answer rule prod-data-export within this call')
+            if (ASK_STDOUT[g.name]) expect(r.status, `${g.name} asked with a non-zero exit:\n${r.stderr}`).toBe(0)
+            else expect(wasBlocked(g, r), `${g.name} let an escalation through:\n${r.stdout}${r.stderr}`).toBe(true)
+          })
+        } finally {
+          rmSync(engineJson, { force: true })
+        }
+
+        // An engine that does not answer: an enforcing rule refuses, a shadow one allows.
+        const down = { INTUTIC_DECIDE_ENGINE_URL: `http://127.0.0.1:${await closedPort()}`, INTUTIC_DECIDE_MODEL: 'm', INTUTIC_DECIDE_MODEL_DIGEST: DECIDE_DIGEST }
+        const u = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env: down })
+        assertCleanExit(g, u, 'an enforcing rule with its engine down')
+        expect(wasBlocked(g, u)).toBe(true)
+        expect(u.stderr + u.stdout).toContain('GOVERNANCE_UNAVAILABLE')
+        expect([null, 'GOVERNANCE_UNAVAILABLE']).toContain(refusalCode(g, u))
+        const shadow = await decideSnapshotFixture(`engine-shadow-${g.name}`, [shadowDecideRule(['Bash'])])
+        const s = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: shadow, env: down })
+        assertCleanExit(g, s, 'a shadow rule with its engine down')
+        expect(wasBlocked(g, s), `${g.name} refused a call only a shadow rule names:\n${s.stderr}`).toBe(false)
+      }, 60_000)
+
+      if (g.name === 'claudeCode') {
+        it('raises decide.drift from the decide log records it writes, against the eval run of the pin (gate body v22)', async () => {
+          const rule = enforcedDecideRule(['Bash'])
+          const v = validateDecideRule(JSON.parse(rule.ir as string))
+          if (!v.ok) throw new Error(v.reason)
+          const ruleHash = decideRuleHash(v.rule, (t) => createHash('sha256').update(t, 'utf8').digest('hex'))
+          const intutic = join(roots.get(g.name)!, '.intutic')
+          // Start from no decisions, beside the eval run the rule's pin names.
+          rmSync(join(intutic, 'decide', 'stats'), { recursive: true, force: true })
+          rmSync(join(intutic, 'logs'), { recursive: true, force: true })
+          const runs = join(intutic, 'decide', 'evals', ruleHash, 'runs')
+          mkdirSync(runs, { recursive: true })
+          writeFileSync(join(runs, 'eval_local_01.json'), JSON.stringify({ v: 1, evalRunId: 'eval_local_01', baseline: { evalRunId: 'eval_local_01', escalationRate: 0, questions: {} } }))
+          const snap = await decideSnapshotFixture('drift', [rule])
+          try {
+            await withDecideEngine('unsure', async (env) => {
+              for (let i = 0; i < 21; i++) {
+                const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+                assertCleanExit(g, r, 'a call the decide rule cannot decide')
+              }
+            })
+            const lines = decideLogLines(g)
+            expect(lines.filter((l) => l.event === 'decide.decision')).toHaveLength(21)
+            expect(lines.filter((l) => l.event === 'decide.drift')).toEqual([
+              expect.objectContaining({ ruleRef: 'local:data.md#prod-data-export', ruleHash, evalRunId: 'eval_local_01', measure: 'escalation_rate', n: 20 }),
+            ])
+          } finally {
+            rmSync(join(intutic, 'decide', 'evals'), { recursive: true, force: true })
+          }
+        }, 60_000)
+      }
+
+      if (g.name === 'cursor') {
+        it('asks on the shell and MCP hooks only: an escalation on preToolUse refuses (gate body v22)', async () => {
+          const snap = await decideSnapshotFixture('cursor-ask', [enforcedDecideRule(['Bash'])])
+          await withDecideEngine('unsure', async (env) => {
+            const ask = JSON.stringify({ permission: 'ask', user_message: DECIDE_ASK_REASON, agent_message: DECIDE_ASK_REASON }) + '\n'
+            for (const event of ['beforeShellExecution', 'beforeMCPExecution']) {
+              const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env, extra: { hook_event_name: event } })
+              expect(r.status, `${event}: ${r.stderr}`).toBe(0)
+              expect(r.stdout, event).toBe(ask)
+            }
+            const pre = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env, extra: { hook_event_name: 'preToolUse' } })
+            expect(pre.status, pre.stderr).toBe(2)
+            expect(pre.stdout).not.toContain('"ask"')
+            expect(pre.stderr).toContain(DECIDE_ASK_REASON)
+          })
+        }, 60_000)
+      }
+    } else {
+      it('hands a decide rule to `intutic decide check --stdin` after its deterministic tiers, and refuses when the CLI cannot answer (gate body v22)', async () => {
+        const snap = await decideSnapshotFixture(`cli-${g.name}`, [enforcedDecideRule(['Bash'])])
+
+        const refuse = fakeDecideCli(`refuse-${g.name}`, { stdout: cliAnswer('refuse', 'DECIDE_REFUSED', 'Decide rule prod-data-export (Production data handling) refused this call') })
+        const r = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env: { PATH: refuse.path } })
+        assertCleanExit(g, r, 'a call the CLI refuses')
+        expect(wasBlocked(g, r), `${g.name} allowed a call the decide check refused:\n${r.stderr}`).toBe(true)
+        expect(r.stderr).toContain(DECIDE_REFUSED_REASON)
+        expect(refusalCode(g, r)).toBe('DECIDE_REFUSED')
+        const sent = JSON.parse(readFileSync(join(refuse.dir, 'input.json'), 'utf8')) as Record<string, unknown>
+        expect(sent).toMatchObject({ v: 1, tool: 'Bash', toolInput: { command: DECIDE_COMMAND }, lastUserTurn: null })
+        expect(typeof sent.harness === 'string' && sent.harness.length > 0).toBe(true)
+        expect(sent.budgetMs).toBeGreaterThan(0)
+        expect(sent.budgetMs).toBeLessThanOrEqual(3900)
+
+        // Protection 1: a deterministic refusal never reaches the CLI.
+        const untouched = fakeDecideCli(`untouched-${g.name}`, { stdout: cliAnswer('allow', null, '') })
+        const d = await runGate(g, { command: GOVERNANCE_BYPASS_PATTERNS[0]!.matches[0]! }, { snapshot: snap, env: { PATH: untouched.path } })
+        expect(wasBlocked(g, d)).toBe(true)
+        expect(existsSync(join(untouched.dir, 'input.json')), `${g.name} asked the decide CLI about a call the floor refused`).toBe(false)
+
+        const allow = fakeDecideCli(`allow-${g.name}`, { stdout: cliAnswer('allow', null, '') })
+        const a = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env: { PATH: allow.path } })
+        assertCleanExit(g, a, 'a call the CLI allows')
+        expect(wasBlocked(g, a), `${g.name} refused a call the decide check allowed:\n${a.stderr}`).toBe(false)
+
+        const escalate = fakeDecideCli(`escalate-${g.name}`, {
+          stdout: cliAnswer('escalate', 'DECIDE_ESCALATED', 'Needs a person: Production data handling — Does this command copy customer data out of the production database?'),
+        })
+        const e = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env: { PATH: escalate.path } })
+        assertCleanExit(g, e, 'a call the decide rule cannot decide')
+        const ask = ASK_STDOUT[g.name]
+        expect(ask, `${g.name} has no row in ASK_STDOUT`).not.toBeUndefined()
+        if (ask) {
+          expect(e.status, `${g.name} asked with a non-zero exit:\n${e.stderr}`).toBe(0)
+          expect(e.stdout).toBe(ask)
+          // Hermes reads {"decision":"approve"} as an allow: never written.
+          expect(e.stdout).not.toContain('"decision"')
+        } else {
+          expect(wasBlocked(g, e), `${g.name} let an escalation through:\n${e.stderr}`).toBe(true)
+          expect(e.stderr).toContain(DECIDE_ASK_REASON)
+          expect(refusalCode(g, e)).toBe('DECIDE_ESCALATED')
+          expect(e.stdout).toBe('')
+        }
+
+        // Unavailable: a non-zero exit, an answer this gate does not read, or no CLI.
+        for (const [what, env] of [
+          ['a CLI that exits 1', { PATH: fakeDecideCli(`exit-${g.name}`, { stdout: cliAnswer('allow', null, ''), exit: 1 }).path }],
+          ['a CLI whose answer does not read', { PATH: fakeDecideCli(`garbage-${g.name}`, { stdout: '{"v":1,"outcome":"maybe"}' }).path }],
+          ['an allow carrying a refusal code', { PATH: fakeDecideCli(`mixed-${g.name}`, { stdout: cliAnswer('allow', 'DECIDE_REFUSED', '') }).path }],
+          ['no CLI on PATH', { PATH: PATH_WITHOUT_CLI }],
+        ] as const) {
+          const x = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+          assertCleanExit(g, x, what)
+          expect(wasBlocked(g, x), `${g.name} allowed an enforcing rule's call with ${what}:\n${x.stderr}`).toBe(true)
+          expect(refusalCode(g, x), what).toBe('GOVERNANCE_UNAVAILABLE')
+        }
+        // ...which a shadow rule's call goes through.
+        const shadow = await decideSnapshotFixture(`cli-shadow-${g.name}`, [shadowDecideRule(['Bash'])])
+        const s = await runGate(g, { command: DECIDE_COMMAND }, { snapshot: shadow, env: { PATH: PATH_WITHOUT_CLI } })
+        assertCleanExit(g, s, 'a shadow rule with no CLI')
+        expect(wasBlocked(g, s), `${g.name} refused a call only a shadow rule names:\n${s.stderr}`).toBe(false)
+      }, 120_000)
+    }
 
     it('holds a call under a hold rule: refused, tool_held recorded, a v1 hold record appended for the daemon; an unrelated call still runs', async () => {
       // The hold tier at EVERY gate, one mechanism. An
@@ -1554,6 +1907,7 @@ describe('n8n workflow gate', () => {
   async function runWorkflow(
     workflow: unknown,
     snapshot?: string,
+    env: NodeJS.ProcessEnv = {},
   ): Promise<{ refused: boolean; stderr: string }> {
     const driver = join(roots.get(gate.name)!, 'wf-drv.cjs')
     writeFileSync(
@@ -1572,12 +1926,13 @@ describe('n8n workflow gate', () => {
         '        (e) => { console.error(String((e && e.message) || e)); process.exit(3); });',
       ].join('\n'),
     )
-    const res = await runProcess('node', [driver, hookFile(), JSON.stringify(workflow)], {
+    const res = await runProcess(process.execPath, [driver, hookFile(), JSON.stringify(workflow)], {
       env: {
         ...process.env,
         HOME: roots.get(gate.name)!,
         USERPROFILE: roots.get(gate.name)!,
         INTUTIC_SNAPSHOT_RULES: snapshot ?? join(home, 'no-such.rules'),
+        ...env,
       },
       timeoutMs: 20_000,
     })
@@ -1633,19 +1988,57 @@ describe('n8n workflow gate', () => {
     expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
   })
 
-  it('refuses through a decide rule\'s fallback line, its record decoded or not, while it evaluates no decide rule (gate body v22)', async () => {
-    expect(GATE_EVALUATES_DECIDE.n8n).toBe(false)
+  it('hands a node a decide rule names to `intutic decide check --stdin`, and skips its fallback line only when the record decodes (gate body v22)', async () => {
+    expect(GATE_EVALUATES_DECIDE.n8n).toBe(true)
     const decoded = await decideSnapshotFixture('ok-n8n', [enforcedDecideRule(['executeCommand'])])
-    const d = await runWorkflow(wf([commandNode('ls -la')]), decoded)
-    expect(d.refused, 'skipped a fallback line while it evaluates no decide rule').toBe(true)
-    expect(d.stderr).toContain('decide-fallback:prod-data-export@')
+
+    const refuse = fakeDecideCli('refuse-n8n', { stdout: cliAnswer('refuse', 'DECIDE_REFUSED', 'Decide rule prod-data-export (Production data handling) refused this call') })
+    const r = await runWorkflow(wf([commandNode(DECIDE_COMMAND)]), decoded, { PATH: refuse.path })
+    expect(r.refused, 'ran a node the decide check refused').toBe(true)
+    expect(r.stderr).toContain(DECIDE_REFUSED_REASON)
+    expect(r.stderr).toContain('(refusal code DECIDE_REFUSED)')
+    expect(r.stderr).not.toContain(DECIDE_FALLBACK_REASON)
+    const sent = JSON.parse(readFileSync(join(refuse.dir, 'input.json'), 'utf8')) as Record<string, unknown>
+    expect(sent).toMatchObject({ v: 1, harness: 'n8n', tool: 'executeCommand', toolInput: { command: DECIDE_COMMAND }, lastUserTurn: null })
+    expect(sent.budgetMs).toBeGreaterThan(0)
+    expect(sent.budgetMs).toBeLessThanOrEqual(7300)
+
+    const allow = fakeDecideCli('allow-n8n', { stdout: cliAnswer('allow', null, '') })
+    expect((await runWorkflow(wf([commandNode(DECIDE_COMMAND)]), decoded, { PATH: allow.path })).refused, 'refused a node the decide check allowed').toBe(false)
+
+    // n8n cannot ask a person: an escalation refuses.
+    const escalate = fakeDecideCli('escalate-n8n', {
+      stdout: cliAnswer('escalate', 'DECIDE_ESCALATED', 'Needs a person: Production data handling — Does this command copy customer data out of the production database?'),
+    })
+    const e = await runWorkflow(wf([commandNode(DECIDE_COMMAND)]), decoded, { PATH: escalate.path })
+    expect(e.refused, 'ran a node a decide rule escalated').toBe(true)
+    expect(e.stderr).toContain(DECIDE_ASK_REASON)
+    expect(e.stderr).toContain('(refusal code DECIDE_ESCALATED)')
+
+    // Unavailable refuses an enforcing rule, and lets a shadow rule's node run.
+    const failing = fakeDecideCli('exit-n8n', { stdout: '', exit: 1 })
+    for (const env of [{ PATH: failing.path }, { PATH: PATH_WITHOUT_CLI }]) {
+      const u = await runWorkflow(wf([commandNode(DECIDE_COMMAND)]), decoded, env)
+      expect(u.refused, `ran an enforcing rule's node with ${env.PATH === PATH_WITHOUT_CLI ? 'no CLI' : 'a failing CLI'}`).toBe(true)
+      expect(u.stderr).toContain('GOVERNANCE_UNAVAILABLE')
+    }
+    const shadow = await decideSnapshotFixture('shadow-n8n', [shadowDecideRule(['executeCommand'])])
+    expect((await runWorkflow(wf([commandNode(DECIDE_COMMAND)]), shadow, { PATH: PATH_WITHOUT_CLI })).refused, 'refused a node only a shadow rule names').toBe(false)
+
+    // Protection 1: a node the deterministic tiers refuse never reaches the CLI.
+    const untouched = fakeDecideCli('untouched-n8n', { stdout: cliAnswer('allow', null, '') })
+    const d = await runWorkflow(wf([commandNode(GOVERNANCE_BYPASS_PATTERNS[0]!.matches[0]!)]), decoded, { PATH: untouched.path })
+    expect(d.refused).toBe(true)
+    expect(existsSync(join(untouched.dir, 'input.json')), 'asked the decide CLI about a workflow the floor refused').toBe(false)
+
+    // A record that does not decode leaves its fallback line in force.
     const edited = await decideSnapshotFixture('edited-n8n', [enforcedDecideRule(['executeCommand'])], (lines) =>
       tamperDecidePayload(lines, (rec) => { (rec.ir as { when: string }).when = 'NOT exports' }),
     )
-    const r = await runWorkflow(wf([commandNode('ls -la')]), edited)
-    expect(r.refused, 'skipped a fallback line whose record does not decode').toBe(true)
-    expect(r.stderr).toContain('decide-fallback:prod-data-export@')
-  })
+    const x = await runWorkflow(wf([commandNode('ls -la')]), edited, { PATH: allow.path })
+    expect(x.refused, 'skipped a fallback line whose record does not decode').toBe(true)
+    expect(x.stderr).toContain('decide-fallback:prod-data-export@')
+  }, 60_000)
 
   it('refuses a workflow with an MCP client node on an unverified snapshot, observe-only too', async () => {
     // n8n's MCP Client Tool node calls tools on an MCP server, and a snapshot
@@ -1838,6 +2231,7 @@ describe('OpenCode plugin gate', () => {
     tool: string,
     args: unknown,
     snapshot?: string,
+    env: NodeJS.ProcessEnv = {},
   ): Promise<{ refused: boolean; stderr: string }> {
     const driver = join(roots.get(gate.name)!, 'plugin-drv.mjs')
     writeFileSync(
@@ -1866,12 +2260,13 @@ describe('OpenCode plugin gate', () => {
         '  (e) => { console.error(String((e && e.message) || e)); process.exit(3); });',
       ].join('\n'),
     )
-    const res = await runProcess('node', [driver, pluginFile(), shape, tool, JSON.stringify(args)], {
+    const res = await runProcess(process.execPath, [driver, pluginFile(), shape, tool, JSON.stringify(args)], {
       env: {
         ...process.env,
         HOME: roots.get(gate.name)!,
         USERPROFILE: roots.get(gate.name)!,
         INTUTIC_SNAPSHOT_RULES: snapshot ?? join(home, 'no-such.rules'),
+        ...env,
       },
       timeoutMs: 20_000,
     })
@@ -1923,6 +2318,37 @@ describe('OpenCode plugin gate', () => {
       })
     })
   }
+
+  it('1.x asks the decide engine after its deterministic tiers; an escalation refuses, since OpenCode cannot ask (gate body v22)', async () => {
+    const snap = await decideSnapshotFixture('opencode-engine', [enforcedDecideRule(['bash'])])
+    await withDecideEngine('yes', async (env) => {
+      const r = await runPlugin('server', 'bash', { command: DECIDE_COMMAND }, snap, env)
+      expect(r.refused, `allowed a call its decide rule refused:\n${r.stderr}`).toBe(true)
+      expect(r.stderr).toContain(DECIDE_REFUSED_REASON)
+    })
+    await withDecideEngine('no', async (env) => {
+      const r = await runPlugin('server', 'bash', { command: DECIDE_COMMAND }, snap, env)
+      expect(r.refused, `refused a call its decide rule allowed:\n${r.stderr}`).toBe(false)
+    })
+    await withDecideEngine('unsure', async (env) => {
+      const r = await runPlugin('server', 'bash', { command: DECIDE_COMMAND }, snap, env)
+      expect(r.refused, 'let an escalation through').toBe(true)
+      expect(r.stderr).toContain(DECIDE_ASK_REASON)
+    })
+  }, 60_000)
+
+  it('2.x, whose host may not await the hook, stays synchronous: an enforcing decide rule\'s call is refused, a shadow one\'s allowed (gate body v22)', async () => {
+    const snap = await decideSnapshotFixture('opencode-sync', [enforcedDecideRule(['bash'])])
+    await withDecideEngine('no', async (env) => {
+      const r = await runPlugin('setup', 'bash', { command: DECIDE_COMMAND }, snap, env)
+      expect(r.refused, 'the synchronous hook allowed a call an enforcing decide rule names').toBe(true)
+      expect(r.stderr).toContain('GOVERNANCE_UNAVAILABLE')
+    })
+    const shadow = await decideSnapshotFixture('opencode-sync-shadow', [shadowDecideRule(['bash'])])
+    expect((await runPlugin('setup', 'bash', { command: DECIDE_COMMAND }, shadow)).refused).toBe(false)
+    expect((await runPlugin('setup', 'bash', { command: 'npm run build' }, snap)).refused).toBe(true)
+    expect((await runPlugin('setup', 'read', { filePath: '/tmp/notes.txt' }, snap)).refused).toBe(false)
+  }, 60_000)
 
   it('composes OpenCode <server>_<tool> MCP ids into mcp__<server>__<tool> for the allowlist, longest configured server name first', async () => {
     const root = roots.get(gate.name)!
@@ -2052,8 +2478,8 @@ describe('Pi and OpenClaw plugin gates', () => {
     g: GateEntry,
     tool: string,
     args: unknown,
-    opts: { snapshot?: string; derivedPaths?: string[] } = {},
-  ): Promise<{ refused: boolean; stderr: string; timeoutMs?: number }> {
+    opts: { snapshot?: string; derivedPaths?: string[]; env?: NodeJS.ProcessEnv } = {},
+  ): Promise<{ refused: boolean; stderr: string; timeoutMs?: number; asked?: Record<string, unknown> }> {
     const root = roots.get(g.name)!
     const driver = join(root, 'plugin-block-drv.mjs')
     writeFileSync(
@@ -2084,24 +2510,31 @@ describe('Pi and OpenClaw plugin gates', () => {
         'let res;',
         'try { res = await call(); } catch (e) { console.error(String((e && e.message) || e)); process.exit(6); }',
         "if (res && res.block === true) { console.error(String(res.reason || res.blockReason || '')); process.exit(3); }",
+        "if (res && res.requireApproval) { console.error('ASKED ' + JSON.stringify(res)); process.exit(5); }",
         'process.exit(0);',
       ].join('\n'),
     )
     const res = await runProcess(
-      'node',
+      process.execPath,
       [driver, join(root, g.artifact), g.name, tool],
       {
         // On stdin: an argument list over the size limit is too large for argv.
         input: JSON.stringify({ args, derivedPaths: opts.derivedPaths ?? [] }),
-        env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: opts.snapshot ?? join(home, 'no-such.rules') },
+        env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: opts.snapshot ?? join(home, 'no-such.rules'), ...opts.env },
         timeoutMs: 20_000,
       },
     )
     expect(res.status, `${g.name}: the host could not load the file: ${res.stderr}`).not.toBe(4)
     expect(res.status, `${g.name}: the handler threw instead of returning a block result: ${res.stderr}`).not.toBe(6)
-    expect([0, 3], `${g.name} exited ${res.status} (${res.signal ?? 'no signal'}): ${res.stderr}`).toContain(res.status)
+    expect([0, 3, 5], `${g.name} exited ${res.status} (${res.signal ?? 'no signal'}): ${res.stderr}`).toContain(res.status)
     const t = /timeoutMs=(\d+)/.exec(res.stderr)
-    return { refused: res.status === 3, stderr: res.stderr, ...(t ? { timeoutMs: Number(t[1]) } : {}) }
+    const a = /ASKED (.*)/.exec(res.stderr)
+    return {
+      refused: res.status === 3,
+      stderr: res.stderr,
+      ...(t ? { timeoutMs: Number(t[1]) } : {}),
+      ...(a ? { asked: JSON.parse(a[1]!) as Record<string, unknown> } : {}),
+    }
   }
 
   const plugins = GATES.filter((g) => g.contract === 'plugin-block')
@@ -2121,6 +2554,34 @@ describe('Pi and OpenClaw plugin gates', () => {
         const w = await runPluginGate(g, 'write', { path: 'src/index.ts', content: 'export {}' })
         expect(w.refused, `refused an ordinary write:\n${w.stderr}`).toBe(false)
       })
+
+      it('asks the decide engine after its deterministic tiers, and asks a person where the host can (gate body v22)', async () => {
+        const snap = await decideSnapshotFixture(`${g.name}-engine`, [enforcedDecideRule([shell])])
+        await withDecideEngine('yes', async (env) => {
+          const r = await runPluginGate(g, shell, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+          expect(r.refused, `allowed a call its decide rule refused:\n${r.stderr}`).toBe(true)
+          expect(r.stderr).toContain(DECIDE_REFUSED_REASON)
+        })
+        await withDecideEngine('no', async (env) => {
+          const r = await runPluginGate(g, shell, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+          expect(r.refused, `refused a call its decide rule allowed:\n${r.stderr}`).toBe(false)
+          expect(r.asked).toBeUndefined()
+        })
+        await withDecideEngine('unsure', async (env) => {
+          const r = await runPluginGate(g, shell, { command: DECIDE_COMMAND }, { snapshot: snap, env })
+          if (g.name === 'openclaw') {
+            // OpenClaw's plugin approval, once only.
+            expect(r.asked).toEqual({
+              requireApproval: { title: 'Intutic: a person must decide this call', description: DECIDE_ASK_REASON, severity: 'warning', allowedDecisions: ['allow-once', 'deny'] },
+            })
+          } else {
+            // Pi has no ask result: the escalation refuses.
+            expect(r.asked).toBeUndefined()
+            expect(r.refused, 'let an escalation through').toBe(true)
+            expect(r.stderr).toContain(DECIDE_ASK_REASON)
+          }
+        })
+      }, 60_000)
 
       it('refuses a governance-bypass command, naming the rule', async () => {
         const r = await runPluginGate(g, shell, { command: 'chflags nouchg .intutic/hooks/x' })

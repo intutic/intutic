@@ -62,6 +62,8 @@ import { SyncWsClient,
   drainReviewRequests,
   REVIEW_REQUESTS_LOG,
   syncOfflineTraces,
+  pruneDecideLogs,
+  uploadDecideLogs,
   TrajectoryMonitor,
   fetchLocalProxyInstanceId,
   endAllOpenSessions,
@@ -566,6 +568,10 @@ export async function runConnect(opts: {
   // First, the snapshot's self-heal: a snapshot changed while the daemon was
   // stopped is put back to the last verified copy, and reported, before the
   // refresh replaces it. With `checkSnapshot` false the caller is that check.
+  // The settings the last sync carried, read through a closure so the poll
+  // loop sees the value applySyncConfig stored.
+  const lastSyncSettings = (): Record<string, unknown> | undefined => lastCachedConfig?.settings as unknown as Record<string, unknown> | undefined
+
   async function refreshGateCachesForConnect(checkSnapshot = true): Promise<void> {
     if (checkSnapshot) await guardPolicySnapshot(safeConfig.workspaceRoot, async () => {})
     const localHoldTokens = await localHoldTokensFor(
@@ -1376,6 +1382,14 @@ export async function runConnect(opts: {
         // does, at dim level because this runs every poll interval.
         log.dim(`Offline trace sync failed (will retry next poll): ${err instanceof Error ? err.message : String(err)}`)
       }
+      // The decide log: aged out after 30 days, and uploaded only when the
+      // workspace opted in (decideLogUploadEnabled). Neither throws.
+      await pruneDecideLogs()
+      await uploadDecideLogs({
+        controlPlaneUrl,
+        apiKey: safeCreds.apiKey,
+        settings: lastSyncSettings(),
+      })
       // Register agents + report one session per harness (the reporter
       // dedupes per run and per proxy process), and turn this cycle's skill
       // scan findings into `skill_flagged` events. The local proxy's instance

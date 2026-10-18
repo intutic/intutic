@@ -954,6 +954,63 @@ def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key="")
         return ""
     return fault["kind"] + "\\t" + fault["reason"]
 
+
+_INTUTIC_DECIDE_CODES = {
+    "allow": (None,),
+    "refuse": ("DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE"),
+    "escalate": ("DECIDE_ESCALATED",),
+}
+
+
+def intutic_decide_check(harness, tool, budget_ms, session_id, enforce, tool_input_json):
+    # The decide tier of a bash gate: \`intutic decide check --stdin\` on a call
+    # an @decide record names. Returns outcome, code, rule id and reason,
+    # joined by the unit separator (an empty field where there is none). A
+    # missing CLI, a non-zero exit, a timeout or an answer that does not read
+    # is unavailable: refused with GOVERNANCE_UNAVAILABLE when a matched
+    # record is stamped enforce (enforce "1"), allowed, with the reason, when
+    # every one is shadow. The CLI spends the budget, its own start included.
+    import json, shutil, subprocess
+    sep = chr(31)
+
+    def clean(text):
+        return " ".join(str(text).split())
+
+    def unavailable(why):
+        if enforce != "1":
+            return sep.join(["allow", "", "", clean(why)])
+        return sep.join(["refuse", "GOVERNANCE_UNAVAILABLE", "", clean("GOVERNANCE_UNAVAILABLE — " + why)])
+
+    try:
+        tool_input = json.loads(tool_input_json or "{}")
+    except ValueError:
+        tool_input = {}
+    exe = shutil.which("intutic")
+    if not exe:
+        return unavailable("the decide rules on " + tool + " need the intutic CLI, which is not on PATH")
+    payload = {"v": 1, "harness": harness, "tool": tool, "toolInput": tool_input, "cwd": os.getcwd(),
+               "sessionId": session_id, "budgetMs": int(budget_ms), "lastUserTurn": None}
+    try:
+        done = subprocess.run([exe, "decide", "check", "--stdin"], input=json.dumps(payload), capture_output=True,
+                              text=True, timeout=int(budget_ms) / 1000.0)
+    except subprocess.TimeoutExpired:
+        return unavailable("intutic decide check did not answer within " + str(budget_ms) + " ms")
+    except OSError as err:
+        return unavailable("intutic decide check could not run (" + type(err).__name__ + ")")
+    if done.returncode != 0:
+        return unavailable("intutic decide check exited " + str(done.returncode))
+    try:
+        out = json.loads(done.stdout)
+    except ValueError:
+        out = None
+    rule_id = out.get("ruleId") if isinstance(out, dict) else None
+    if (not isinstance(out, dict) or out.get("v") != 1 or out.get("outcome") not in _INTUTIC_DECIDE_CODES
+            or out.get("code") not in _INTUTIC_DECIDE_CODES[out.get("outcome")]
+            or not (rule_id is None or (isinstance(rule_id, str) and rule_id.startswith("decide.")))
+            or not isinstance(out.get("reason", ""), str)):
+        return unavailable("intutic decide check gave an answer this gate does not read")
+    return sep.join([out["outcome"], out.get("code") or "", clean(rule_id or ""), clean(out.get("reason") or "")])
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -1336,8 +1393,30 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   done < "$INTUTIC_SNAPSHOT_RULES"
 
   # A fallback line stands in for a decide rule a gate cannot evaluate. This
-  # gate evaluates none, so every fallback line stays in force and refuses
-  # its rule's tools, as in a gate that reads no @decide records.
+  # gate hands a decide rule to the CLI, which decodes its record and refuses
+  # the call when it does not decode, so it skips the fallback line that an
+  # @decide record of five columns names in its second. Any other line with
+  # the prefix is enforced.
+  if [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+    _intutic_skip=$'\\n'
+    for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+      _intutic_tabs="\${_rec//[^$'\\t']/}"
+      _intutic_fb="\${_rec#*$'\\t'}"
+      _intutic_fb="\${_intutic_fb%%$'\\t'*}"
+      if [ \${#_intutic_tabs} -eq 4 ] && [ -n "\${_rec##*$'\\t'}" ]; then
+        case "$_intutic_fb" in 'decide-fallback:'*) _intutic_skip+="$_intutic_fb"$'\\n' ;; esac
+      fi
+    done
+    _intutic_kept=()
+    if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        case "$_intutic_skip" in *$'\\n'"\${_rec%%$'\\t'*}"$'\\n'*) continue ;; esac
+        _intutic_kept+=("$_rec")
+      done
+    fi
+    INTUTIC_DYNAMIC=()
+    if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
+  fi
 
   # Integrity, in the order that fails cheapest first.
   #
@@ -1851,6 +1930,68 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Decide tier (gate body v22) ──────────────────────────────────────────────
+# Only after every tier above allowed the call, and only for a tool an @decide
+# record names in its fourth column: intutic decide check --stdin asks the
+# self-hosted engine, within 3900 ms less what the deadline has left.
+# A CLI that is missing, fails, times out or answers what this gate cannot
+# read is unavailable, which refuses unless every record on the tool is
+# stamped shadow.
+_intutic_decide_match=0
+_intutic_decide_enforce=0
+if [ -z "\${1:-}" ] && [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+    IFS=$'\\t' read -r _ _d_fb _d_roll _d_tools _d_rest <<< "$_rec"
+    case ",\${_d_tools}," in
+      *",\${TOOL:-},"*)
+        _intutic_decide_match=1
+        [ "$_d_roll" = "enforce" ] && _intutic_decide_enforce=1
+        ;;
+    esac
+  done
+fi
+if [ "$_intutic_decide_match" = "1" ]; then
+  _intutic_decide_budget=$(( 9000 - (SECONDS + 1) * 1000 - 500 ))
+  [ "$_intutic_decide_budget" -gt 3900 ] && _intutic_decide_budget=3900
+  if [ "$_intutic_decide_budget" -lt 50 ]; then
+    if [ "$_intutic_decide_enforce" = "1" ]; then
+      _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    else
+      _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    fi
+  else
+    _intutic_dec="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_decide_check"](*sys.argv[1:6], sys.stdin.read()))' 'gemini-cli' "\${TOOL:-}" "$_intutic_decide_budget" "\${SESSION_ID:-}" "$_intutic_decide_enforce" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || true)"
+    if [ -z "$_intutic_dec" ]; then
+      # python3 could not say (it is required, and checked, before any rule
+      # runs): unavailable, as a CLI that did not answer is.
+      if [ "$_intutic_decide_enforce" = "1" ]; then
+        _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — the decide check could not run"
+      else
+        _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"the decide check could not run"
+      fi
+    fi
+  fi
+  IFS=$'\\x1f' read -r _intutic_dec_out _intutic_dec_code _intutic_dec_rid _intutic_dec_reason <<< "$_intutic_dec"
+  if [ "$_intutic_dec_out" = "allow" ]; then
+    # A shadow rule's engine that could not answer: recorded, and the call goes on.
+    if [ -n "$_intutic_dec_reason" ]; then
+      log_event "tool_would_block" "\${TOOL:-}" "GOVERNANCE_UNAVAILABLE — $_intutic_dec_reason" || true
+    fi
+  else
+    _intutic_dec_full="$_intutic_dec_reason"
+    [ -n "$_intutic_dec_rid" ] && _intutic_dec_full="$_intutic_dec_full [$_intutic_dec_rid]"
+    # gemini-cli cannot ask a person, so an escalation refuses (DECIDE_ESCALATED).
+    _intutic_chaos_rule="$_intutic_dec_rid"; _intutic_chaos_hit=1
+    intutic_shown "$_intutic_dec_full"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_shown} (refusal code \${_intutic_dec_code:-DECIDE_ESCALATED})" >&2
+    log_event "tool_blocked" "\${TOOL:-}" "$_intutic_dec_full"
+    exit 2
+  fi
+fi
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
 # Recorded as allowed, then the fault that is due, if any. A permission delay
@@ -2834,6 +2975,63 @@ def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key="")
         return ""
     return fault["kind"] + "\\t" + fault["reason"]
 
+
+_INTUTIC_DECIDE_CODES = {
+    "allow": (None,),
+    "refuse": ("DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE"),
+    "escalate": ("DECIDE_ESCALATED",),
+}
+
+
+def intutic_decide_check(harness, tool, budget_ms, session_id, enforce, tool_input_json):
+    # The decide tier of a bash gate: \`intutic decide check --stdin\` on a call
+    # an @decide record names. Returns outcome, code, rule id and reason,
+    # joined by the unit separator (an empty field where there is none). A
+    # missing CLI, a non-zero exit, a timeout or an answer that does not read
+    # is unavailable: refused with GOVERNANCE_UNAVAILABLE when a matched
+    # record is stamped enforce (enforce "1"), allowed, with the reason, when
+    # every one is shadow. The CLI spends the budget, its own start included.
+    import json, shutil, subprocess
+    sep = chr(31)
+
+    def clean(text):
+        return " ".join(str(text).split())
+
+    def unavailable(why):
+        if enforce != "1":
+            return sep.join(["allow", "", "", clean(why)])
+        return sep.join(["refuse", "GOVERNANCE_UNAVAILABLE", "", clean("GOVERNANCE_UNAVAILABLE — " + why)])
+
+    try:
+        tool_input = json.loads(tool_input_json or "{}")
+    except ValueError:
+        tool_input = {}
+    exe = shutil.which("intutic")
+    if not exe:
+        return unavailable("the decide rules on " + tool + " need the intutic CLI, which is not on PATH")
+    payload = {"v": 1, "harness": harness, "tool": tool, "toolInput": tool_input, "cwd": os.getcwd(),
+               "sessionId": session_id, "budgetMs": int(budget_ms), "lastUserTurn": None}
+    try:
+        done = subprocess.run([exe, "decide", "check", "--stdin"], input=json.dumps(payload), capture_output=True,
+                              text=True, timeout=int(budget_ms) / 1000.0)
+    except subprocess.TimeoutExpired:
+        return unavailable("intutic decide check did not answer within " + str(budget_ms) + " ms")
+    except OSError as err:
+        return unavailable("intutic decide check could not run (" + type(err).__name__ + ")")
+    if done.returncode != 0:
+        return unavailable("intutic decide check exited " + str(done.returncode))
+    try:
+        out = json.loads(done.stdout)
+    except ValueError:
+        out = None
+    rule_id = out.get("ruleId") if isinstance(out, dict) else None
+    if (not isinstance(out, dict) or out.get("v") != 1 or out.get("outcome") not in _INTUTIC_DECIDE_CODES
+            or out.get("code") not in _INTUTIC_DECIDE_CODES[out.get("outcome")]
+            or not (rule_id is None or (isinstance(rule_id, str) and rule_id.startswith("decide.")))
+            or not isinstance(out.get("reason", ""), str)):
+        return unavailable("intutic decide check gave an answer this gate does not read")
+    return sep.join([out["outcome"], out.get("code") or "", clean(rule_id or ""), clean(out.get("reason") or "")])
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -3218,8 +3416,30 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   done < "$INTUTIC_SNAPSHOT_RULES"
 
   # A fallback line stands in for a decide rule a gate cannot evaluate. This
-  # gate evaluates none, so every fallback line stays in force and refuses
-  # its rule's tools, as in a gate that reads no @decide records.
+  # gate hands a decide rule to the CLI, which decodes its record and refuses
+  # the call when it does not decode, so it skips the fallback line that an
+  # @decide record of five columns names in its second. Any other line with
+  # the prefix is enforced.
+  if [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+    _intutic_skip=$'\\n'
+    for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+      _intutic_tabs="\${_rec//[^$'\\t']/}"
+      _intutic_fb="\${_rec#*$'\\t'}"
+      _intutic_fb="\${_intutic_fb%%$'\\t'*}"
+      if [ \${#_intutic_tabs} -eq 4 ] && [ -n "\${_rec##*$'\\t'}" ]; then
+        case "$_intutic_fb" in 'decide-fallback:'*) _intutic_skip+="$_intutic_fb"$'\\n' ;; esac
+      fi
+    done
+    _intutic_kept=()
+    if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        case "$_intutic_skip" in *$'\\n'"\${_rec%%$'\\t'*}"$'\\n'*) continue ;; esac
+        _intutic_kept+=("$_rec")
+      done
+    fi
+    INTUTIC_DYNAMIC=()
+    if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
+  fi
 
   # Integrity, in the order that fails cheapest first.
   #
@@ -3733,6 +3953,68 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Decide tier (gate body v22) ──────────────────────────────────────────────
+# Only after every tier above allowed the call, and only for a tool an @decide
+# record names in its fourth column: intutic decide check --stdin asks the
+# self-hosted engine, within 3900 ms less what the deadline has left.
+# A CLI that is missing, fails, times out or answers what this gate cannot
+# read is unavailable, which refuses unless every record on the tool is
+# stamped shadow.
+_intutic_decide_match=0
+_intutic_decide_enforce=0
+if [ -z "\${1:-}" ] && [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+    IFS=$'\\t' read -r _ _d_fb _d_roll _d_tools _d_rest <<< "$_rec"
+    case ",\${_d_tools}," in
+      *",\${TOOL:-},"*)
+        _intutic_decide_match=1
+        [ "$_d_roll" = "enforce" ] && _intutic_decide_enforce=1
+        ;;
+    esac
+  done
+fi
+if [ "$_intutic_decide_match" = "1" ]; then
+  _intutic_decide_budget=$(( 9000 - (SECONDS + 1) * 1000 - 500 ))
+  [ "$_intutic_decide_budget" -gt 3900 ] && _intutic_decide_budget=3900
+  if [ "$_intutic_decide_budget" -lt 50 ]; then
+    if [ "$_intutic_decide_enforce" = "1" ]; then
+      _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    else
+      _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    fi
+  else
+    _intutic_dec="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_decide_check"](*sys.argv[1:6], sys.stdin.read()))' 'goose' "\${TOOL:-}" "$_intutic_decide_budget" "\${SESSION_ID:-}" "$_intutic_decide_enforce" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || true)"
+    if [ -z "$_intutic_dec" ]; then
+      # python3 could not say (it is required, and checked, before any rule
+      # runs): unavailable, as a CLI that did not answer is.
+      if [ "$_intutic_decide_enforce" = "1" ]; then
+        _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — the decide check could not run"
+      else
+        _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"the decide check could not run"
+      fi
+    fi
+  fi
+  IFS=$'\\x1f' read -r _intutic_dec_out _intutic_dec_code _intutic_dec_rid _intutic_dec_reason <<< "$_intutic_dec"
+  if [ "$_intutic_dec_out" = "allow" ]; then
+    # A shadow rule's engine that could not answer: recorded, and the call goes on.
+    if [ -n "$_intutic_dec_reason" ]; then
+      log_event "tool_would_block" "\${TOOL:-}" "GOVERNANCE_UNAVAILABLE — $_intutic_dec_reason" || true
+    fi
+  else
+    _intutic_dec_full="$_intutic_dec_reason"
+    [ -n "$_intutic_dec_rid" ] && _intutic_dec_full="$_intutic_dec_full [$_intutic_dec_rid]"
+    # goose cannot ask a person, so an escalation refuses (DECIDE_ESCALATED).
+    _intutic_chaos_rule="$_intutic_dec_rid"; _intutic_chaos_hit=1
+    intutic_shown "$_intutic_dec_full"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_shown} (refusal code \${_intutic_dec_code:-DECIDE_ESCALATED})" >&2
+    log_event "tool_blocked" "\${TOOL:-}" "$_intutic_dec_full"
+    exit 2
+  fi
+fi
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
 # Recorded as allowed, then the fault that is due, if any. A permission delay
@@ -4727,6 +5009,63 @@ def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key="")
         return ""
     return fault["kind"] + "\\t" + fault["reason"]
 
+
+_INTUTIC_DECIDE_CODES = {
+    "allow": (None,),
+    "refuse": ("DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE"),
+    "escalate": ("DECIDE_ESCALATED",),
+}
+
+
+def intutic_decide_check(harness, tool, budget_ms, session_id, enforce, tool_input_json):
+    # The decide tier of a bash gate: \`intutic decide check --stdin\` on a call
+    # an @decide record names. Returns outcome, code, rule id and reason,
+    # joined by the unit separator (an empty field where there is none). A
+    # missing CLI, a non-zero exit, a timeout or an answer that does not read
+    # is unavailable: refused with GOVERNANCE_UNAVAILABLE when a matched
+    # record is stamped enforce (enforce "1"), allowed, with the reason, when
+    # every one is shadow. The CLI spends the budget, its own start included.
+    import json, shutil, subprocess
+    sep = chr(31)
+
+    def clean(text):
+        return " ".join(str(text).split())
+
+    def unavailable(why):
+        if enforce != "1":
+            return sep.join(["allow", "", "", clean(why)])
+        return sep.join(["refuse", "GOVERNANCE_UNAVAILABLE", "", clean("GOVERNANCE_UNAVAILABLE — " + why)])
+
+    try:
+        tool_input = json.loads(tool_input_json or "{}")
+    except ValueError:
+        tool_input = {}
+    exe = shutil.which("intutic")
+    if not exe:
+        return unavailable("the decide rules on " + tool + " need the intutic CLI, which is not on PATH")
+    payload = {"v": 1, "harness": harness, "tool": tool, "toolInput": tool_input, "cwd": os.getcwd(),
+               "sessionId": session_id, "budgetMs": int(budget_ms), "lastUserTurn": None}
+    try:
+        done = subprocess.run([exe, "decide", "check", "--stdin"], input=json.dumps(payload), capture_output=True,
+                              text=True, timeout=int(budget_ms) / 1000.0)
+    except subprocess.TimeoutExpired:
+        return unavailable("intutic decide check did not answer within " + str(budget_ms) + " ms")
+    except OSError as err:
+        return unavailable("intutic decide check could not run (" + type(err).__name__ + ")")
+    if done.returncode != 0:
+        return unavailable("intutic decide check exited " + str(done.returncode))
+    try:
+        out = json.loads(done.stdout)
+    except ValueError:
+        out = None
+    rule_id = out.get("ruleId") if isinstance(out, dict) else None
+    if (not isinstance(out, dict) or out.get("v") != 1 or out.get("outcome") not in _INTUTIC_DECIDE_CODES
+            or out.get("code") not in _INTUTIC_DECIDE_CODES[out.get("outcome")]
+            or not (rule_id is None or (isinstance(rule_id, str) and rule_id.startswith("decide.")))
+            or not isinstance(out.get("reason", ""), str)):
+        return unavailable("intutic decide check gave an answer this gate does not read")
+    return sep.join([out["outcome"], out.get("code") or "", clean(rule_id or ""), clean(out.get("reason") or "")])
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -5101,8 +5440,30 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   done < "$INTUTIC_SNAPSHOT_RULES"
 
   # A fallback line stands in for a decide rule a gate cannot evaluate. This
-  # gate evaluates none, so every fallback line stays in force and refuses
-  # its rule's tools, as in a gate that reads no @decide records.
+  # gate hands a decide rule to the CLI, which decodes its record and refuses
+  # the call when it does not decode, so it skips the fallback line that an
+  # @decide record of five columns names in its second. Any other line with
+  # the prefix is enforced.
+  if [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+    _intutic_skip=$'\\n'
+    for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+      _intutic_tabs="\${_rec//[^$'\\t']/}"
+      _intutic_fb="\${_rec#*$'\\t'}"
+      _intutic_fb="\${_intutic_fb%%$'\\t'*}"
+      if [ \${#_intutic_tabs} -eq 4 ] && [ -n "\${_rec##*$'\\t'}" ]; then
+        case "$_intutic_fb" in 'decide-fallback:'*) _intutic_skip+="$_intutic_fb"$'\\n' ;; esac
+      fi
+    done
+    _intutic_kept=()
+    if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        case "$_intutic_skip" in *$'\\n'"\${_rec%%$'\\t'*}"$'\\n'*) continue ;; esac
+        _intutic_kept+=("$_rec")
+      done
+    fi
+    INTUTIC_DYNAMIC=()
+    if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
+  fi
 
   # Integrity, in the order that fails cheapest first.
   #
@@ -5616,6 +5977,79 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Decide tier (gate body v22) ──────────────────────────────────────────────
+# Only after every tier above allowed the call, and only for a tool an @decide
+# record names in its fourth column: intutic decide check --stdin asks the
+# self-hosted engine, within 3900 ms less what the deadline has left.
+# A CLI that is missing, fails, times out or answers what this gate cannot
+# read is unavailable, which refuses unless every record on the tool is
+# stamped shadow.
+_intutic_decide_match=0
+_intutic_decide_enforce=0
+if [ -z "\${1:-}" ] && [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+    IFS=$'\\t' read -r _ _d_fb _d_roll _d_tools _d_rest <<< "$_rec"
+    case ",\${_d_tools}," in
+      *",\${TOOL:-},"*)
+        _intutic_decide_match=1
+        [ "$_d_roll" = "enforce" ] && _intutic_decide_enforce=1
+        ;;
+    esac
+  done
+fi
+if [ "$_intutic_decide_match" = "1" ]; then
+  _intutic_decide_budget=$(( 9000 - (SECONDS + 1) * 1000 - 500 ))
+  [ "$_intutic_decide_budget" -gt 3900 ] && _intutic_decide_budget=3900
+  if [ "$_intutic_decide_budget" -lt 50 ]; then
+    if [ "$_intutic_decide_enforce" = "1" ]; then
+      _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    else
+      _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    fi
+  else
+    _intutic_dec="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_decide_check"](*sys.argv[1:6], sys.stdin.read()))' 'hermes' "\${TOOL:-}" "$_intutic_decide_budget" "\${SESSION_ID:-}" "$_intutic_decide_enforce" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || true)"
+    if [ -z "$_intutic_dec" ]; then
+      # python3 could not say (it is required, and checked, before any rule
+      # runs): unavailable, as a CLI that did not answer is.
+      if [ "$_intutic_decide_enforce" = "1" ]; then
+        _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — the decide check could not run"
+      else
+        _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"the decide check could not run"
+      fi
+    fi
+  fi
+  IFS=$'\\x1f' read -r _intutic_dec_out _intutic_dec_code _intutic_dec_rid _intutic_dec_reason <<< "$_intutic_dec"
+  if [ "$_intutic_dec_out" = "allow" ]; then
+    # A shadow rule's engine that could not answer: recorded, and the call goes on.
+    if [ -n "$_intutic_dec_reason" ]; then
+      log_event "tool_would_block" "\${TOOL:-}" "GOVERNANCE_UNAVAILABLE — $_intutic_dec_reason" || true
+    fi
+  else
+    _intutic_dec_full="$_intutic_dec_reason"
+    [ -n "$_intutic_dec_rid" ] && _intutic_dec_full="$_intutic_dec_full [$_intutic_dec_rid]"
+    if [ "$_intutic_dec_out" = "escalate" ]; then
+      # Hermes' human approval: {"action":"approve"}. Never {"decision":"approve"},
+      # which Hermes reads as an allow.
+      intutic_shown "$_intutic_dec_full"
+      echo "[Intutic Governance] ASK: \${_intutic_shown}" >&2
+      log_event "tool_flagged" "\${TOOL:-}" "DECIDE_ESCALATED — asked a person: $_intutic_dec_full" || true
+      _intutic_chaos_rule="$_intutic_dec_rid"; _intutic_chaos_hit=1
+      intutic_chaos_decide hold >/dev/null 2>&1 || true
+      _intutic_chaos_done=1
+      printf '{"action":"approve","message":"%s"}\\n' "$(intutic_json_escape "$_intutic_shown")"
+      exit 0
+    fi
+    _intutic_chaos_rule="$_intutic_dec_rid"; _intutic_chaos_hit=1
+    intutic_shown "$_intutic_dec_full"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_shown} (refusal code \${_intutic_dec_code:-DECIDE_ESCALATED})" >&2
+    log_event "tool_blocked" "\${TOOL:-}" "$_intutic_dec_full"
+    exit 2
+  fi
+fi
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
 # Recorded as allowed, then the fault that is due, if any. A permission delay
@@ -6598,6 +7032,63 @@ def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key="")
         return ""
     return fault["kind"] + "\\t" + fault["reason"]
 
+
+_INTUTIC_DECIDE_CODES = {
+    "allow": (None,),
+    "refuse": ("DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE"),
+    "escalate": ("DECIDE_ESCALATED",),
+}
+
+
+def intutic_decide_check(harness, tool, budget_ms, session_id, enforce, tool_input_json):
+    # The decide tier of a bash gate: \`intutic decide check --stdin\` on a call
+    # an @decide record names. Returns outcome, code, rule id and reason,
+    # joined by the unit separator (an empty field where there is none). A
+    # missing CLI, a non-zero exit, a timeout or an answer that does not read
+    # is unavailable: refused with GOVERNANCE_UNAVAILABLE when a matched
+    # record is stamped enforce (enforce "1"), allowed, with the reason, when
+    # every one is shadow. The CLI spends the budget, its own start included.
+    import json, shutil, subprocess
+    sep = chr(31)
+
+    def clean(text):
+        return " ".join(str(text).split())
+
+    def unavailable(why):
+        if enforce != "1":
+            return sep.join(["allow", "", "", clean(why)])
+        return sep.join(["refuse", "GOVERNANCE_UNAVAILABLE", "", clean("GOVERNANCE_UNAVAILABLE — " + why)])
+
+    try:
+        tool_input = json.loads(tool_input_json or "{}")
+    except ValueError:
+        tool_input = {}
+    exe = shutil.which("intutic")
+    if not exe:
+        return unavailable("the decide rules on " + tool + " need the intutic CLI, which is not on PATH")
+    payload = {"v": 1, "harness": harness, "tool": tool, "toolInput": tool_input, "cwd": os.getcwd(),
+               "sessionId": session_id, "budgetMs": int(budget_ms), "lastUserTurn": None}
+    try:
+        done = subprocess.run([exe, "decide", "check", "--stdin"], input=json.dumps(payload), capture_output=True,
+                              text=True, timeout=int(budget_ms) / 1000.0)
+    except subprocess.TimeoutExpired:
+        return unavailable("intutic decide check did not answer within " + str(budget_ms) + " ms")
+    except OSError as err:
+        return unavailable("intutic decide check could not run (" + type(err).__name__ + ")")
+    if done.returncode != 0:
+        return unavailable("intutic decide check exited " + str(done.returncode))
+    try:
+        out = json.loads(done.stdout)
+    except ValueError:
+        out = None
+    rule_id = out.get("ruleId") if isinstance(out, dict) else None
+    if (not isinstance(out, dict) or out.get("v") != 1 or out.get("outcome") not in _INTUTIC_DECIDE_CODES
+            or out.get("code") not in _INTUTIC_DECIDE_CODES[out.get("outcome")]
+            or not (rule_id is None or (isinstance(rule_id, str) and rule_id.startswith("decide.")))
+            or not isinstance(out.get("reason", ""), str)):
+        return unavailable("intutic decide check gave an answer this gate does not read")
+    return sep.join([out["outcome"], out.get("code") or "", clean(rule_id or ""), clean(out.get("reason") or "")])
+
 INTUTIC_PY_LIB_END
 export INTUTIC_PY_LIB
 
@@ -6982,8 +7473,30 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   done < "$INTUTIC_SNAPSHOT_RULES"
 
   # A fallback line stands in for a decide rule a gate cannot evaluate. This
-  # gate evaluates none, so every fallback line stays in force and refuses
-  # its rule's tools, as in a gate that reads no @decide records.
+  # gate hands a decide rule to the CLI, which decodes its record and refuses
+  # the call when it does not decode, so it skips the fallback line that an
+  # @decide record of five columns names in its second. Any other line with
+  # the prefix is enforced.
+  if [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+    _intutic_skip=$'\\n'
+    for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+      _intutic_tabs="\${_rec//[^$'\\t']/}"
+      _intutic_fb="\${_rec#*$'\\t'}"
+      _intutic_fb="\${_intutic_fb%%$'\\t'*}"
+      if [ \${#_intutic_tabs} -eq 4 ] && [ -n "\${_rec##*$'\\t'}" ]; then
+        case "$_intutic_fb" in 'decide-fallback:'*) _intutic_skip+="$_intutic_fb"$'\\n' ;; esac
+      fi
+    done
+    _intutic_kept=()
+    if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        case "$_intutic_skip" in *$'\\n'"\${_rec%%$'\\t'*}"$'\\n'*) continue ;; esac
+        _intutic_kept+=("$_rec")
+      done
+    fi
+    INTUTIC_DYNAMIC=()
+    if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
+  fi
 
   # Integrity, in the order that fails cheapest first.
   #
@@ -7497,6 +8010,68 @@ case "\${TOOL:-}" in
     fi
     ;;
 esac
+
+# ── Decide tier (gate body v22) ──────────────────────────────────────────────
+# Only after every tier above allowed the call, and only for a tool an @decide
+# record names in its fourth column: intutic decide check --stdin asks the
+# self-hosted engine, within 3900 ms less what the deadline has left.
+# A CLI that is missing, fails, times out or answers what this gate cannot
+# read is unavailable, which refuses unless every record on the tool is
+# stamped shadow.
+_intutic_decide_match=0
+_intutic_decide_enforce=0
+if [ -z "\${1:-}" ] && [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+    IFS=$'\\t' read -r _ _d_fb _d_roll _d_tools _d_rest <<< "$_rec"
+    case ",\${_d_tools}," in
+      *",\${TOOL:-},"*)
+        _intutic_decide_match=1
+        [ "$_d_roll" = "enforce" ] && _intutic_decide_enforce=1
+        ;;
+    esac
+  done
+fi
+if [ "$_intutic_decide_match" = "1" ]; then
+  _intutic_decide_budget=$(( 9000 - (SECONDS + 1) * 1000 - 500 ))
+  [ "$_intutic_decide_budget" -gt 3900 ] && _intutic_decide_budget=3900
+  if [ "$_intutic_decide_budget" -lt 50 ]; then
+    if [ "$_intutic_decide_enforce" = "1" ]; then
+      _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    else
+      _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    fi
+  else
+    _intutic_dec="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_decide_check"](*sys.argv[1:6], sys.stdin.read()))' 'openhands' "\${TOOL:-}" "$_intutic_decide_budget" "\${SESSION_ID:-}" "$_intutic_decide_enforce" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || true)"
+    if [ -z "$_intutic_dec" ]; then
+      # python3 could not say (it is required, and checked, before any rule
+      # runs): unavailable, as a CLI that did not answer is.
+      if [ "$_intutic_decide_enforce" = "1" ]; then
+        _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — the decide check could not run"
+      else
+        _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"the decide check could not run"
+      fi
+    fi
+  fi
+  IFS=$'\\x1f' read -r _intutic_dec_out _intutic_dec_code _intutic_dec_rid _intutic_dec_reason <<< "$_intutic_dec"
+  if [ "$_intutic_dec_out" = "allow" ]; then
+    # A shadow rule's engine that could not answer: recorded, and the call goes on.
+    if [ -n "$_intutic_dec_reason" ]; then
+      log_event "tool_would_block" "\${TOOL:-}" "GOVERNANCE_UNAVAILABLE — $_intutic_dec_reason" || true
+    fi
+  else
+    _intutic_dec_full="$_intutic_dec_reason"
+    [ -n "$_intutic_dec_rid" ] && _intutic_dec_full="$_intutic_dec_full [$_intutic_dec_rid]"
+    # openhands cannot ask a person, so an escalation refuses (DECIDE_ESCALATED).
+    _intutic_chaos_rule="$_intutic_dec_rid"; _intutic_chaos_hit=1
+    intutic_shown "$_intutic_dec_full"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_shown} (refusal code \${_intutic_dec_code:-DECIDE_ESCALATED})" >&2
+    log_event "tool_blocked" "\${TOOL:-}" "$_intutic_dec_full"
+    exit 2
+  fi
+fi
 
 # ── Agent fault injection: the call is allowed ───────────────────────────────
 # Recorded as allowed, then the fault that is due, if any. A permission delay

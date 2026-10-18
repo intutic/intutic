@@ -1648,6 +1648,115 @@ def whoami() -> Dict[str, Any]
 GET /api/v1/auth/me
 
 
+### DecideEngineConfig
+
+```python
+@dataclass
+class DecideEngineConfig(
+    url: str,
+    adapter: str,
+    model: str,
+    timeout_ms: int,
+    parallel: int,
+    structured: bool,
+    ollama: bool,
+    api_key: Optional[str] = None,
+    model_digest: Optional[str] = None,
+    self_hosted_hosts: Optional[str] = None,
+    max_response_state_bytes: Optional[int] = None,
+)
+```
+
+#### Attributes
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `adapter` | `str` | — |  |
+| `api_key` | `Optional[str]` | `field(default=None, repr=False)` |  |
+| `max_response_state_bytes` | `Optional[int]` | `None` |  |
+| `model` | `str` | — |  |
+| `model_digest` | `Optional[str]` | `None` |  |
+| `ollama` | `bool` | — |  |
+| `parallel` | `int` | — |  |
+| `self_hosted_hosts` | `Optional[str]` | `None` |  |
+| `structured` | `bool` | — |  |
+| `timeout_ms` | `int` | — |  |
+| `url` | `str` | — |  |
+
+### DecideEngineError
+
+```python
+class DecideEngineError(code: str, message: str, status: Optional[int] = None)
+```
+
+Bases: `Exception`
+
+An engine failure. `code` is one of not_configured, host_refused,
+timeout, upstream, no_logprobs, bad_response, too_large, canary_failed;
+`status` is the upstream HTTP status of an `upstream` error that got
+a response.
+
+
+### DecideSdkAnswer
+
+```python
+@dataclass
+class DecideSdkAnswer(
+    type: str,
+    p: Optional[float] = None,
+    value: Optional[str] = None,
+    per_order: Optional[List[Dict[str, float]]] = None,
+    options: Optional[Dict[str, Dict[str, Any]]] = None,
+    choice: Optional[str] = None,
+)
+```
+
+#### Attributes
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `choice` | `Optional[str]` | `None` |  |
+| `options` | `Optional[Dict[str, Dict[str, Any]]]` | `None` |  |
+| `p` | `Optional[float]` | `None` |  |
+| `per_order` | `Optional[List[Dict[str, float]]]` | `None` |  |
+| `type` | `str` | — |  |
+| `value` | `Optional[str]` | `None` |  |
+
+### DecideSdkResult
+
+```python
+@dataclass
+class DecideSdkResult(
+    answers: Dict[str, DecideSdkAnswer],
+    value: Optional[str],
+    outcome: Optional[str],
+    code: Optional[str],
+    via: Optional[str],
+    error: Optional[str],
+    model: Optional[str],
+    model_digest: Optional[str],
+    digest_strength: Optional[str],
+    adapter: str,
+    latency_ms: float,
+)
+```
+
+#### Attributes
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `adapter` | `str` | — |  |
+| `answers` | `Dict[str, DecideSdkAnswer]` | — |  |
+| `code` | `Optional[str]` | — |  |
+| `digest_strength` | `Optional[str]` | — |  |
+| `error` | `Optional[str]` | — |  |
+| `latency_ms` | `float` | — |  |
+| `model` | `Optional[str]` | — |  |
+| `model_digest` | `Optional[str]` | — |  |
+| `outcome` | `Optional[str]` | — |  |
+| `value` | `Optional[str]` | — |  |
+| `via` | `Optional[str]` | — |  |
+
 ### Gate
 
 ```python
@@ -2039,6 +2148,32 @@ class ProxyRefusal(_ProxyRefusalBase)
 | `rule_id` | `str` | — |  |
 
 ## Functions
+
+### decide()
+
+```python
+def decide(
+    state: str,
+    questions: Mapping[str, Any],
+    *,
+    when: Optional[str] = None,
+    band: Optional[Mapping[str, float]] = None,
+    escalate: Optional[str] = None,
+    engine: Optional[DecideEngineConfig] = None,
+    engine_file: Any = _UNSET,
+    env: Optional[Mapping[str, str]] = None,
+    budget_ms: Optional[float] = None,
+) -> DecideSdkResult
+```
+
+Asks `questions` (written as a decide rule's `questions`) about
+`state`. `engine` is the engine's configuration; without it,
+`engine_file` (engine.json's parsed content, default read from
+`~/.intutic/decide/engine.json`) and `env` (default `os.environ`)
+give it. Raises `ValueError` for questions a decide rule would refuse,
+and `DecideEngineError` when the engine is not configured, its host is
+refused, or it cannot answer in time.
+
 
 ### guard()
 

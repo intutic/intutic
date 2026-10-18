@@ -17,7 +17,11 @@ import {
   DECIDE_CANARY_FILE,
   DECIDE_CANARY_TTL_MS,
   decideCanaryFresh,
+  decideDecision,
   decideEffectiveRollout,
+  decideRuleCalls,
+  decideRuleEstimateMs,
+  decideStoredQ95Ms,
   evaluateDecideCall,
   type DecideEvaluateDeps,
   type DecideRuleEntry,
@@ -128,6 +132,84 @@ describe('evaluate', () => {
     )
     expect(got.call).toMatchObject({ outcome: 'refuse', code: 'GOVERNANCE_UNAVAILABLE' })
     expect(got.rules[0]).toMatchObject({ outcome: 'unavailable', error: 'not_configured' })
+  })
+})
+
+describe('the latency budget', () => {
+  const DIGEST = 'sha256:' + 'c'.repeat(64)
+  const yesNo = { type: 'yes_no', ask: 'Does this command copy customer data out of the production database?' } as const
+  const choice = { type: 'choice', ask: 'Where does the data go?', options: ['local_file', 'cloud_bucket', 'external_host'] } as const
+  function rule(id: string, over: Record<string, unknown> = {}, rollout: 'shadow' | 'enforce' = 'enforce'): DecideRuleEntry {
+    return entry({
+      ref: `local:data.md#${id}`,
+      rule: { id, on: 'tool_call', tools: ['Bash'], questions: { exports: yesNo }, when: 'exports', rollout, ...over } as unknown as DecideRule,
+      rollout,
+      stampedBy: 'rule',
+      sopTitle: 'Production data handling',
+      ruleText: 'Customer data never leaves production.',
+      pins: [{ modelDigest: DIGEST, evalRunId: 'eval_local_01', source: 'local' }],
+    })
+  }
+  /** One rule of one call, and one of four (a yes/no, and a choice of four in three orders). */
+  const cheap = () => rule('cheap')
+  const dear = (over: Record<string, unknown> = {}, rollout: 'shadow' | 'enforce' = 'enforce') =>
+    rule('dear', { questions: { exports: yesNo, dest: choice }, when: 'exports AND dest != none_of_these', ...over }, rollout)
+  const run = (rules: DecideRuleEntry[], q95Ms: number | null, parallel = 1) =>
+    evaluateDecideCall(
+      { deterministic: 'allow', tool: 'Bash', toolInput: { command: 'pg_dump -h prod' }, cwd: '/', rules, deadlineMs: Date.now() + 5000 },
+      { engine: new DecideEngineError('not_configured', 'no model'), engineUrl: '', canary: createDecideCanaryFileStore(canaryFile(), fs), sha256Hex, q95Ms, parallel },
+    )
+
+  it('estimates a rule as the p95 times its calls over the engine parallelism', () => {
+    const v = validateDecideRule(dear().ir)
+    if (!v.ok) throw new Error(v.reason)
+    expect(decideRuleCalls(v.rule)).toBe(4)
+    expect(decideRuleEstimateMs(v.rule, 500, 1)).toBe(2000)
+    expect(decideRuleEstimateMs(v.rule, 500, 3)).toBe(1000)
+    expect(decideRuleEstimateMs(v.rule, 500, 8)).toBe(500)
+  })
+
+  it('reads the p95 doctor stored, and nothing else', () => {
+    expect(decideStoredQ95Ms({ q95Ms: 812, q95MeasuredAt: '2026-10-17T09:00:00.000Z' })).toBe(812)
+    for (const file of [null, undefined, [], 'x', {}, { q95Ms: 0 }, { q95Ms: -1 }, { q95Ms: '812' }, { q95Ms: Infinity }, { q95Ms: true }]) {
+      expect(decideStoredQ95Ms(file), JSON.stringify(file)).toBeNull()
+    }
+  })
+
+  it('escalates an enforcing rule it cannot fit, without asking the engine', async () => {
+    const got = await run([dear()], 2000)
+    expect(got.call).toEqual({ outcome: 'escalate', code: 'DECIDE_ESCALATED', ruleRef: 'local:data.md#dear', via: 'ask', reason: null })
+    expect(got.rules.map((r) => [r.ref, r.effective, r.outcome, r.error])).toEqual([['local:data.md#dear', 'enforce', 'escalate', 'budget_skip']])
+    // The engine is not configured; had it been asked, the rule would refuse GOVERNANCE_UNAVAILABLE.
+    expect(got.engine).toBeNull()
+    expect(decideDecision(got, [dear()]).reason).toBe(
+      "Needs a person: Production data handling — the decide engine cannot answer rule dear within this call's time budget",
+    )
+  })
+
+  it("follows the rule's escalate, and lets a shadow rule's call on", async () => {
+    expect((await run([dear({ escalate: 'refuse' })], 2000)).call).toMatchObject({ outcome: 'refuse', code: 'DECIDE_ESCALATED', ruleRef: 'local:data.md#dear' })
+    const shadow = await run([dear({}, 'shadow')], 2000)
+    expect(shadow.call.outcome).toBe('allow')
+    expect(shadow.rules.map((r) => [r.effective, r.outcome, r.error])).toEqual([['shadow', 'allow', 'budget_skip']])
+  })
+
+  it('asks the rules that fit, and their refusal still wins', async () => {
+    // 2,000 ms a call: the one-call rule fits in 5 s, the four-call rule does not.
+    const got = await run([cheap(), dear()], 2000)
+    expect(got.rules.map((r) => [r.ref, r.error])).toEqual([
+      ['local:data.md#cheap', 'not_configured'],
+      ['local:data.md#dear', 'budget_skip'],
+    ])
+    expect(got.call).toMatchObject({ outcome: 'refuse', code: 'GOVERNANCE_UNAVAILABLE', ruleRef: 'local:data.md#cheap' })
+    // Four calls in parallel fit too.
+    expect((await run([dear()], 2000, 4)).rules.map((r) => r.error)).toEqual(['not_configured'])
+  })
+
+  it('asks every rule when no p95 was stored', async () => {
+    const got = await run([dear()], null)
+    expect(got.rules.map((r) => r.error)).toEqual(['not_configured'])
+    expect(got.call.code).toBe('GOVERNANCE_UNAVAILABLE')
   })
 })
 

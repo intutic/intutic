@@ -66,8 +66,8 @@ describe('parsePolicySnapshot', () => {
     expect(snap.workspaceId).toBe('wk_alpha')
   })
 
-  it('counts decide rules as the gates read them: while no gate evaluates them, every fallback line is a rule', () => {
-    expect(CAN_EVALUATE_DECIDE).toBe(false)
+  it('counts decide rules as the gates read them: a fallback line a decoded record names is not a rule, any other is', () => {
+    expect(CAN_EVALUATE_DECIDE).toBe(true)
     const vectors = JSON.parse(
       readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/shared-types/fixtures/decide-vectors.json'), 'utf-8'),
     ).record as { valid: Array<{ line: string }>; damaged: Array<{ name: string; line: string }> }
@@ -75,8 +75,13 @@ describe('parsePolicySnapshot', () => {
     const body = ['@format\t2', vectors.valid[0]!.line, fallback, rule('sop.1', ' (Write) ')]
     const snap = parsePolicySnapshot(snapshotText(body))
     expect({ state: snap.state, formatVersion: snap.formatVersion, decideRules: snap.decideRules, ruleCount: snap.ruleCount }).toEqual({
-      state: 'ok', formatVersion: 2, decideRules: 1, ruleCount: 2,
+      state: 'ok', formatVersion: 2, decideRules: 1, ruleCount: 1,
     })
+
+    // A fallback line no decoded record names still refuses its tools, so it is a rule.
+    const orphan = rule('decide-fallback:other-rule@6bcd6b021e7d', ' (Edit) ')
+    const withOrphan = parsePolicySnapshot(snapshotText([...body, orphan]))
+    expect([withOrphan.decideRules, withOrphan.ruleCount]).toEqual([1, 2])
 
     // A record that does not decode leaves its fallback line a rule.
     const damaged = vectors.damaged.find((c) => c.name === 'a word of the rule changed under the same hash')!.line

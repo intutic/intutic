@@ -150,11 +150,11 @@ function logEvent(verdict, toolName, reason) {
 }
 
 /**
- * One tool call. Returns to allow; throws '[Intutic Governance] …' to refuse.
+ * One tool call. Resolves to allow; throws '[Intutic Governance] …' to refuse.
  * Input that is not an object is refused outright: the gate reads paths and
  * commands out of it, and a shape it cannot read is not one it can allow.
  */
-function intuticEvaluate(event, ctx) {
+async function intuticEvaluate(event, ctx) {
   _intuticSessionId = '';
   try { _intuticSessionId = String(ctx.sessionManager.getSessionId() || ''); } catch (e) {}
   const tool = String((event && event.toolName) || 'tool');
@@ -167,7 +167,7 @@ function intuticEvaluate(event, ctx) {
   }
   const target = input.path || input.file_path || input.filePath || input.target || '';
   const command = input.command || input.cmd || input.script || '';
-  intuticGate(tool, target, command, logEvent, _intuticWsId, input, _intuticSessionId);
+  await intuticGateWithDecide(tool, target, command, logEvent, _intuticWsId, input, _intuticSessionId);
   logEvent('tool_allowed', tool, '');
 }
 
@@ -175,14 +175,14 @@ function intuticEvaluate(event, ctx) {
  * Fail closed: a fault inside the gate is a refusal, never an allow. The gate
  * body reports a refusal on stderr for the hook processes; inside Pi that
  * line would land in the middle of the terminal UI, and the reason reaches
- * the user in the tool result anyway, so stderr is muted for the call. The
- * evaluation is synchronous, so nothing else logs in between.
+ * the user in the tool result anyway, so stderr is muted for the call, the
+ * decide tier's wait for its engine included. Pi awaits this handler.
  */
-function toolCall(event, ctx) {
+async function toolCall(event, ctx) {
   const consoleError = console.error;
   console.error = () => {};
   try {
-    intuticEvaluate(event, ctx);
+    await intuticEvaluate(event, ctx);
     return undefined;
   } catch (err) {
     let reason = String((err && err.message) || err);

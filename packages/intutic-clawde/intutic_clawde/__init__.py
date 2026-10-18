@@ -22,6 +22,10 @@ from .gate import (
     guard_tools,
     intutic_headers,
 )
+# decide(state, questions, ...): ask a self-hosted model narrow questions about a
+# state. Exported here rather than from .gate, whose ``decide`` is the rule module.
+from .gate.decide_engine import DecideEngineConfig, DecideEngineError
+from .gate.decide_sdk import DecideSdkAnswer, DecideSdkResult, decide
 from .evidence import verify_evidence_archive
 from .integrity import verify_integrity_root
 
@@ -32,5 +36,6 @@ __all__ = [
     "stream_refusal", "UPSTREAM_ATTEMPTS_HEADER", "UPSTREAM_FALLBACK_HEADER",
     "Gate", "GateClient", "GateConfig", "GateResponse", "IntuticGateHold", "IntuticGateRefusal",
     "guard", "guard_tools", "intutic_headers",
+    "DecideEngineConfig", "DecideEngineError", "DecideSdkAnswer", "DecideSdkResult", "decide",
     "verify_evidence_archive", "verify_integrity_root",
 ]

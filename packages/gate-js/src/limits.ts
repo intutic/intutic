@@ -24,6 +24,13 @@ export const GATE_DEADLINE_MARGIN_MS = 1000
 export const GATE_DEADLINE_MS = HOOK_TIMEOUT_SECONDS * 1000 - GATE_DEADLINE_MARGIN_MS
 
 /**
+ * How long the decide tier may spend on one call unless
+ * `INTUTIC_DECIDE_BUDGET_MS` says otherwise: a JavaScript hook gate's budget
+ * under a 10 s timeout (`DECIDE_SDK_BUDGET_MS` in gateLimits.ts).
+ */
+export const DECIDE_BUDGET_MS = 7300
+
+/**
  * Why a call is too large to evaluate, or null. Counts the command and the
  * compact JSON of the arguments in UTF-8 bytes; arguments that do not
  * serialize are left to the tiers, which handle them already.

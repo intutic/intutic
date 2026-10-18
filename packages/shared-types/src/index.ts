@@ -897,6 +897,10 @@ export {
   GATE_DEADLINE_MARGIN_MS,
   HOOK_GATE_TIMEOUTS,
   gateDeadlineMs,
+  DETERMINISTIC_WORST_CASE_MS,
+  DECIDE_BUDGET_MARGIN_MS,
+  DECIDE_SDK_BUDGET_MS,
+  decideBudgetMs,
 } from './gateLimits.js'
 export type { HookGateHarness, HookGateTimeout, HookTimeoutSetBy } from './gateLimits.js'
 export {
@@ -981,6 +985,7 @@ export {
   DECIDE_DEFAULT_ENGINE_URL,
   DECIDE_DEFAULT_TIMEOUT_MS,
   DECIDE_MAX_STATE_BYTES,
+  DECIDE_MAX_RESPONSE_STATE_BYTES,
   DECIDE_RULE_TEXT_MAX_BYTES,
   DECIDE_LAST_USER_TURN_MAX_CHARS,
   DECIDE_MIN_CALL_MS,
@@ -994,6 +999,7 @@ export {
   decideQuestionPrompts,
   resolveDecideEngineConfig,
   runDecideCanary,
+  DECIDE_ENGINE_JS_SOURCE,
 } from './decideEngine.js'
 export type {
   DecideAdapter,
@@ -1017,11 +1023,20 @@ export {
   decideCanaryFresh,
   decideEffectiveRollout,
   evaluateDecideCall,
+  decideRuleCalls,
+  decideRuleEstimateMs,
+  decideStoredQ95Ms,
+  decideDecision,
+  decideShadowFindings,
+  decideUnavailableDecision,
+  DECIDE_EVALUATE_JS_SOURCE,
+  DECIDE_GATE_JS_SOURCE,
 } from './decideEvaluate.js'
 export type {
   DecideCanaryEntry,
   DecideCanaryFs,
   DecideCanaryStore,
+  DecideDecision,
   DecideEffectiveRollout,
   DecideEvaluateDeps,
   DecideEvaluateInput,
@@ -1035,5 +1050,56 @@ export {
   DecideHostRefusedError,
   assertSelfHostedDecisionHost,
   checkSelfHostedDecisionHost,
+  DECIDE_HOST_GUARD_JS_SOURCE,
 } from './decideHostGuard.js'
 export type { DecideHostVerdict } from './decideHostGuard.js'
+// decide(state, questions, opts) for the SDKs (decideSdk.ts).
+export { DECIDE_ENGINE_FILE_PATH, DECIDE_SDK_DEFAULT_BUDGET_MS, decideQuestions, loadDecideEngineFile } from './decideSdk.js'
+export type { DecideSdkAnswer, DecideSdkOptions, DecideSdkResult } from './decideSdk.js'
+
+// The decide log and its drift alarm (decideLog.ts), and the excerpt's redaction patterns.
+export {
+  DECIDE_ARGS_EXCERPT_MAX_BYTES,
+  DECIDE_DRIFT_ESCALATION_DELTA,
+  DECIDE_DRIFT_INTERVAL_MS,
+  DECIDE_DRIFT_MIN_DECISIONS,
+  DECIDE_LOG_LINE_MAX_BYTES,
+  DECIDE_LOG_RETENTION_DAYS,
+  DECIDE_REDACTED,
+  DECIDE_STATS_KEEP,
+  appendDecideLogLine,
+  buildDecideDecisionRecord,
+  buildDecideEventRecord,
+  checkDecideDrift,
+  decideArgsExcerpt,
+  decideEngineHost,
+  decideLogDeps,
+  decideLogEngine,
+  decideLogFileDate,
+  decideLogFileName,
+  decideLogLine,
+  decideRedact,
+  decideTrackedP,
+  decideUtf8Prefix,
+  DECIDE_LOG_JS_SOURCE,
+  readDecideEvalRunBaseline,
+  readDecideStats,
+  recordDecideStats,
+  writeDecideCallLog,
+  writeDecideStats,
+} from './decideLog.js'
+export type {
+  DecideDecisionRecord,
+  DecideDrift,
+  DecideEvalRunBaseline,
+  DecideLogAnswer,
+  DecideLogContext,
+  DecideLogEngine,
+  DecideLogEvent,
+  DecideLogFs,
+  DecideLogRule,
+  DecideLogWriteDeps,
+  DecideStats,
+  DecideStatsDecision,
+} from './decideLog.js'
+export { decideLogRedactionSources } from './decideLogRedaction.js'

@@ -9,6 +9,10 @@
         "collapsed": true,
         "items": [
           {
+            "text": "DecideEngineError",
+            "link": "/reference/sdk/gate/core/classes/DecideEngineError.md"
+          },
+          {
             "text": "Gate",
             "link": "/reference/sdk/gate/core/classes/Gate.md"
           },
@@ -23,6 +27,10 @@
           {
             "text": "GateError",
             "link": "/reference/sdk/gate/core/classes/GateError.md"
+          },
+          {
+            "text": "IntuticGateEscalation",
+            "link": "/reference/sdk/gate/core/classes/IntuticGateEscalation.md"
           },
           {
             "text": "IntuticGateHold",
