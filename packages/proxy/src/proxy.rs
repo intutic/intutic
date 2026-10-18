@@ -10535,7 +10535,8 @@ fn body_with_note(body: &[u8], note: &str) -> Option<Vec<u8>> {
             Some(_) => return None,
         };
         msg.insert("content".into(), serde_json::Value::String(text));
-    } else if let Some(output) = v.get_mut("output").and_then(|o| o.as_array_mut()) {
+    } else {
+        let output = v.get_mut("output").and_then(|o| o.as_array_mut())?;
         output.push(serde_json::json!({
             "id": "msg_intutic_decide",
             "type": "message",
@@ -10543,8 +10544,6 @@ fn body_with_note(body: &[u8], note: &str) -> Option<Vec<u8>> {
             "role": "assistant",
             "content": [{ "type": "output_text", "text": note, "annotations": [] }]
         }));
-    } else {
-        return None;
     }
     serde_json::to_vec(&v).ok()
 }

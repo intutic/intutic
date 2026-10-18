@@ -550,7 +550,7 @@ async function controlPlaneRequest(cp: ControlPlane, method: 'GET' | 'POST', pat
     signal: AbortSignal.timeout(CONTROL_PLANE_TIMEOUT_MS),
   })
   const { unwrapToonEnvelope } = await import('../lib/api.js')
-  let parsed: unknown = null
+  let parsed: unknown
   try {
     parsed = unwrapToonEnvelope(await res.json())
   } catch {
