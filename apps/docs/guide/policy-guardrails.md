@@ -42,7 +42,7 @@ will see on stderr when it blocks.
 | ordering, counts, denied tools, taint: `requires_before`, `forbid_after`, `max_calls`, `forbid_with`, `deny_tools`, `review_before` | `sop_front_matter` | the proxy's SOP detectors | the workspace SOP policy a gateway-mode proxy fetches; `intutic guardrails pull` for a proxy that reads SOPs from disk |
 | a context condition — which harness, role or environment may act, as a `wasm_predicate` clause | `wasm_rule` | a compiled WASM rule in the proxy | the rule-candidate pipeline: compiled from its source of record, gated, shadowed, promoted |
 | which models agents may use (`allowed_models`), or which hosts they may also reach (`egress_allow`) | `workspace_setting` | the proxy's approved-models check and its egress policy, through the workspace settings `allowedModels` and `egressAllow` | a promotion writes the setting, recorded as a settings change by the promoting member; retiring the guardrail undoes its own write |
-| a narrow yes/no or pick-one question a self-hosted model answers about a tool call or a response, as a `decide` rule | `sop_front_matter` | the hook gates and the SDK gates, for an `on: tool_call` rule, once every deterministic tier has allowed the call, by asking a self-hosted model ([Decide rules](/guide/decide)); the proxy reads and validates the rule and evaluates nothing, so an `on: response` rule is not enforced in 3.0. It is written by hand, never proposed from policy prose | a `decide:` line in a SOP's front matter, one JSON rule per line |
+| a narrow yes/no or pick-one question a self-hosted model answers about a tool call or a response, as a `decide` rule | `sop_front_matter` | the hook gates and the SDK gates, for an `on: tool_call` rule, once every deterministic tier has allowed the call, by asking a self-hosted model ([Decide rules](/guide/decide)); the proxy evaluates both kinds, an `on: response` rule on each complete response. It is written by hand, or drafted from policy prose and approved by a person ([Drafting decide rules](#drafting-decide-rules)) | a `decide:` line in a SOP's front matter, one JSON rule per line |
 
 Hook rules are rendered from literal tool names and up to four literal
 argument fragments — the tool pattern is anchored, the argument pattern is a
@@ -300,6 +300,36 @@ Four ways in, one API:
   read back after the write, the answer is a 500 with code
   `GUARDRAIL_READ_BACK_FAILED` (and its `guardrailId`), never a success
   without a guardrail. See the [route catalog](/reference/api#route-catalog).
+
+## Drafting decide rules
+
+Some sentences need judgement a literal match cannot make: "customer data
+never leaves the production database except through the export job". On the
+Documents tab, **Draft decide rules** asks the self-hosted model to draft
+[decide rules](/guide/decide) from a document's passages, with a prompt of
+its own, under the same daily model-call cap as extraction
+(`POST /api/v1/policy-guardrails/documents/:docId/draft-decide`). The model
+is held to the extraction checks and to three more:
+
+- **Grounded.** The quote is verbatim; every question's subject and every
+  option are words the passage uses; a tool other than `Bash` is one the
+  passage names.
+- **Atomic.** Each question asks one fact about the call in the present tense,
+  as [Writing atomic questions](/guide/decide#writing-atomic-questions) says:
+  no "and" or "or", no verdict such as "dangerous", nothing about the session,
+  a review or a ticket, never whether the call names a command, flag or tool
+  (a literal match decides that), and `when` never negates a yes/no question.
+- **Left to a person.** A draft carries no `rollout: enforce`, no band and no
+  context, and none is drafted from a sentence scoped to a role or about the
+  order of actions in a session: a decide rule has no roles, and the session
+  rules enforce order.
+
+A draft that passes is a proposed guardrail, like an extracted clause, on the
+Review tab under the extractor `llm-decide:<model>`. It is served to no gate
+until an owner or admin approves it for shadow, and it refuses nothing until
+its rule says `rollout: enforce` and a calibration, promoted after a passing
+pre-registered eval run, pins the model. **Policies → Decide Rules** shows
+how each served rule's answers hold up.
 
 ## What this is not
 

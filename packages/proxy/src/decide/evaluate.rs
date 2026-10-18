@@ -1,5 +1,5 @@
-//! Evaluating one tool call's decide rules against the engine, inside the
-//! engine protections.
+//! Evaluating one tool call's decide rules, or one model response's, against
+//! the engine, inside the engine protections.
 //!
 //! A transliteration of `packages/shared-types/src/decideEvaluate.ts`; read
 //! its module comment for the design. In short: nothing is asked unless the
@@ -16,12 +16,14 @@
 //! `packages/shared-types/fixtures/decide-engine-vectors.json`.
 
 use super::engine::{
-    build_tool_call_state, run_canary, Answer as EngineAnswer, DecideAsk, DecideEngineError,
-    ErrorOutcome, ModelIdentity, QuestionCall, QuestionType as CallType, ToolCallStateInput,
+    build_response_state, build_tool_call_state, run_canary, Answer as EngineAnswer, DecideAsk,
+    DecideEngineError, ErrorOutcome, ModelIdentity, QuestionCall, QuestionType as CallType,
+    ToolCallStateInput,
 };
 use super::{
-    call_outcome, rule_hash, rule_outcome, select_rules, Answer, Band, CallOutcome, Candidate,
-    Combiner, DecideRule, Escalate, On, Outcome, QuestionType, Rollout, RuleResult, DEFAULT_BAND,
+    call_outcome, rule_hash, rule_outcome, select_response_rules, select_rules, Answer, Band,
+    CallOutcome, Candidate, Combiner, DecideRule, Escalate, On, Outcome, QuestionType, Rollout,
+    RuleResult, DEFAULT_BAND,
 };
 use futures_util::future::join_all;
 use serde_json::{json, Value};
@@ -311,6 +313,24 @@ pub struct EvaluateInput<'a> {
     pub deadline: Instant,
 }
 
+/// A model response, judged by the `on: response` rules among `rules`.
+pub struct ResponseInput<'a> {
+    /// The response's text.
+    pub content: &'a str,
+    /// The most bytes a rule's state (its rule text and `content`) may hold;
+    /// a larger one is unknown, never truncated.
+    pub max_state_bytes: usize,
+    /// In snapshot order.
+    pub rules: &'a [RuleEntry],
+    pub deadline: Instant,
+}
+
+/// What the questions are asked about.
+enum Subject<'a> {
+    ToolCall(&'a EvaluateInput<'a>),
+    Response(&'a ResponseInput<'a>),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanaryState {
     /// A fresh passed result from the cache.
@@ -377,12 +397,13 @@ fn allow() -> CallOutcome {
     }
 }
 
-/// Asks the engine one rule's questions about the call.
+/// Asks the engine one rule's questions about the call or the response.
 async fn ask_rule<E: DecideAsk + ?Sized>(
     client: Option<&E>,
     error: Option<DecideEngineError>,
     e: &RuleEntry,
-    input: &EvaluateInput<'_>,
+    subject: &Subject<'_>,
+    deadline: Instant,
 ) -> Asked {
     let Some(c) = client.filter(|_| error.is_none()) else {
         return Asked {
@@ -408,22 +429,29 @@ async fn ask_rule<E: DecideAsk + ?Sized>(
             },
         })
         .collect();
-    let with_turn = e.rule.context.iter().any(|c| c == "last_user_turn");
-    let state = build_tool_call_state(&ToolCallStateInput {
-        rule_id: &e.rule.id,
-        sop_title: &e.sop_title,
-        rule_text: &e.rule_text,
-        tool: input.tool,
-        cwd: input.cwd,
-        tool_input: input.tool_input,
-        last_user_turn: if with_turn {
-            input.last_user_turn
-        } else {
-            None
-        },
-    });
+    let state = match subject {
+        Subject::ToolCall(input) => {
+            let with_turn = e.rule.context.iter().any(|c| c == "last_user_turn");
+            build_tool_call_state(&ToolCallStateInput {
+                rule_id: &e.rule.id,
+                sop_title: &e.sop_title,
+                rule_text: &e.rule_text,
+                tool: input.tool,
+                cwd: input.cwd,
+                tool_input: input.tool_input,
+                last_user_turn: if with_turn {
+                    input.last_user_turn
+                } else {
+                    None
+                },
+            })
+        }
+        Subject::Response(input) => {
+            build_response_state(&e.rule_text, input.content, input.max_state_bytes)
+        }
+    };
     let result = match state {
-        Ok(state) => c.ask(&state, &questions, input.deadline).await,
+        Ok(state) => c.ask(&state, &questions, deadline).await,
         Err(err) => Err(err),
     };
     match result {
@@ -469,6 +497,52 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
         .iter()
         .filter(|r| r.rule.on == On::ToolCall && r.rule.tools.iter().any(|t| t == input.tool))
         .collect();
+    evaluate_matched(
+        matched,
+        &Subject::ToolCall(input),
+        input.deadline,
+        engine,
+        engine_url,
+        canary,
+    )
+    .await
+}
+
+/// Judges a model response by the `on: response` rules among `input.rules`,
+/// inside the same protections as a tool call: the same rollout, canary,
+/// per-call limit and outcome. A state over `input.max_state_bytes` makes its
+/// rule unknown, which escalates. Never fails.
+pub async fn evaluate_response<E: DecideAsk + ?Sized>(
+    input: &ResponseInput<'_>,
+    engine: Result<&E, DecideEngineError>,
+    engine_url: &str,
+    canary: &CanaryFileStore,
+) -> Evaluation {
+    let matched: Vec<&RuleEntry> = input
+        .rules
+        .iter()
+        .filter(|r| r.rule.on == On::Response)
+        .collect();
+    evaluate_matched(
+        matched,
+        &Subject::Response(input),
+        input.deadline,
+        engine,
+        engine_url,
+        canary,
+    )
+    .await
+}
+
+/// The rules that matched the call or the response, asked and combined.
+async fn evaluate_matched<E: DecideAsk + ?Sized>(
+    matched: Vec<&RuleEntry>,
+    subject: &Subject<'_>,
+    deadline: Instant,
+    engine: Result<&E, DecideEngineError>,
+    engine_url: &str,
+    canary: &CanaryFileStore,
+) -> Evaluation {
     if matched.is_empty() {
         return Evaluation {
             call: allow(),
@@ -485,7 +559,7 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
     };
     let mut identity: Option<ModelIdentity> = None;
     if let Some(c) = client {
-        match c.describe(input.deadline).await {
+        match c.describe(deadline).await {
             Ok(id) => identity = Some(id),
             Err(err) => engine_error = Some(err),
         }
@@ -520,7 +594,10 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
             .effective,
         })
         .collect();
-    let selection = select_rules(&candidates, input.tool);
+    let selection = match subject {
+        Subject::ToolCall(input) => select_rules(&candidates, input.tool),
+        Subject::Response(_) => select_response_rules(&candidates),
+    };
     let skipped: Vec<String> = selection
         .skipped
         .iter()
@@ -566,7 +643,7 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
         let Some((c, digest)) = &run else {
             return None;
         };
-        match run_canary(*c, input.deadline).await {
+        match run_canary(*c, deadline).await {
             Ok(r) => {
                 // An unwritable cache only means the canary runs again next call.
                 let _ = canary.write(&CanaryEntry {
@@ -585,11 +662,13 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
     };
     let (canary_error, asked) = tokio::join!(
         canary_run,
-        join_all(
-            evaluated
-                .iter()
-                .map(|e| ask_rule(client, engine_error.clone(), e, input))
-        )
+        join_all(evaluated.iter().map(|e| ask_rule(
+            client,
+            engine_error.clone(),
+            e,
+            subject,
+            deadline
+        )))
     );
     if run.is_some() {
         canary_state = match canary_error {

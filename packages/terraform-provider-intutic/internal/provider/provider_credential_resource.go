@@ -280,7 +280,8 @@ func (r *providerCredentialResource) Schema(_ context.Context, _ resource.Schema
 				Required:    true,
 				Sensitive:   true,
 				Description: "The credential's fields, which the API never returns. `anthropic`, `openai`, `gemini`, " +
-					"`mistral`, `openrouter`, `deepseek` and `cohere` take `apiKey`; `azure_openai` takes `endpoint` " +
+					"`mistral`, `openrouter`, `deepseek`, `cohere`, and the decision-model providers `typesafe` and " +
+					"`fastino`, take `apiKey`; `azure_openai` takes `endpoint` " +
 					"(`https://<resource>.openai.azure.com`, `.services.ai.azure.com` or `.cognitiveservices.azure.com`) " +
 					"and `apiKey`; `bedrock` takes `awsRegion` and either `awsAccessKeyId` with `awsSecretAccessKey`, or " +
 					"`apiKey`; `vertex_ai` takes `projectId`, optionally `location`, and `serviceAccountJson` (the key " +

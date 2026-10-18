@@ -362,6 +362,15 @@ impl EgressPolicy {
             }
         }
     }
+
+    /// [`Self::decide`] for the host of an upstream URL the proxy itself
+    /// calls (decision traffic). `None` for a URL with no host, which the
+    /// caller refuses rather than calls.
+    pub fn decide_url(&self, url: &str) -> Option<EgressDecision> {
+        let parsed = reqwest::Url::parse(url).ok()?;
+        let host = parsed.host_str()?;
+        Some(self.decide(host, parsed.port_or_known_default().unwrap_or(443)))
+    }
 }
 
 /// One central egress policy as read from the daemon-written file: the

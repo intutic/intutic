@@ -10,6 +10,8 @@ pub mod credential;
 pub mod credential_crypto;
 /// Decide: rules asked of a self-hosted decision model — grammar, semantics and the engine client
 pub mod decide;
+/// Customer calls to decision models (System One, OpenAI Decisions), governed like LLM calls
+pub mod decision_traffic;
 pub mod dlp;
 pub mod graph;
 pub mod injection;

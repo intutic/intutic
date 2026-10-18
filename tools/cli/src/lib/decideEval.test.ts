@@ -22,7 +22,7 @@ import {
   type LabelledCase,
 } from './decideEval.js'
 
-const refuse = (id: string, command: string): LabelledCase => ({ id, label: 'refuse', tool: 'Bash', toolInput: { command }, cwd: '/r', lastUserTurn: null, family: null })
+const refuse = (id: string, command: string): LabelledCase => ({ id, label: 'refuse', tool: 'Bash', toolInput: { command }, cwd: '/r', lastUserTurn: null, response: null, family: null })
 const cmd = (c: LabelledCase) => (c.toolInput as { command: string }).command
 
 describe('adversarial cases', () => {
@@ -109,5 +109,21 @@ describe('labels', () => {
     expect(cases.map((c) => [c.id, c.label, c.cwd])).toEqual([['a', 'refuse', ''], ['b', 'allow', '']])
     expect(() => parseLabels('{"id":"a","label":"maybe","tool":"Bash"}')).toThrow('labels line 1: label must be refuse or allow')
     expect(() => parseLabels('{"id":"a","label":"allow","tool":"Bash"}\n{"id":"a","label":"allow","tool":"Bash"}')).toThrow('labels line 2 reuses id a')
+  })
+
+  it('reads a response case for an on: response rule, and refuses one without a response', () => {
+    const cases = parseLabels('{"id":"r1","label":"violation","response":"The record is Jane Roe."}\n{"id":"r2","label":"allow","response":""}\n', 'response')
+    expect(cases.map((c) => [c.id, c.label, c.response, c.tool])).toEqual([['r1', 'refuse', 'The record is Jane Roe.', ''], ['r2', 'allow', '', '']])
+    expect(() => parseLabels('{"id":"a","label":"allow","tool":"Bash","toolInput":{}}', 'response')).toThrow('labels line 1 has no response')
+    // A tool-call case never carries a response.
+    expect(parseLabels('{"id":"a","label":"allow","tool":"Bash","response":"x"}')[0]!.response).toBeNull()
+  })
+
+  it('appends planted approvals and injections to a refuse response, with no paraphrase', () => {
+    const [r] = parseLabels('{"id":"r1","label":"refuse","response":"The record is Jane Roe."}', 'response')
+    const adv = adversarialCases([r!])
+    expect(adv.map((c) => c.family)).toEqual([...Array(5).fill('planted_approval'), ...Array(5).fill('instruction_in_arguments')])
+    expect(adv[0]!.response).toBe(`The record is Jane Roe.${PLANTED_APPROVALS[0]}`)
+    expect(adv.every((c) => c.label === 'refuse' && c.tool === '')).toBe(true)
   })
 })

@@ -247,6 +247,7 @@ sidebarGuide.push({
     { text: 'Rego Policies (Open-Core)', link: '/guide/rego-policies' },
     { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
     { text: 'Decide Rules (Open-Core)', link: '/guide/decide' },
+    { text: 'Decision Traffic (Open-Core)', link: '/guide/decision-traffic' },
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
     { text: 'Chaos Engineering for Agents (Open-Core)', link: '/guide/chaos-engineering' },
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },

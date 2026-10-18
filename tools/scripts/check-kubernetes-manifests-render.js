@@ -460,6 +460,43 @@ function localJudgeProblems(docs) {
   return problems
 }
 
+/**
+ * The gateway chart's decide model, rendered for one variant. The proxy's
+ * engine must name the chart's own Service, and the engine's host guard must
+ * list that name: a Service name is neither loopback nor a private address,
+ * so an unlisted one is refused, and every enforcing decide rule then refuses
+ * its calls.
+ */
+function decideModelProblems(docs, variant) {
+  const problems = []
+  const where = `chart intutic-gateway (decideModel.variant=${variant})`
+  const byComponent = (c) => docs.find((d) => d.kind === 'Deployment' && d.metadata.labels['app.kubernetes.io/component'] === c)
+  const deployment = byComponent('decide-model')
+  const container = deployment?.spec.template.spec.containers[0]
+  if (!container) return [`${where} renders no decide-model Deployment`]
+  if (!/@sha256:[0-9a-f]{64}$/.test(container.image)) problems.push(`${where}: the model server's image ${container.image} is not pinned by digest`)
+  const name = deployment.metadata.name
+  if (!docs.some((d) => d.kind === 'Service' && d.metadata.name === name)) problems.push(`${where} renders no Service ${name}`)
+  const env = Object.fromEntries((byComponent('proxy')?.spec.template.spec.containers[0].env ?? []).map((e) => [e.name, e.value]))
+  let host = ''
+  try {
+    host = new URL(env.INTUTIC_DECIDE_ENGINE_URL).hostname
+  } catch {
+    // Reported below.
+  }
+  if (host !== name) problems.push(`${where}: the proxy's INTUTIC_DECIDE_ENGINE_URL (${env.INTUTIC_DECIDE_ENGINE_URL}) is not the ${name} Service`)
+  const listed = (env.INTUTIC_SELF_HOSTED_DECISION_HOSTS ?? '').split(',').map((h) => h.trim())
+  if (!listed.includes(name)) problems.push(`${where}: INTUTIC_SELF_HOSTED_DECISION_HOSTS does not list ${name}, so the engine refuses it`)
+  if (env.INTUTIC_DECIDE_MODEL !== 'decide-test' || !env.INTUTIC_DECIDE_MODEL_DIGEST) {
+    problems.push(`${where}: the proxy is not told the decide model and its digest`)
+  }
+  if (variant === 'cpu' && !String(container.args?.[0] ?? '').includes('sha256sum -c')) {
+    problems.push(`${where}: llama.cpp starts without checking the weights against the digest`)
+  }
+  if (variant === 'gpu' && !container.resources?.limits?.['nvidia.com/gpu']) problems.push(`${where}: vLLM asks for no GPU`)
+  return problems
+}
+
 // ── Helm charts (Self-host) ──────────────────────────────────────────────────
 // tools/helm/intutic is how a Self-host customer installs on Kubernetes, and
 // nothing deploys it here, so a broken template would first fail on their
@@ -483,11 +520,31 @@ if (existsSync(HELM_DIR)) {
     '--set', 'litellm.judgeModel=intutic-openweight-judge',
     '--set-file', `litellm.config=${join(ROOT, 'infra', 'compose', 'litellm_config.yaml')}`,
   ]
+  // And with its decide model, in each variant.
+  const decideModel = (variant, digest) => [
+    '--set', 'decideModel.enabled=true', '--set', `decideModel.variant=${variant}`,
+    '--set', 'decideModel.model=decide-test', '--set', `decideModel.digest=${digest}`,
+    '--set', 'decideModel.weights.existingClaim=decide-weights', '--set', 'decideModel.weights.path=weights',
+  ]
+  const decideCpu = decideModel('cpu', `sha256:${'0'.repeat(64)}`)
+  const decideGpu = decideModel('gpu', 'hf:example/model@main')
   const charts = [
     ['intutic', ['--set', 'hostname=intutic.example.internal', '--set', 'ingress.tls.secretName=tls', '--set', 'bootstrap.secretName=owner']],
     ['intutic-gateway', []],
     ['intutic-gateway', localJudge],
+    ['intutic-gateway', decideCpu],
+    ['intutic-gateway', decideGpu],
   ]
+  if (existsSync(join(HELM_DIR, 'intutic-gateway'))) {
+    // Enabled with no model, the chart must refuse to render rather than
+    // deploy a model server the proxy cannot name.
+    try {
+      execFileSync('helm', ['template', 't', join(HELM_DIR, 'intutic-gateway'), '--set', 'decideModel.enabled=true'], { stdio: 'pipe' })
+      failures.push('chart intutic-gateway renders decideModel.enabled=true with no model')
+    } catch {
+      // Refused, as it should be.
+    }
+  }
   for (const [chart, args] of charts) {
     const dir = join(HELM_DIR, chart)
     if (!existsSync(dir)) {
@@ -517,6 +574,8 @@ if (existsSync(HELM_DIR)) {
     failures.push(...upstreamProblems(`chart ${chart}`, docs))
     failures.push(...placeholderSecretProblems(`chart ${chart}`, docs))
     if (args === localJudge) failures.push(...localJudgeProblems(docs))
+    if (args === decideCpu) failures.push(...decideModelProblems(docs, 'cpu'))
+    if (args === decideGpu) failures.push(...decideModelProblems(docs, 'gpu'))
     if (chart !== 'intutic') continue
     const deployments = new Map(docs.filter((d) => d.kind === 'Deployment').map((d) => [d.metadata.labels['app.kubernetes.io/component'], d]))
     for (const c of ['control-plane', 'proxy', 'dashboard', 'docs', 'valkey']) {

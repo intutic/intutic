@@ -146,8 +146,8 @@ function unreadableDecideLines(entries: readonly SyncSopEntry[]): string[] {
 
 /**
  * One warning per readable `decide:` rule 3.0 does not carry out as written
- * (`decideRuleNotes`: an `on: response` rule, a reserved `context`), naming
- * its SOP file and line number.
+ * (`decideRuleNotes`: a reserved `context`), naming its SOP file and line
+ * number.
  */
 function notedDecideRules(entries: readonly SyncSopEntry[]): string[] {
   const out: string[] = []

@@ -17,6 +17,8 @@
   "piiDetectors": { "pii.email": "redact" },
   "upstreamRetry": { "enabled": true, "maxAttempts": 3, "onStatus": [503], "fallbacks": { "gpt-4o": [{ "provider": "anthropic" }] } },
   "storeToolArguments": true,
+  "decideLogUploadEnabled": true,
+  "decideLogUploadArgs": false,
   "budget": { "dailyUsd": 50, "monthlyUsd": 1000 },
   "interventionMode": "OPAQUE",
   "llmJudgeEnabled": false

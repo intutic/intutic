@@ -299,6 +299,9 @@ export const ResolvedWorkspaceSettings = z
     configBodyUpload: z.boolean().optional(),
     securityProbeSampleRate: z.number().optional(),
     governanceCardLabelingEnabled: z.boolean(),
+    decideLogUploadEnabled: z.boolean().optional(),
+    decideLogUploadArgs: z.boolean().optional(),
+    decideAutoPromote: z.boolean().optional(),
     appliedSecurityPosture: z.string().optional().describe('The security posture preset last applied; removed by a manual edit to a knob it governs.'),
     appliedCostPosture: z.string().optional().describe('The cost posture preset last applied; removed by a manual edit to a knob it governs.'),
   })
@@ -397,6 +400,8 @@ export const KeyContextResponse = z.object({
   piiDetectors: PiiDetectorActions.nullable().describe('Null when unreadable; the proxy applies its policy fail mode.'),
   upstreamRetry: UpstreamRetry.nullable(),
   storeToolArguments: z.boolean().nullable().describe('Only `true` keeps tool-call argument values in replay contexts.'),
+  decideLogUploadEnabled: z.boolean().nullable().describe("Only `true` sends the gateway's decide log lines to `POST /api/v1/decide/events`."),
+  decideLogUploadArgs: z.boolean().nullable().describe('Only `true` sends the arguments excerpt with them.'),
   budget: z.object({ dailyUsd: z.number(), monthlyUsd: z.number() }).nullable().describe('Null when the caps could not be read: the proxy refuses as BUDGET_UNVERIFIABLE.'),
   interventionMode: z.enum(['TRANSPARENT', 'OPAQUE', 'SILENT_LOG']).nullable(),
   llmJudgeEnabled: z.boolean().nullable(),

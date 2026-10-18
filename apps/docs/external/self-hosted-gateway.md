@@ -26,7 +26,8 @@ proxy process is run. A config change applies live on every target (see
 
 A purpose-built Compose file bundles the proxy, a local Valkey instance, and (optionally) a
 LiteLLM container used by the opt-in [local judge](#4-what-does-not-run-locally-read-this-before-you-deploy)
-— see §4 for exactly what that buys you and what it still doesn't. This is distinct from the full self-hosted
+— see §4 for exactly what that buys you and what it still doesn't — and a
+[decide model](#decide-model) server. This is distinct from the full self-hosted
 enterprise stack (`docker-compose.enterprise.yml`), which additionally runs its own
 control-plane, Postgres, and dashboard — a self-hosted *gateway* keeps the control plane on
 Intutic's Cloud and self-hosts only the data-plane proxy.
@@ -46,17 +47,93 @@ docker compose -f docker-compose.gateway.yml up -d
 
 The images at `ghcr.io/intutic` are private, hence the login. A host that cannot reach
 `ghcr.io` loads them from the bundle instead (`docker load -i ../images.tar`) and copies the
-`LITELLM_IMAGE` line from `../images.env` into `.env` (LiteLLM's image is on `ghcr.io` too); one
-that also cannot reach Docker Hub copies the `VALKEY_IMAGE` line as well.
+`LITELLM_IMAGE` and `DECIDE_MODEL_IMAGE` lines from `../images.env` into `.env` (both images are
+on `ghcr.io` too); one that also cannot reach Docker Hub copies the `VALKEY_IMAGE` line as well.
 
 Agents reach the gateway on the host's port `GATEWAY_PORT` (default `8080`), at `/v1`: for
 example `http://gateway.example.internal:8080/v1`. Put your own TLS-terminating proxy or load
 balancer in front of it for traffic that leaves the host.
 
+#### Decide model {#decide-model}
+
+[Decide rules](/guide/decide) ask a self-hosted model. The Compose file can run that model
+server too, in one of two profiles: run one, never both. Either answers as `decide-model` on
+port 8000 of the gateway's internal network, which has no route out, and the Compose file
+points the proxy's decide engine at it: `INTUTIC_DECIDE_ENGINE_URL`, with the service name
+listed in `INTUTIC_SELF_HOSTED_DECISION_HOSTS` so the engine's
+[self-hosted guard](/guide/decide#self-hosted-only) allows it. These are the variables a gate
+reads. No weights ship in the bundle: put them in `DECIDE_MODEL_DIR` (default `./models`, next
+to the Compose file) first. With `INTUTIC_DECIDE_MODEL` empty the engine is not configured.
+
+| Profile | Server | Model |
+|---|---|---|
+| `decide-model-gpu` | vLLM, on one NVIDIA GPU with 24 GB (an L4) | Qwen3.6-27B, AWQ 4-bit: the server model that passed Intutic's evaluation |
+| `decide-model` | llama.cpp, on CPU | One GGUF file you choose. No CPU-sized model passed the evaluation |
+
+On a GPU host, with the NVIDIA Container Toolkit installed, download the weights at the
+revision Intutic tested:
+
+```bash
+hf download cyankiwi/Qwen3.6-27B-AWQ-INT4 --revision e5cc0400fb2403c437c2c40a7c52fb5ae93fda18 \
+  --local-dir models/Qwen3.6-27B-AWQ-INT4
+```
+
+set these in `.env`, and start the profile with the rest of the gateway:
+
+```bash
+INTUTIC_DECIDE_MODEL=qwen3.6-27b-awq
+INTUTIC_DECIDE_MODEL_DIGEST=hf:cyankiwi/Qwen3.6-27B-AWQ-INT4@e5cc0400fb2403c437c2c40a7c52fb5ae93fda18
+```
+
+```bash
+docker compose -f docker-compose.gateway.yml --profile decide-model-gpu up -d
+```
+
+vLLM's image is about 10 GB and is not in the bundle. It is pinned by digest
+(`DECIDE_MODEL_GPU_IMAGE`); a host without Docker Hub access needs a mirror of it.
+`DECIDE_MODEL_GPU_WEIGHTS` names another weights directory, and
+`DECIDE_MODEL_GPU_MEMORY_UTILIZATION` (default `0.94`) the share of GPU memory vLLM takes.
+
+On CPU, copy your GGUF file into `models/`, then set:
+
+```bash
+DECIDE_MODEL_FILE=<file>.gguf
+INTUTIC_DECIDE_MODEL=<a name for it>
+INTUTIC_DECIDE_MODEL_DIGEST=sha256:<the file's SHA-256, from sha256sum models/<file>.gguf>
+INTUTIC_DECIDE_TIMEOUT_MS=30000
+```
+
+```bash
+docker compose -f docker-compose.gateway.yml --profile decide-model up -d
+```
+
+The server checks the file against `INTUTIC_DECIDE_MODEL_DIGEST` before it starts and refuses one
+that does not match, so the digest decide pins are keyed by is the weights it serves. Its image,
+llama.cpp, is in the bundle. A CPU answers far more slowly than a GPU, hence the longer
+per-call timeout. The release's air-gap smoke test runs this profile with Qwen3.5-4B (Q4_K_M)
+to prove the wiring: that model reads the engine canary's yes/no questions the right way round,
+but its choice answer falls short of the canary's bar, so decide rules on it are unavailable,
+and an enforcing one refuses its calls.
+
+Whichever model you run, a rule enforces on it only once `intutic decide eval` passes for that
+rule on your labels. Neither profile can be reached from outside the gateway host's internal
+network. To run `intutic decide eval` or `intutic doctor` against it from the host, publish its
+port in a `docker-compose.override.yml` beside the Compose file, which gives it a route out
+while it is there:
+
+```yaml
+services:
+  decide-model:            # or decide-model-gpu
+    networks: [gateway-internal, egress]
+    ports: ["127.0.0.1:8000:8000"]
+```
+
+and point the CLI at `http://127.0.0.1:8000` with the same model name and digest.
+
 ### Kubernetes
 
 The `intutic-gateway` chart runs the proxy, its own Valkey and, optionally, LiteLLM for the
-local judge. It is separate from the `intutic` chart, which runs the whole product.
+local judge and a [decide model](#decide-model) server. It is separate from the `intutic` chart, which runs the whole product.
 
 The chart is at `oci://ghcr.io/intutic/charts/intutic-gateway` and in each release bundle's
 `helm/` directory. `<version>` is the release Intutic sent you; each release publishes the
@@ -117,9 +194,24 @@ Service. The install's notes print the address.
 | `litellm.image.repository`, `litellm.image.digest`, `litellm.image.tag`, `litellm.image.pullPolicy` | `ghcr.io/berriai/litellm`, pinned by digest, `main-latest`, `IfNotPresent` | The digest wins over the tag; clear it only to track upstream on purpose |
 | `litellm.resources` | see `helm show values` | LiteLLM's requests and limits; it is killed at start with under 512Mi of memory |
 | `serviceAccount.create`, `serviceAccount.name`, `serviceAccount.annotations` | `true`, named after the release, none | The pods' ServiceAccount. With `create: false`, name one that exists |
+| `decideModel.enabled` | `false` | Run a [decide model](#decide-model) server, `<release>-intutic-gateway-decide-model:8000`, and point the proxy's decide engine at it |
+| `decideModel.variant` | `cpu` | `cpu` (llama.cpp, one GGUF file) or `gpu` (vLLM, one NVIDIA GPU) |
+| `decideModel.model` | none, required | The name the proxy asks for (`INTUTIC_DECIDE_MODEL`), e.g. `qwen3.6-27b-awq` |
+| `decideModel.digest` | none, required | `INTUTIC_DECIDE_MODEL_DIGEST`. `cpu`: `sha256:<the file's SHA-256>`, checked before the server starts. `gpu`: what pins your download, e.g. `hf:cyankiwi/Qwen3.6-27B-AWQ-INT4@<revision>` |
+| `decideModel.weights.existingClaim`, `decideModel.weights.path` | none, required | A PersistentVolumeClaim holding the weights, mounted read-only, and the GGUF file (`cpu`) or weights directory (`gpu`) in it |
+| `decideModel.timeoutMs` | the engine's 5000 | The proxy's per-call timeout in milliseconds; a CPU model needs more |
+| `decideModel.cpu.image.repository`, `decideModel.cpu.image.digest`, `decideModel.cpu.image.tag`, `decideModel.cpu.image.pullPolicy`, `decideModel.gpu.image.repository`, `decideModel.gpu.image.digest`, `decideModel.gpu.image.tag`, `decideModel.gpu.image.pullPolicy` | llama.cpp `server-b11459`, vLLM `v0.27.1`, each pinned by digest; `IfNotPresent` | The digest wins over the tag |
+| `decideModel.cpu.resources`, `decideModel.gpu.resources`, `decideModel.gpu.gpuMemoryUtilization` | see `helm show values`; `0.94` | The GPU variant asks for one `nvidia.com/gpu` |
+| `decideModel.nodeSelector`, `decideModel.tolerations`, `decideModel.affinity` | none | Where the model server runs, e.g. a GPU node pool |
 
 `helm show values oci://ghcr.io/intutic/charts/intutic-gateway --version <version>` prints
 them all with their comments.
+
+The decide model's Service is reachable inside the cluster. A gate or `intutic decide eval` run
+in the cluster can use it as its engine: set `INTUTIC_DECIDE_ENGINE_URL` to
+`http://<service>.<namespace>.svc.cluster.local:8000`, which the engine's guard allows as a
+`.local` name. A short Service name must be listed in `INTUTIC_SELF_HOSTED_DECISION_HOSTS`, as the
+chart does for the proxy.
 
 ### Bare metal
 

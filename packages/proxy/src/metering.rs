@@ -110,6 +110,29 @@ pub fn check_model_allowed(
     Ok(())
 }
 
+/// The cost of one decision call (`crate::decision_traffic`).
+///
+/// A decision call is metered like an LLM call: it publishes one trace, which
+/// is one Governed Request, and its cost accrues against the same budgets.
+/// LiteLLM's price map, which the bundle is built from, keys decision models
+/// by provider (`typesafe/jev-1.14.0`), so that key is tried first, then the
+/// model's own name with the usual family and conservative fallbacks.
+pub fn decision_call_cost(
+    provider: &str,
+    model: &str,
+    input_tokens: u32,
+    output_tokens: u32,
+) -> f64 {
+    let price = crate::pricing::exact_price(&format!("{provider}/{model}"));
+    match price {
+        Some(p) => {
+            (input_tokens as f64 / 1000.0) * p.input_cost_per_1k
+                + (output_tokens as f64 / 1000.0) * p.output_cost_per_1k
+        }
+        None => crate::pricing::estimate_cost(model, input_tokens, output_tokens),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum MeteringError {
     #[error("Virtual key not found")]
@@ -230,5 +253,22 @@ mod check_model_allowed_tests {
         // And the disjoint case refuses everything rather than falling back
         // to unrestricted — an empty intersection is not an absent list.
         assert!(check_model_allowed("claude-sonnet-4-5", Some(&ws), &key).is_err());
+    }
+}
+
+#[cfg(test)]
+mod decision_cost_tests {
+    use super::decision_call_cost;
+
+    #[test]
+    fn a_decision_call_is_priced_by_its_provider_key_then_its_model() {
+        // `typesafe/jev-1.14.0`: $0.042 per million input tokens, no output rate.
+        let cost = decision_call_cost("typesafe", "jev-1.14.0", 1_000_000, 50);
+        assert!((cost - 0.042).abs() < 1e-9, "cost={cost}");
+        // OpenAI's Decisions model is listed under its own name.
+        let cost = decision_call_cost("openai", "gpt-6-luna", 1000, 0);
+        assert!((cost - 0.0001).abs() < 1e-12, "cost={cost}");
+        // A model the bundle does not list is never free.
+        assert!(decision_call_cost("other", "kev-4b", 1000, 0) > 0.0);
     }
 }

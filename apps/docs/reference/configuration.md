@@ -39,6 +39,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `MISTRAL_UPSTREAM_URL` | `https://api.mistral.ai` | Where requests for Mistral models go |
 | `OPENROUTER_UPSTREAM_URL` | `https://openrouter.ai/api` | Where requests for OpenRouter models go |
 | `DEEPSEEK_UPSTREAM_URL` | `https://api.deepseek.com` | Where requests for DeepSeek models go |
+| `TYPESAFE_API_KEY`, `FASTINO_API_KEY` | unset | The decision-model provider key the proxy uses for a [decision call](/guide/decision-traffic) made with an Intutic key (`vk_…`) when the workspace has not provisioned its own TypeSafe or Fastino key. Same rules as the provider keys below |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY` | unset | The provider key the proxy uses when a caller authenticates with an Intutic key (`vk_…`) and the workspace has not provisioned its own key for that provider. A caller that sends its own provider key uses that key, and the proxy sends it to that provider only, never to the control plane. A gateway with `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY` set refuses instead of falling back |
 | `ENCRYPTION_KEY` | unset | Opens the workspace provider keys a control plane stores encrypted in Valkey: the same value the control plane has. Without it, the proxy never sends an encrypted value upstream: it treats the key as not provisioned and logs why. A key the proxy captures from a request is stored encrypted when this is set. With Valkey, the proxy announces the ids of the keys it holds (none, without this), and the control plane encrypts stored keys only once every running proxy holds its key |
 | `ENCRYPTION_KEY_PREVIOUS` | unset | While `ENCRYPTION_KEY` is being rotated: the key it replaces, or several separated by commas. Values sealed under them still open |
@@ -109,7 +110,25 @@ Settings for a proxy deployed as a shared or self-hosted gateway.<!-- ENTERPRISE
 | `LITELLM_LOCAL_JUDGE_MODEL` | none (required) | The judge model's name on that server |
 | `LITELLM_LOCAL_TYPED_JUDGE_MODEL` | `LITELLM_LOCAL_JUDGE_MODEL` | A separate model for the two typed questions |
 | `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI` | unset | The band, in log-odds. With both set, the judge is the decide rule `local-judge` with the band `{no_below: σ(LO), yes_at: σ(HI)}`: below `LO` is `COMPLIANT`, at or above `HI` a `VIOLATION`, between them `AMBIGUOUS`. `HI` must be above 0. Without a band the free-text verdict decides (deprecated) |
-| `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` | `32768` | The most bytes the SOP text and a response may hold together for the `local-judge` rule (an `on: response` state), 1 to 1048576. A larger one is `AMBIGUOUS`, never truncated. A tool call's state keeps its own 16,384-byte limit |
+
+The local judge's `local-judge` rule holds its state to `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES`, as the gateway's `on: response` rules do ([Decide rules](#decide-rules)).
+
+#### Decide rules
+
+The engine the proxy asks its SOPs' [decide rules](/guide/decide#at-the-gateway) on, read once when the proxy starts: `~/.intutic/decide/engine.json` in the proxy's home directory (which `intutic decide configure` writes), overridden by these. With no model the engine is not configured, and an enforcing decide rule refuses with `GOVERNANCE_UNAVAILABLE`. Pins are read from `~/.intutic/decide/evals/` in the same home directory, and `~/.intutic/decide/disabled` runs every rule as shadow.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_DECIDE_ENGINE_URL` | `url` in `engine.json`, else `http://127.0.0.1:11434` | The self-hosted engine. A hosted decision API, or a host that is not loopback, private or listed below, is refused, and the engine is unavailable |
+| `INTUTIC_DECIDE_ADAPTER` | `adapter` in `engine.json`, else `logprobs` | `logprobs`, `systemone` or `decisions` |
+| `INTUTIC_DECIDE_MODEL` | `model` in `engine.json`; none otherwise | The model the engine serves |
+| `INTUTIC_DECIDE_TIMEOUT_MS` | `timeoutMs` in `engine.json`, else `5000` | Per-call timeout |
+| `INTUTIC_DECIDE_PARALLEL` | `parallel` in `engine.json`, else `1` for Ollama and `8` otherwise | Most engine requests in flight at once |
+| `INTUTIC_DECIDE_API_KEY` | unset | The engine's key, if it needs one. Never logged |
+| `INTUTIC_DECIDE_MODEL_DIGEST` | unset | The weights digest, for a server that cannot report one. Pins are keyed by it |
+| `INTUTIC_SELF_HOSTED_DECISION_HOSTS` | unset | Comma list of host names (or `.suffix`es) the engine may run on besides loopback and private addresses |
+| `INTUTIC_DECIDE_BUDGET_MS` | `7300` | How long one tool call's decide rules, or one response's, may take, in milliseconds. A rule its engine cannot answer within it is unavailable, which refuses an enforcing rule |
+| `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` | `32768` | The most bytes an `on: response` rule's state (the SOP text and the response) may hold, 1 to 1048576. A larger one is never truncated: the rule is unknown, which is `AMBIGUOUS`. A tool call's state keeps its own 16,384-byte limit. A value out of range leaves the engine unavailable |
 
 #### Connected services
 
@@ -279,6 +298,10 @@ These configure the control plane in hosted and Self-host deployments.
 | `LITELLM_ADMIN_BASE_URL` | ❌ | `http://localhost:4000` | The LiteLLM endpoint when `LITELLM_PROXY_URL` is unset |
 | `INTUTIC_SIGNUP_ALLOWLIST` | ❌ | — | Makes self sign-up invite-only: comma-separated `domain` (that exact domain, not its subdomains) or `name@domain` entries, case-insensitive. Set, sign-up (email, org, and a first GitHub or Google sign-in) refuses any other address with 403 `SIGNUP_CLOSED`, and `GET /api/v1/deployment` reports `signupOpen: false`; set but empty admits no one. Invites, SCIM, SSO and sign-in are unaffected. Unset, sign-up is open wherever `INTUTIC_SELF_SERVE_SIGNUP` is `true`. A Self-host deployment has no sign-up either way. Entries match the typed address, which signup does not verify |
 | `LITELLM_PLATFORM_KEY` | ❌ | — | Scoped LiteLLM virtual key for judge/probe/generation calls — NOT LiteLLM's own admin secret, which this service never holds. See the key-rotation runbook for how it's minted. |
+| `INTUTIC_DECIDE` | ❌ | `off` | The server switch for decide rules. `off`: `GET /api/v1/policy/resolve` serves none, so connected gates evaluate none. `shadow`: every served rule is stamped shadow, and connected gates stop enforcing decide rules on their next snapshot poll (30 seconds by default); use it to roll back. `on`: rules are served as written, and a rule still enforces only with `rollout: enforce` and an active calibration. Any other value reads as `shadow`. Restart the control plane after changing it |
+| `INTUTIC_DECIDE_WORKSPACES` | ❌ | — | Comma-separated workspace ids `INTUTIC_DECIDE` applies to; every other workspace is `off`. Unset applies it to every workspace |
+| `DECIDE_EVENTS_RETENTION_DAYS` | ❌ | `90` | Days uploaded decide decisions are kept. The table is partitioned by UTC day, and the daily retention sweep drops each day once it is older. Argument excerpts are cleared after `JUDGE_REVIEW_EXCERPT_RETENTION_DAYS` (30) |
+| `DECIDE_EVENTS_MAX_ROWS_PER_WORKSPACE_DAY` | ❌ | `50000` | The most uploaded decide decisions stored for one workspace in one UTC day. Past it, `POST /api/v1/decide/events` refuses the rest of that day's rows, counts them in its answer (`overBudget`) and logs `decide_events_budget_exceeded` |
 
 The control plane refuses to start when `JWT_SECRET` or `ENCRYPTION_KEY` is
 missing, shorter than 32 characters or a template value (`changeme`, `secret`,
@@ -458,6 +481,19 @@ intutic_settings:
 | :--- | :---: | :---: | :--- |
 | `mode` | string | `off` | `off`, `monitor` or `enforce`; any other value stops the proxy at startup. `INTUTIC_EGRESS_MODE` takes precedence. See [Egress control](#egress-control) |
 | `allow` | string[] | none | Hosts, `.suffixes` and IP ranges to allow; `INTUTIC_EGRESS_ALLOW` adds to it |
+
+### Decision traffic (`intutic_settings.decision_traffic`) {#decision-traffic}
+
+Customer calls to decision models on `/v1/systemone` and `/v1/decisions`. See [Decision Traffic](/guide/decision-traffic).
+
+| Setting | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `mode` | string | `enforce` | `enforce` refuses a call to an unpinned model (`403 policy_denied`); `shadow` forwards it and logs `would_refuse_unpinned` |
+| `allow_unpinned` | boolean | `false` | Admit a model with no pinned version, such as `jev-latest` or `jev-preview` |
+| `floors` | map | none | The lowest acceptable top probability per question name, `*` for every question, each between 0 and 1 (another value stops the proxy at startup). A question answered below its floor is named in `x-intutic-decision-abstain` |
+| `consequential_models` | string[] | none | Models whose every call is answered with `x-intutic-decision-requires-human: 1` |
+| `systemone_upstream` | URL | `UPSTREAM_URL`, else `https://api.typesafe.ai` | Where `/v1/systemone` calls go |
+| `decisions_upstream` | URL | `UPSTREAM_URL`, else `https://api.openai.com` | Where `/v1/decisions` calls go |
 
 ### Gateway (`intutic_settings.gateway`)
 

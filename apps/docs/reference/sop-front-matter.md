@@ -27,7 +27,7 @@ construction — the model may ignore it.
 | `forbid_with:` | `taint(), token` | Refuses the two together in one request. |
 | `sql_guard:` | `refuse` or `warn`, with `sql_allow_dsns:` | Refuses (or logs) destructive SQL in a shell call aimed at a database not on the allowlist. See [Destructive SQL](#destructive-sql). |
 | `hook_rule:` | one JSON object per line | Refuses a tool call by tool name and argument literals. See [Hook rules](#hook-rules). |
-| `decide:` | one JSON object per line | Narrow questions a self-hosted model answers about a tool call; the hook gates and gate SDKs refuse, allow or ask a person from the answers. The proxy reads and validates the line and evaluates nothing. See [Decide rules](#decide-rules). |
+| `decide:` | one JSON object per line | Narrow questions a self-hosted model answers about a tool call or a response; the hook gates and gate SDKs refuse, allow or ask a person from the answers, and the gateway evaluates both kinds. See [Decide rules](#decide-rules). |
 
 ::: warning Two shapes that look right and match nothing
 
@@ -328,7 +328,7 @@ decide: {"id":"prod-data-export","on":"tool_call","tools":["Bash"],"questions":{
 | :--- | :--- | :--- |
 | `id` | yes | A lower-case letter, then up to 47 of `a-z`, `0-9`, `_` or `-`. Unique within the SOP: a second line with the same id does not read |
 | `title` | no | 1 to 80 characters, no tab or newline. Default: the SOP's title (its first `# ` heading, else its file name) |
-| `on` | yes | `tool_call`, or `response`. A `response` rule is not enforced in 3.0: it is read and validated, and no gate or gateway evaluates it |
+| `on` | yes | `tool_call`, or `response`. A `response` rule is enforced at the gateway, which judges each complete response by it ([Decide rules at the gateway](/guide/decide#at-the-gateway)); the gates see tool calls only |
 | `tools` | with `on: tool_call` only | 1 to 8 tool names, each a letter then up to 63 of `A-Z`, `a-z`, `0-9`, `_`, `.`, `:` or `-`. Matched exactly, case included, against the name the harness reports. No wildcards |
 | `questions` | yes | 1 to 8 questions, by name: a lower-case letter, then up to 31 of `a-z`, `0-9` or `_`, and not `and`, `or`, `not` or `in` |
 | `questions.<q>.type` | yes | `yes_no` or `choice` |
@@ -337,7 +337,7 @@ decide: {"id":"prod-data-export","on":"tool_call","tools":["Bash"],"questions":{
 | `questions.<q>.band` | no | This question's band, as `band`. Default: the rule's |
 | `when` | yes | The expression below, at most 256 characters, using every question at least once |
 | `band` | no | `{"yes_at": …, "no_below": …}`: `yes_at` above 0.5 and below 1, `no_below` above 0 and below `yes_at`. Default `{"yes_at": 0.85, "no_below": 0.15}` |
-| `escalate` | no | What an unknown `when` does: `ask` (default), `review` (treated as `ask`) or `refuse` |
+| `escalate` | no | What an unknown `when` does: `ask` (default), `review` (asks as `ask` does; a workspace that uploads its decide log also queues the call for a person's ruling) or `refuse` |
 | `rollout` | no | `shadow` (default) or `enforce`. The author's ceiling: the rule enforces only once a pre-registered `intutic decide eval` has pinned a model for it |
 | `context` | no, `on: tool_call` only | `["last_user_turn"]` or `[]`. Reserved in 3.0: no gate supplies the last user turn, so the rule is asked without it |
 

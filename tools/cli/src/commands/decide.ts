@@ -34,6 +34,7 @@ import { performance } from 'node:perf_hooks'
 import { dirname, join, resolve } from 'node:path'
 import {
   appendDecideLogLine,
+  buildDecideResponseState,
   buildDecideToolCallState,
   checkSelfHostedDecisionHost,
   createDecideCanaryFileStore,
@@ -346,13 +347,21 @@ function questionCalls(rule: DecideRule) {
   })
 }
 
+/** What a case asks about: a call, or a response's text for an `on: response` rule. */
+type Asked = { tool: string; toolInput: unknown; cwd: string; response?: string | null }
+
 /**
- * The state a gate sends for this call. `context: ["last_user_turn"]` is
- * reserved in 3.0: no gate supplies the user's last turn, so a case's
- * `lastUserTurn` is never sent, and `test` and `eval` measure what a gate
- * asks.
+ * The state a gate sends for this call, or the state the gateway sends for
+ * this response: for an `on: response` rule, the SOP's text and the
+ * response, held to the engine's response limit (`maxResponseStateBytes`,
+ * 32,768 bytes by default). `context: ["last_user_turn"]` is reserved in
+ * 3.0: no gate supplies the user's last turn, so a case's `lastUserTurn` is
+ * never sent, and `test` and `eval` measure what a gate asks.
  */
-function stateFor(rule: DecideRule, sopTitle: string, ruleText: string, c: { tool: string; toolInput: unknown; cwd: string }): string {
+function stateFor(rule: DecideRule, sopTitle: string, ruleText: string, c: Asked, maxResponseBytes?: number): string {
+  if (rule.on === 'response') {
+    return buildDecideResponseState({ ruleText, content: c.response ?? '', ...(maxResponseBytes !== undefined ? { maxBytes: maxResponseBytes } : {}) })
+  }
   return buildDecideToolCallState({
     ruleId: rule.id,
     sopTitle,
@@ -384,14 +393,14 @@ async function askCases(
   ruleText: string,
   cases: readonly LabelledCase[],
   timeoutMs: number,
-  opts: { logState?: boolean; ref: string; ruleHash: string },
+  opts: { logState?: boolean; ref: string; ruleHash: string; maxResponseBytes?: number },
 ): Promise<AnsweredCase[]> {
   const qs = questionCalls(rule)
   const out: AnsweredCase[] = []
   for (const c of cases) {
     let answers: Record<string, DecideAnswer> | null
     try {
-      const state = stateFor(rule, sopTitle, ruleText, c)
+      const state = stateFor(rule, sopTitle, ruleText, c, opts.maxResponseBytes)
       if (opts.logState) logState(opts.ref, opts.ruleHash, state)
       answers = (await engine.ask(state, qs, Date.now() + timeoutMs * (qs.length * 3 + 1))).answers
     } catch {
@@ -413,21 +422,26 @@ export async function runDecideTest(spec: string, opts: { state: string; json?: 
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err))
   }
-  let c: { tool: string; toolInput: unknown; cwd: string; lastUserTurn: string | null }
+  const rule = hit.decl.rule
+  let c: Asked & { lastUserTurn: string | null }
   try {
     const v = JSON.parse(node_fs.readFileSync(resolve(opts.state), 'utf8')) as Record<string, unknown>
-    if (typeof v.tool !== 'string') throw new Error('it has no "tool"')
-    c = { tool: v.tool, toolInput: v.toolInput ?? {}, cwd: typeof v.cwd === 'string' ? v.cwd : process.cwd(), lastUserTurn: typeof v.lastUserTurn === 'string' ? v.lastUserTurn : null }
+    if (rule.on === 'response') {
+      if (typeof v.response !== 'string') throw new Error('it has no "response": an on: response rule is asked about a response\'s text')
+      c = { tool: '', toolInput: {}, cwd: '', lastUserTurn: null, response: v.response }
+    } else {
+      if (typeof v.tool !== 'string') throw new Error('it has no "tool"')
+      c = { tool: v.tool, toolInput: v.toolInput ?? {}, cwd: typeof v.cwd === 'string' ? v.cwd : process.cwd(), lastUserTurn: typeof v.lastUserTurn === 'string' ? v.lastUserTurn : null }
+    }
   } catch (err) {
     return fail(`Could not read the state file ${opts.state}: ${err instanceof Error ? err.message : String(err)}`)
   }
-  const rule = hit.decl.rule
   const loaded = loadEngine()
   const engine = engineOrFail(loaded)
   if (!engine) return
   let state: string
   try {
-    state = stateFor(rule, hit.sopTitle, hit.ruleText, c)
+    state = stateFor(rule, hit.sopTitle, hit.ruleText, c, loaded.cfg?.maxResponseStateBytes)
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err))
   }
@@ -491,6 +505,111 @@ interface Preregistration {
   passMarks: typeof PASS_MARKS
   adversarial: true
   registeredAt: string
+  /**
+   * The control-plane calibration this run is the companion of
+   * (`--calibration`): its band and combiner as the control plane serves
+   * them. The run is scored under them.
+   */
+  calibration?: ServedCalibration
+  /** The eval run the control plane registered for this pre-registration, on a logged-in machine. */
+  serverEvalRunId?: string
+}
+
+/** A calibration as `GET /api/v1/decide/calibrations` serves it: the fields a companion run pre-registers. */
+interface ServedCalibration {
+  calibrationId: string
+  band: DecideBand
+  /** As served, so the pre-registration names exactly this combiner; null for a band-only calibration. */
+  combiner: { bias: number; weights: Record<string, number> } | null
+}
+
+/** How long one request to the control plane may take. */
+const CONTROL_PLANE_TIMEOUT_MS = 10_000
+
+interface ControlPlane {
+  url: string
+  apiKey: string
+}
+
+/** The control plane this machine is logged in to, or null when it is not. */
+async function controlPlaneLogin(): Promise<ControlPlane | null> {
+  const { loadCredentials } = await import('../config/store.js')
+  const creds = await loadCredentials()
+  if (!creds || !creds.controlPlaneUrl || !creds.apiKey) return null
+  let end = creds.controlPlaneUrl.length
+  while (end > 0 && creds.controlPlaneUrl.charCodeAt(end - 1) === 0x2f) end--
+  return { url: creds.controlPlaneUrl.slice(0, end), apiKey: creds.apiKey }
+}
+
+/** One JSON request to the control plane. Throws when it gets no answer; a non-2xx answer is returned. */
+async function controlPlaneRequest(cp: ControlPlane, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; body: Record<string, unknown> | null }> {
+  const res = await fetch(`${cp.url}${path}`, {
+    method,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${cp.apiKey}` },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(CONTROL_PLANE_TIMEOUT_MS),
+  })
+  const { unwrapToonEnvelope } = await import('../lib/api.js')
+  let parsed: unknown
+  try {
+    parsed = unwrapToonEnvelope(await res.json())
+  } catch {
+    parsed = null
+  }
+  return { status: res.status, body: typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null }
+}
+
+function errorText(r: { status: number; body: Record<string, unknown> | null }): string {
+  return typeof r.body?.error === 'string' ? `${r.status}: ${r.body.error}` : `status ${r.status}`
+}
+
+/**
+ * The candidate calibration `calibrationId` of this rule, fitted on
+ * `modelDigest`, as the control plane serves it. Throws a message for the
+ * user when there is none.
+ */
+async function fetchCalibration(cp: ControlPlane, ruleHash: string, calibrationId: string, modelDigest: string): Promise<ServedCalibration> {
+  const r = await controlPlaneRequest(cp, 'GET', `/api/v1/decide/calibrations?ruleHash=${ruleHash}&limit=500`)
+  if (r.status !== 200) throw new Error(`The control plane did not list this rule's calibrations (${errorText(r)})`)
+  const list = Array.isArray(r.body?.calibrations) ? (r.body.calibrations as Array<Record<string, unknown>>) : []
+  const c = list.find((x) => x.calibrationId === calibrationId)
+  if (!c) throw new Error(`No calibration ${calibrationId} of this rule (rule hash ${ruleHash.slice(0, 12)}) on the control plane`)
+  if (c.status !== 'candidate') throw new Error(`Calibration ${calibrationId} is ${String(c.status)}; a companion run is for a candidate`)
+  if (c.modelDigest !== modelDigest) throw new Error(`Calibration ${calibrationId} was fitted on model ${String(c.modelDigest)}; the engine runs ${modelDigest}`)
+  const band = c.band as Record<string, unknown> | null
+  if (!band || typeof band.yes_at !== 'number' || typeof band.no_below !== 'number') throw new Error(`Calibration ${calibrationId} has no band`)
+  const comb = c.combiner as Record<string, unknown> | null | undefined
+  let combiner: ServedCalibration['combiner'] = null
+  if (comb !== null && comb !== undefined) {
+    const w = comb.weights
+    if (typeof comb.bias !== 'number' || typeof w !== 'object' || w === null || Object.values(w).some((x) => typeof x !== 'number')) {
+      throw new Error(`Calibration ${calibrationId} has a combiner this CLI does not read`)
+    }
+    combiner = comb as ServedCalibration['combiner']
+  }
+  return { calibrationId, band: { yes_at: band.yes_at, no_below: band.no_below }, combiner }
+}
+
+/**
+ * The pre-registration as the control plane registers it: the local
+ * document, and for a companion run its calibration's id, band and combiner
+ * exactly as served, which is how the control plane recognises the run.
+ */
+export function serverPreregistration(doc: Preregistration): Record<string, unknown> {
+  const { serverEvalRunId: _id, calibration, ...rest } = doc
+  return calibration ? { ...rest, calibrationId: calibration.calibrationId, band: calibration.band, combiner: calibration.combiner } : rest
+}
+
+/** Registers the pre-registration with the control plane: its eval run's id, or why not. */
+async function registerEvalRun(cp: ControlPlane, doc: Preregistration): Promise<{ evalRunId: string } | { error: string }> {
+  try {
+    const r = await controlPlaneRequest(cp, 'POST', '/api/v1/decide/eval-runs', { ruleHash: doc.ruleHash, modelDigest: doc.modelDigest, prereg: serverPreregistration(doc), source: 'cli' })
+    const run = r.body?.evalRun as Record<string, unknown> | undefined
+    if (r.status !== 201 || typeof run?.evalRunId !== 'string') return { error: errorText(r) }
+    return { evalRunId: run.evalRunId }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 function readPins(ruleHash: string): DecidePin[] | null {
@@ -525,6 +644,8 @@ function usedSetHashes(ruleHash: string): Set<string> {
 export interface DecideEvalOptions {
   labels?: string
   preregister?: string
+  /** A control-plane candidate calibration this run pre-registers and uploads as its companion. */
+  calibration?: string
   adversarial?: boolean
   json?: boolean
   logState?: boolean
@@ -559,15 +680,34 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
     return fail(`The engine did not say which model it runs: ${err instanceof Error ? err.message : String(err)}`)
   }
 
+  if (opts.calibration && !opts.preregister) return fail('--calibration pre-registers a companion run: pass --preregister <file> too.')
+  // On a logged-in machine a pre-registered run is registered with, and uploaded to, the control plane.
+  const cp = opts.preregister ? await controlPlaneLogin() : null
+
   // Pre-registration: written before any label is read; a run under it must match it.
   let prereg: Preregistration | null = null
   if (opts.preregister) {
     const file = resolve(opts.preregister)
     if (!node_fs.existsSync(file)) {
+      let calibration: ServedCalibration | undefined
+      if (opts.calibration) {
+        if (!cp) return fail('--calibration reads the calibration from the control plane: log in first (`intutic login`).')
+        try {
+          calibration = await fetchCalibration(cp, ruleHash, opts.calibration, identity.modelDigest)
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err))
+        }
+      }
       const candidate = readJson<{ modelDigest?: string; combiner?: { bias: number; weights: Record<string, number> }; band?: DecideBand }>(
         join(candidatesDir(ruleHash), digestFileName(identity.modelDigest)),
       )
-      const combiner = candidate?.modelDigest === identity.modelDigest && candidate.combiner && candidate.band ? { ...candidate.combiner, band: candidate.band } : null
+      const combiner = calibration
+        ? calibration.combiner
+          ? { bias: calibration.combiner.bias, weights: calibration.combiner.weights, band: calibration.band }
+          : null
+        : candidate?.modelDigest === identity.modelDigest && candidate.combiner && candidate.band
+          ? { ...candidate.combiner, band: candidate.band }
+          : null
       const doc: Preregistration = {
         v: 1,
         ruleRef: hit.ref!,
@@ -578,9 +718,15 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
         passMarks: PASS_MARKS,
         adversarial: true,
         registeredAt: new Date().toISOString(),
+        ...(calibration ? { calibration } : {}),
       }
+      const registered = cp ? await registerEvalRun(cp, doc) : null
+      if (registered && 'evalRunId' in registered) doc.serverEvalRunId = registered.evalRunId
       node_fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
       log.success(`Pre-registered ${hit.ref} on ${identity.modelDigest} in ${opts.preregister} (sha256 ${sha256Hex(JSON.stringify(doc)).slice(0, 12)}). No label was read.`)
+      if (calibration) log.dim(`It is the companion run of calibration ${calibration.calibrationId}: scored at its band${calibration.combiner ? ' and combiner' : ''}.`)
+      if (registered && 'evalRunId' in registered) log.dim(`Registered with the control plane as eval run ${registered.evalRunId}.`)
+      else if (registered) log.warn(`Not registered with the control plane (${registered.error}); it is registered when the run is evaluated.`)
       log.dim('Run the same command again to evaluate against it.')
       return
     }
@@ -592,6 +738,17 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
     if (prereg.v !== 1 || prereg.ruleHash !== ruleHash) return fail(`${opts.preregister} was registered for another version of this rule (rule hash ${String(prereg.ruleHash).slice(0, 12)}); pre-register again`)
     if (prereg.modelDigest !== identity.modelDigest) return fail(`${opts.preregister} was registered for model ${prereg.modelDigest}; the engine runs ${identity.modelDigest}`)
     if (!(Date.parse(prereg.registeredAt) < Date.now())) return fail(`${opts.preregister} has no registration time before now`)
+    if (opts.calibration && prereg.calibration?.calibrationId !== opts.calibration) {
+      return fail(`${opts.preregister} does not pre-register calibration ${opts.calibration}; pre-register a new file with --calibration`)
+    }
+  }
+  // Registered before any label is read, when the pre-registration could not be.
+  let serverRunId = prereg?.serverEvalRunId ?? null
+  let serverError: string | null = null
+  if (prereg && cp && !serverRunId) {
+    const r = await registerEvalRun(cp, prereg)
+    if ('evalRunId' in r) serverRunId = r.evalRunId
+    else serverError = r.error
   }
 
   if (!opts.labels) return fail('Pass --labels <file.jsonl>.')
@@ -599,7 +756,7 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
   let cases: LabelledCase[]
   try {
     labelsText = node_fs.readFileSync(resolve(opts.labels), 'utf8')
-    cases = parseLabels(labelsText)
+    cases = parseLabels(labelsText, rule.on)
   } catch (err) {
     return fail(`Could not read ${opts.labels}: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -608,7 +765,7 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
   const adversarial = Boolean(opts.adversarial) || prereg !== null
   const extra = adversarial ? adversarialCases(cases) : []
   const timeoutMs = loaded.cfg?.timeoutMs ?? 5000
-  const askOpts = { logState: opts.logState, ref: hit.ref!, ruleHash }
+  const askOpts = { logState: opts.logState, ref: hit.ref!, ruleHash, maxResponseBytes: loaded.cfg?.maxResponseStateBytes }
   const answered = await askCases(engine, rule, hit.sopTitle, hit.ruleText, cases, timeoutMs, askOpts)
   const answeredAdv = await askCases(engine, rule, hit.sopTitle, hit.ruleText, extra, timeoutMs, askOpts)
 
@@ -625,6 +782,9 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
       band = fit.band
       evalRule = withBand(rule, band)
     }
+  } else if (prereg.calibration && !prereg.calibration.combiner) {
+    // A band-only calibration: the rule's own `when`, at the calibration's band.
+    evalRule = withBand(rule, prereg.calibration.band)
   }
   const m = metrics(evalRule, scored, combiner)
   const adv = adversarial ? adversarialReport(evalRule, answeredAdv, combiner) : null
@@ -655,6 +815,22 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
       }
     : null
   const passed = marks !== null && Object.values(marks).every(Boolean)
+  // The results, uploaded to the eval run the control plane registered. Never the labels or a state.
+  let server: { evalRunId: string | null; uploaded: boolean; error: string | null; marks: Record<string, boolean> | null } | null = null
+  if (prereg && cp) {
+    server = { evalRunId: serverRunId, uploaded: false, error: serverError, marks: null }
+    if (serverRunId) {
+      try {
+        const r = await controlPlaneRequest(cp, 'POST', `/api/v1/decide/eval-runs/${encodeURIComponent(serverRunId)}/results`, { setHash, results: m, adversarial: adv })
+        if (r.status === 200) {
+          server.uploaded = true
+          server.marks = (r.body?.marks as Record<string, boolean> | undefined) ?? null
+        } else server.error = errorText(r)
+      } catch (err) {
+        server.error = err instanceof Error ? err.message : String(err)
+      }
+    }
+  }
   const evalRunId = `eval_local_${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}_${sha256Hex(setHash + ruleHash + Date.now()).slice(0, 6)}`
   const evalAll = (xs: readonly AnsweredCase[]) => metrics(evalRule, xs, combiner)
   const report = {
@@ -678,6 +854,8 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
     marks,
     passed,
     completedAt: new Date().toISOString(),
+    calibrationId: prereg?.calibration?.calibrationId ?? null,
+    server,
     // What drift compares this rule's live decisions with.
     baseline: {
       evalRunId,
@@ -720,6 +898,8 @@ export async function runDecideEval(spec: string, opts: DecideEvalOptions): Prom
   log.field(prereg ? 'Results' : 'Test split', line(m))
   for (const [n, q] of Object.entries(questions)) log.field(`AUC ${n}`, q.auc === null ? '—' : q.auc.toFixed(3))
   if (adv) for (const [f, r] of Object.entries(adv)) log.field(`Adversarial ${f.replace(/_/g, ' ')}`, `recall ${pct(r.recall)} of ${r.n}`)
+  if (server?.uploaded) log.field('Control plane', `results uploaded to eval run ${server.evalRunId}${prereg?.calibration ? `, the companion of calibration ${prereg.calibration.calibrationId}` : ''}`)
+  else if (server) log.warn(`The results were not uploaded to the control plane: ${server.error ?? 'no eval run is registered'}.`)
   console.log('')
   if (!prereg) {
     log.info('Not pre-registered, so no pin. Write the band into the rule if it fits, then:')
@@ -759,7 +939,7 @@ export async function runDecideCalibrate(spec: string, opts: { labels: string; j
   let labelsText: string
   try {
     labelsText = node_fs.readFileSync(resolve(opts.labels), 'utf8')
-    cases = parseLabels(labelsText)
+    cases = parseLabels(labelsText, rule.on)
   } catch (err) {
     return fail(`Could not read ${opts.labels}: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -769,7 +949,7 @@ export async function runDecideCalibrate(spec: string, opts: { labels: string; j
   } catch (err) {
     return fail(`The engine did not say which model it runs: ${err instanceof Error ? err.message : String(err)}`)
   }
-  const answered = await askCases(engine, rule, hit.sopTitle, hit.ruleText, cases, loaded.cfg?.timeoutMs ?? 5000, { ref: hit.ref!, ruleHash: hit.ruleHash! })
+  const answered = await askCases(engine, rule, hit.sopTitle, hit.ruleText, cases, loaded.cfg?.timeoutMs ?? 5000, { ref: hit.ref!, ruleHash: hit.ruleHash!, maxResponseBytes: loaded.cfg?.maxResponseStateBytes })
   const dev = answered.filter((a) => splitOf(a.c.id) === 'dev')
   const fitted = fitCombiner(rule, dev.length >= 10 ? dev : answered)
   const fit = fitBand(rule, dev.length > 0 ? dev : answered, (band) => metrics(rule, dev.length > 0 ? dev : answered, { ...fitted, band }))
@@ -927,8 +1107,8 @@ export async function runDecideLint(opts: { json?: boolean; workspace?: string }
   const problems: Array<{ file: string; line: number; error: string; hint: string | null }> = []
   const byTool = new Map<string, string[]>()
   const rules: Array<{ ref: string; file: string; line: number; ruleHash: string; on: string; rollout: string; tools: string[]; pins: number }> = []
-  // What 3.0 does not do with a rule as written (an on: response rule, a
-  // reserved context): warnings, which do not fail the lint.
+  // What 3.0 does not do with a rule as written (a reserved context):
+  // warnings, which do not fail the lint.
   const notes: Array<{ file: string; line: number; ref: string; note: string }> = []
   for (const l of lines) {
     if (l.decl.kind === 'unreadable') {
@@ -947,13 +1127,9 @@ export async function runDecideLint(opts: { json?: boolean; workspace?: string }
     log.header('intutic decide lint')
     if (lines.length === 0) log.info('No decide: lines in .intutic/sops.')
     for (const r of rules) {
-      const state =
-        r.on === 'response'
-          ? ' (on: response: not enforced in 3.0)'
-          : r.rollout === 'enforce' && r.pins === 0
-            ? ' (no pin yet: runs as shadow until `intutic decide eval` passes)'
-            : ''
-      console.log(`  ${r.on === 'response' ? '!' : '✓'} ${r.file}:${r.line}  ${r.ref}  ${r.rollout}${state}  hash ${r.ruleHash.slice(0, 12)}`)
+      const where = r.on === 'response' ? ' (on: response: judged at the gateway)' : ''
+      const state = r.rollout === 'enforce' && r.pins === 0 ? ' (no pin yet: runs as shadow until `intutic decide eval` passes)' : ''
+      console.log(`  ✓ ${r.file}:${r.line}  ${r.ref}  ${r.rollout}${where}${state}  hash ${r.ruleHash.slice(0, 12)}`)
     }
     for (const p of problems) {
       console.log(`  ✗ ${p.file}:${p.line}  ${p.error}`)
@@ -1132,21 +1308,12 @@ function snapshotDecideRules(snapshotJson: string | null | undefined): Array<{ r
 
 /**
  * What 3.0 does not do with the snapshot's decide rules as written, as doctor
- * lines: every `on: response` rule is not enforced (a failing line, since a
- * rule that does nothing is worth fixing or knowing about), and every rule
- * declaring the reserved `context: ["last_user_turn"]` is asked without it.
+ * lines: every rule declaring the reserved `context: ["last_user_turn"]` is
+ * asked without it. (An `on: response` rule is the gateway's, which judges
+ * each complete response by it.)
  */
 function decideLimitChecks(rules: ReadonlyArray<{ ref: string; rule: DecideRule }>): DecideDoctorCheck[] {
   const out: DecideDoctorCheck[] = []
-  const response = rules.filter((r) => r.rule.on === 'response').map((r) => r.ref)
-  if (response.length > 0) {
-    out.push({
-      name: 'Decide Response Rules',
-      passed: false,
-      detail: `${response.length} rule(s) with on: response not enforced in 3.0: ${response.join(', ')}`,
-      remediation: 'They are read and validated, and no gate or gateway evaluates them yet. Write what must be enforced now as an on: tool_call rule.',
-    })
-  }
   const context = rules.filter((r) => (r.rule.context ?? []).includes('last_user_turn')).map((r) => r.ref)
   if (context.length > 0) {
     out.push({

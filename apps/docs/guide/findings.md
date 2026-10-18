@@ -158,7 +158,7 @@ Click an incident to open its drawer. The header shows the incident type, its se
 
 | Field | What it shows |
 |-------|---------------|
-| **Judge** | For a governance-judge incident, who decided: the typed judge, the free-text judge's interim verdict (a person rules on it), human review, or an assistant ruling made at an operator's instruction; with the first stage's violation probability and the SOP the incident most likely concerns |
+| **Judge** | For a governance-judge incident, who decided: the typed judge, human review, or an assistant ruling made at an operator's instruction (incidents from before 3.0 can also show the free-text judge's interim verdict, and `free-text` is the free-text judge deciding on a deployment with no band, deprecated until 4.0); with the first stage's violation probability and the SOP the incident most likely concerns |
 | **Caller** | Who made the call: the member the API key belongs to, then what the reporting process said (OS user, key prefix, MCP server) |
 | **Gate verdict** | **TAMPER**: a governance file the sync daemon restored, with its path and harness |
 | **MCP call budget** | The budget that refused calls, how many it refused this period, and when it resets |

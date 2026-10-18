@@ -632,13 +632,66 @@ Classify tokens as USEFUL or WASTED.
 
 ---
 
+## Decide Endpoints
+
+Server-side decide routes need a paid plan: on a lapsed `free` workspace every write answers `403 FEATURE_NOT_AVAILABLE`, and decide rules keep working on each machine.
+
+### POST /api/v1/decide/events
+
+The decide log, uploaded by `intutic connect` when the workspace setting `decideLogUploadEnabled` is on. With it off the route answers `403 DECIDE_LOG_UPLOAD_OFF` and stores nothing.
+
+**Auth:** OWNER, ADMIN, EM or DEVELOPER; an API key needs `gateway:use` or `policies:write`
+
+**Request body:** at most 500 lines of `~/.intutic/logs/decide-YYYY-MM-DD.jsonl`, each parsed from its JSON.
+
+```json
+{
+  "events": [
+    {
+      "v": 1, "event": "decide.decision", "at": "2026-10-18T09:12:03.120Z", "harness": "claude-code",
+      "tool": "Bash", "engine": { "adapter": "logprobs", "model": "qwen3.5:4b", "digest": "sha256:…" },
+      "latencyMs": 132, "outcome": "escalate",
+      "rules": [{ "ref": "sop_…#prod-data-export", "ruleHash": "be5c…", "rollout": "shadow", "effective": "shadow",
+                  "modelDigest": "sha256:…", "answers": { "exports": { "type": "yes_no", "p": 0.42, "value": "U" } },
+                  "when": "U", "outcome": "escalate", "error": null }]
+    }
+  ]
+}
+```
+
+Each rule of a `decide.decision` line is stored as one row. Other events (`decide.drift`, `decide.canary_failed`, `decide.unavailable`, `decide.not_evaluated`) are counted as `ignored`. A line that does not read, or is older than 30 days or more than a day ahead, is counted and skipped; it never refuses the batch. `argsExcerpt` is dropped unless `decideLogUploadArgs` is on. A batch sent again stores nothing new. Past `DECIDE_EVENTS_MAX_ROWS_PER_WORKSPACE_DAY` rows (50,000 by default) for one UTC day, the rest of that day's rows are refused.
+
+**Response:** `200 OK`
+
+```json
+{ "accepted": 1, "duplicates": 0, "overBudget": 0, "outOfWindow": 0, "invalid": 0, "ignored": 0, "argsDropped": true }
+```
+
+### Eval runs and calibrations
+
+A rule enforces only under an active calibration, and a calibration becomes active only through its eval run:
+
+1. `POST /api/v1/decide/eval-runs` registers the run, `{ ruleHash, modelDigest, prereg }`, before any label is read.
+2. `POST /api/v1/decide/eval-runs/:evalRunId/results` writes `{ setHash, results, adversarial }` once. The run passes when the set was not used before for this rule, it has at least 40 cases and 10 refuse labels, recall is at least 0.95, false alarms at most 0.10, escalation at most 0.40, and planted-approval recall at least 0.90.
+3. `POST /api/v1/decide/calibrations/:calibrationId/promote` (OWNER, ADMIN or EM) makes a candidate active once it meets every mark of the exit rule, checked on the stored rows: its run pre-registered the candidate's band and combiner, has results, and did not reuse a set; the size, recall, false-alarm and escalation marks above; at least 200 shadow evaluations of the rule on that model digest (an unavailable engine is not one); and planted-approval recall of at least 0.90. A refusal is `409 NOT_READY` with `reasons`, each naming its mark (`mark 4: 120 of 200 shadow evaluations…`). `…/retire` puts the rule back in shadow on the next snapshot poll.
+
+The daily calibration job writes candidates itself: for each rule and model digest with at least 30 new Review Queue rulings since its last fit, it fits a combiner and band on all but the newest 30%, registers a `source: "job"` run with that band, combiner and the held-out review ids, and then writes the held-out results. Its `passed` covers the marks it measures; it asks no model, so the planted-approval mark comes from a second run whose `prereg` names the candidate's `calibrationId`, `band` and `combiner` and whose results carry `adversarial.planted_approval.recall`. With the workspace setting `decideAutoPromote` on (off by default), the job promotes a candidate that meets every mark, as `promotedBy: "decideAutoPromote"`.
+
+`GET /api/v1/policy/resolve` serves the decide rules as `decideRules`, each with its active calibrations as `pins`. The server switch `INTUTIC_DECIDE` decides what it serves: nothing (`off`, the default), every rule stamped shadow (`shadow`), or the rules as written (`on`).
+
+### The rules view
+
+`GET /api/v1/decide/rules?days=30` (1 to 90) answers what the dashboard's Decide Rules page shows: every rule `GET /api/v1/policy/resolve` would serve, each with its `ruleRef`, `ruleHash`, the rule as its line carries it (or the `error` of a line that does not read), the server's shadow `stamp`, its `pins`, and `stats` over the uploaded decisions in the window: `decisions`, `outcomes`, `shadow` and `enforce` counts, `shadowWouldAct` (shadow decisions that refused or escalated), `escalationRate`, `shadowDisagreementRate` (`shadowWouldAct` over shadow decisions), and per question ten probability `buckets` with the answers inside the band (`unknown`) and the review queue's rulings on them (`labelled`, `refuseLabels`). `mode` is the kill switch for the workspace; under `off` no rule is listed.
+
+---
+
 <!-- GENERATED:ROUTE-CATALOG:START -->
 
 <!-- Written by services/control-plane/scripts/generate-api-catalog.ts. Do not edit by hand: change the route source or api-catalog-annotations.ts and regenerate. -->
 
 ## Route Catalog
 
-Every route the control plane serves: 408 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 418 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -772,6 +825,20 @@ Every route the control plane serves: 408 routes, grouped by the source file tha
 | POST | `/api/v1/connectors/virustotal` | OWNER/ADMIN | `integrations:write` | Upsert the workspace's VT API key (OWNER/ADMIN) |
 | GET | `/api/v1/connectors/virustotal/budget` | OWNER/ADMIN | `integrations:read` | Today's lookup budget usage (OWNER/ADMIN) |
 | POST | `/api/v1/connectors/virustotal/test` | OWNER/ADMIN | `integrations:write` | Validate the stored key against a benign hash (OWNER/ADMIN) |
+
+### `decide.ts` <Badge type="tip" text="Cloud" />
+
+| Method | Path | Auth | Key scope | Description |
+|--------|------|------|-----------|-------------|
+| GET | `/api/v1/decide/calibrations` | Authenticated | `policies:read` | Calibrations of the workspace's decide rules, by ruleHash and status |
+| POST | `/api/v1/decide/calibrations/:calibrationId/promote` | OWNER/ADMIN/EM | `policies:write` | Make a candidate calibration active, when it meets every mark of the exit rule |
+| POST | `/api/v1/decide/calibrations/:calibrationId/retire` | OWNER/ADMIN/EM | `policies:write` | Retire an active calibration; its rule drops to shadow on the next snapshot poll |
+| GET | `/api/v1/decide/eval-runs` | Authenticated | `policies:read` | Eval runs, newest first, by ruleHash |
+| POST | `/api/v1/decide/eval-runs` | OWNER/ADMIN/EM/DEVELOPER | `policies:write` | Pre-register an evaluation of a rule on a model digest, before any label is read |
+| POST | `/api/v1/decide/eval-runs/:evalRunId/results` | OWNER/ADMIN/EM/DEVELOPER | `policies:write` | Write a pre-registered run's results, once |
+| GET | `/api/v1/decide/events` | Authenticated | `policies:read` | Uploaded decisions, newest first, by ruleHash, outcome, from and to; paginated by cursor |
+| POST | `/api/v1/decide/events` | OWNER/ADMIN/EM/DEVELOPER | `gateway:use` or `policies:write` | Upload decide-log lines (at most 500); stored only when the workspace setting decideLogUploadEnabled is on |
+| GET | `/api/v1/decide/rules` | Authenticated | `policies:read` | The served decide rules with their uploaded decisions: outcomes, escalation rate, shadow against enforce, and each question's answers by probability |
 
 ### `decisions.ts` <Badge type="tip" text="Cloud" />
 
@@ -1006,9 +1073,9 @@ Every route the control plane serves: 408 routes, grouped by the source file tha
 
 | Method | Path | Auth | Key scope | Description |
 |--------|------|------|-----------|-------------|
-| GET | `/api/v1/governance/judge-reviews` | OWNER/ADMIN/EM | `findings:read` | Judge responses waiting for a person (`status=PENDING\|VIOLATION\|CLEAN`) |
-| POST | `/api/v1/governance/judge-reviews/:reviewId/decide` | OWNER/ADMIN/EM | `findings:write` | `{ decision, note? }`: a VIOLATION opens an incident, a CLEAN resolves the interim one |
-| GET | `/api/v1/governance/judge-reviews/stats` | OWNER/ADMIN/EM | `findings:read` | Rulings per SOP and per stage-1 score bucket |
+| GET | `/api/v1/governance/judge-reviews` | OWNER/ADMIN/EM | `findings:read` | Judge responses and decide escalations waiting for a person (`status=PENDING\|VIOLATION\|CLEAN`, `source=judge\|decide`) |
+| POST | `/api/v1/governance/judge-reviews/:reviewId/decide` | OWNER/ADMIN/EM | `findings:write` | `{ decision, note? }`: on a judge review a VIOLATION opens an incident (a CLEAN resolves one a pre-3.0 interim verdict opened); on a decide review the ruling is the rule's label |
+| GET | `/api/v1/governance/judge-reviews/stats` | OWNER/ADMIN/EM | `findings:read` | Rulings per SOP and per stage-1 score bucket, and decide escalations per rule |
 
 ### `keys.ts` <Badge type="tip" text="Cloud" />
 
@@ -1138,6 +1205,7 @@ Every route the control plane serves: 408 routes, grouped by the source file tha
 | GET | `/api/v1/policy-guardrails/coverage` | OWNER/ADMIN/EM | `policies:read` | Which passages and guardrails cover a token (`token=`) |
 | GET | `/api/v1/policy-guardrails/documents` | OWNER/ADMIN/EM | `policies:read` | Policy documents in the ledger |
 | GET | `/api/v1/policy-guardrails/documents/:docId` | OWNER/ADMIN/EM | `policies:read` | One document with its passages, clauses and extraction runs |
+| POST | `/api/v1/policy-guardrails/documents/:docId/draft-decide` | OWNER/ADMIN | `policies:write` | <Badge type="warning" text="Self-serve+" /> Draft decide rules from a document's prose; each draft the validator admits is a proposed guardrail, served to no gate until approved |
 | POST | `/api/v1/policy-guardrails/documents/:docId/extract` | OWNER/ADMIN | `policies:write` | <Badge type="warning" text="Self-serve+" /> Extract cited guardrail proposals from a document's passages |
 | POST | `/api/v1/policy-guardrails/documents/upload` | OWNER/ADMIN | `policies:write` | Upload a document with no connector behind it: multipart `file` (+ `title`), Markdown, text or HTML up to 1 MiB, Word or PDF up to 10 MiB |
 | GET | `/api/v1/policy-guardrails/duplicates` | OWNER/ADMIN/EM | `policies:read` | Overlapping passages and rules cited twice |

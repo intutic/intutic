@@ -1106,6 +1106,41 @@ async fn llm_judge_allowed(
     }
 }
 
+/// Where this request's decide log lines are uploaded: the workspace's
+/// `decideLogUploadEnabled` (and `decideLogUploadArgs`) on
+/// `/auth/key-context`, the same cached answer the intervention mode reads,
+/// with the request's own virtual key. `None`, so nothing is sent, whenever
+/// the answer does not say `true`: no control plane or virtual key, a control
+/// plane that could not answer, or one older than the field.
+async fn decide_log_upload(
+    state: &AppState,
+    virtual_key: Option<&crate::credential::VirtualKey>,
+    workspace_id: &str,
+) -> Option<crate::decide::gateway::GatewayUpload> {
+    let policy = &state.config.intutic_settings.policy;
+    let (cp_url, virtual_key) = policy.control_plane_url.as_deref().zip(virtual_key)?;
+    let version = state.control_plane.policy_version(workspace_id).await;
+    let body = match crate::key_context::fetch(
+        &state.http_client,
+        cp_url,
+        virtual_key,
+        std::time::Duration::from_millis(policy.timeout_ms),
+        version,
+    )
+    .await
+    {
+        Ok(crate::key_context::Answer::Body(body)) => body,
+        _ => return None,
+    };
+    let (enabled, with_args) = crate::key_context::decide_log_upload(&body);
+    enabled.then(|| crate::decide::gateway::GatewayUpload {
+        client: state.http_client.clone(),
+        control_plane_url: cp_url.to_string(),
+        virtual_key: virtual_key.clone(),
+        with_args,
+    })
+}
+
 /// Whether the workspace stores tool-call argument values in sampled replay
 /// contexts (`storeToolArguments` on `/auth/key-context`, the same cached
 /// answer the intervention mode reads). Read only for a sampled request.
@@ -1993,6 +2028,17 @@ async fn fetch_provider_credential(
             unreachable!("handled above")
         }
     }
+}
+
+/// The OpenAI credential for a workspace, as an LLM call to OpenAI resolves
+/// it (`fetch_provider_credential`): for a decision call to OpenAI's
+/// Decisions API made with a virtual key.
+pub(crate) async fn openai_credential(
+    store: &Arc<dyn LocalStore>,
+    workspace_id: &str,
+    require_provisioned: bool,
+) -> Option<String> {
+    fetch_provider_credential(store, workspace_id, &Provider::OpenAI, require_provisioned).await
 }
 
 /// The path a DeepSeek request is sent to, by protocol. DeepSeek's own API
@@ -3086,7 +3132,7 @@ fn machine_budget_applies_with(control_plane_url: Option<&str>) -> bool {
 /// That path is asynchronous and needs a connected control plane — which is
 /// exactly what a standalone deployment does not have, and standalone is the
 /// mode where `local_spend` is the *only* cost control.
-async fn accrue_spend(
+pub(crate) async fn accrue_spend(
     store: &Arc<dyn LocalStore>,
     actual_cost_usd: f64,
     graph_id: &str,
@@ -4046,7 +4092,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // prompt size before trying it (`try_fallbacks`).
     let budget_prompt_chars = body_str.len();
     if let Some(ref key) = key_record {
-        let estimated_cost = estimated_request_cost(&model, budget_prompt_chars, &body_json);
+        let estimated_cost = match protocol.decision_format() {
+            Some(format) => crate::decision_traffic::estimated_cost(
+                &state.config.intutic_settings.decision_traffic,
+                format,
+                &headers,
+                &model,
+                budget_prompt_chars,
+            ),
+            None => estimated_request_cost(&model, budget_prompt_chars, &body_json),
+        };
         if let Some(refused) = key_budget_refusal(
             state.control_plane.as_ref(),
             key,
@@ -4055,6 +4110,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         )
         .await
         {
+            if let Some(format) = protocol.decision_format() {
+                crate::decision_traffic::note_refusal(
+                    &state,
+                    format,
+                    &headers,
+                    &body_json,
+                    &workspace_id,
+                    key_prefix,
+                    crate::decision_traffic::Action::RefusedBudget,
+                    refused.status(),
+                    start,
+                );
+            }
             return refused;
         }
 
@@ -4127,6 +4195,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     match state.control_plane.hard_block(&workspace_id).await {
         crate::store::HardCapStatus::Blocked => {
             tracing::warn!(workspace_id = %workspace_id, "Hard cap block active — rejecting request");
+            if let Some(format) = protocol.decision_format() {
+                crate::decision_traffic::note_refusal(
+                    &state,
+                    format,
+                    &headers,
+                    &body_json,
+                    &workspace_id,
+                    key_prefix,
+                    crate::decision_traffic::Action::RefusedBudget,
+                    StatusCode::TOO_MANY_REQUESTS,
+                    start,
+                );
+            }
             return json_error(
                 StatusCode::TOO_MANY_REQUESTS,
                 "OVERAGE_HARD_CAP_EXCEEDED",
@@ -4323,6 +4404,39 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let input_dlp = dlp::direction_scan(dlp_cfg.enabled && dlp_cfg.scan_input, pii_policy.as_ref());
     let output_dlp =
         dlp::direction_scan(dlp_cfg.enabled && dlp_cfg.scan_output, pii_policy.as_ref());
+
+    // ── Decision traffic ─────────────────────────────────────────────
+    //
+    // A customer call to a decision model has passed authentication, the
+    // spend budgets, the model allowlist and the loop gate above, like any
+    // LLM call. What is particular to it (DLP on the state alone, egress on
+    // the upstream, the version pin, floors and the decision-traffic log) is
+    // `decision_traffic::handle`, which answers it.
+    if let Some(format) = protocol.decision_format() {
+        return crate::decision_traffic::handle(crate::decision_traffic::Call {
+            state: &state,
+            format,
+            headers: &headers,
+            credential: &credential,
+            key_record: key_record.as_ref(),
+            workspace_id: &workspace_id,
+            key_prefix,
+            session_id: &session_id_hdr,
+            // An app's decision calls are no harness's unless it names one;
+            // the path-based default (`cursor`) would misattribute them.
+            harness_type: if headers.contains_key("x-intutic-harness") {
+                &harness_type
+            } else {
+                "decision-traffic"
+            },
+            body: body_json,
+            input_dlp,
+            started: start,
+            tpm_key_id: tpm_key_id.as_deref(),
+            loop_run_id: loop_run_id_header,
+        })
+        .await;
+    }
 
     let dlp_findings = if let Some(input_pii) = &input_dlp {
         let findings = dlp::scan_with(&body_str, input_pii.as_deref());
@@ -4691,6 +4805,66 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         } else {
             set
         }
+    };
+    // Decide rules (`decide::gateway`): `on: tool_call` rules asked about the
+    // response's tool calls once the deterministic gates allow them, and
+    // `on: response` rules judging its text. Empty for every SOP set without
+    // a `decide:` line, which leaves both paths as they were. On a gateway
+    // that requires virtual keys the workspace's SOPs came from the control
+    // plane, and so do their decide rules' pins and shadow stamps (its policy
+    // resolve, fetched only when a SOP has a `decide:` line). Every evaluation
+    // is written to the decide log, and there also uploaded when the
+    // workspace has `decideLogUploadEnabled` on.
+    let gateway_mode = crate::gateway::requires_vk_only();
+    let served_decide = if gateway_mode && resolved_sops.iter().any(|s| !s.decide_rules.is_empty())
+    {
+        match (
+            control_plane_url_for_sops.as_deref(),
+            credential.virtual_key(),
+        ) {
+            (Some(cp), Some(key)) if workspace_id != "unknown" && !workspace_id.is_empty() => {
+                let version = state.control_plane.policy_version(&workspace_id).await;
+                Some(
+                    crate::decide::gateway::fetch_served(
+                        &state.http_client,
+                        cp,
+                        &workspace_id,
+                        key,
+                        version,
+                    )
+                    .await,
+                )
+            }
+            _ => Some(crate::decide::gateway::ServedDecide::default()),
+        }
+    } else {
+        None
+    };
+    let decide_rules = {
+        let rules = crate::decide::gateway::GatewayRules::from_sops(
+            &resolved_sops,
+            &node.agent_role,
+            intervention_mode,
+            !gateway_mode,
+            served_decide.as_ref(),
+        );
+        let rules = if rules.is_empty() {
+            rules
+        } else {
+            let upload = if gateway_mode {
+                decide_log_upload(&state, credential.virtual_key(), &workspace_id).await
+            } else {
+                None
+            };
+            rules.with_log(crate::decide::gateway::GatewayLog {
+                harness: harness_type.clone(),
+                workspace_id: workspace_id.clone(),
+                session_id: session_id.clone(),
+                dirs: crate::decide::log::LogDirs::default_dirs(),
+                upload,
+            })
+        };
+        Arc::new(rules)
     };
     // The destructive-SQL rule, enforced on the response side below.
     // The shadow set is resolved apart from the enforcing one, so a shadow
@@ -5071,6 +5245,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 tool_result_bytes_saved: 0,
                 // Blocked before any upstream call — routing never ran.
                 routing_shadow_model: None,
+                decision_traffic: None,
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
                 proxy_instance_id: proxy_instance_id().to_string(),
@@ -5838,6 +6013,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 tool_result_bytes_saved: 0,
                 // Never reached routing, so there is no counterfactual.
                 routing_shadow_model: None,
+                decision_traffic: None,
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
                 proxy_instance_id: proxy_instance_id().to_string(),
@@ -6807,6 +6983,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // No response body was ever produced to compact.
                 tool_result_bytes_saved: 0,
                 routing_shadow_model: None,
+                decision_traffic: None,
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
                 proxy_instance_id: proxy_instance_id().to_string(),
@@ -7093,6 +7270,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 tool_result_bytes_saved: 0,
                 // Never reached routing, so there is no counterfactual.
                 routing_shadow_model: None,
+                decision_traffic: None,
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
                 proxy_instance_id: proxy_instance_id().to_string(),
@@ -7259,6 +7437,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let sso_group_gate_clone = sso_group_gate.clone();
         let sql_guard_policies_clone = sql_guard_policies.clone();
         let hook_rule_set_clone = hook_rule_set.clone();
+        let decide_rules_clone = Arc::clone(&decide_rules);
         // Same reason as response_gate_cfg above: the stream task outlives
         // this scope, and the snippet-capture config has to travel with it.
         let response_injection_snippet_cfg = state
@@ -7345,12 +7524,32 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // The same hold carries the hook-rule guardrails: a block whose
             // tool an argument-constraining hook rule names is held and decided
             // whole. `None` when neither is in force.
+            //
+            // And the decide rules' tools: a block an `on: tool_call` rule
+            // names is held, and asked about once the rules above allow it.
+            let decide_tools = decide_rules_clone.tools();
             let mut sql_hold = (response_gate_cfg.enabled
-                && (!sql_guard_policies_clone.is_empty() || !hook_rule_set_clone.is_empty()))
+                && (!sql_guard_policies_clone.is_empty()
+                    || !hook_rule_set_clone.is_empty()
+                    || !decide_tools.is_empty()))
             .then(|| {
                 crate::plugins::sql_guard::StreamHold::new(sql_guard_policies_clone.clone())
                     .with_hook_rules(hook_rule_set_clone.clone())
+                    .with_decide_tools(decide_tools)
             });
+            // `on: response` rules judge the text once the stream is complete,
+            // before its terminal event; the note, when there is one, is
+            // written as a block of its own after the last block the model
+            // opened (`decide_next_block`).
+            let decide_judges_responses =
+                response_gate_cfg.enabled && decide_rules_clone.judges_responses();
+            let mut decide_next_block: u64 = 0;
+            let mut decide_noted = false;
+            // A verdict was noted: the stream is not cached, since a cache hit
+            // replays the text without it.
+            let mut decide_verdict = false;
+            // A Responses terminal's `event:` line, held until its `data:` line.
+            let mut decide_held_event: Option<String> = None;
             // Hook-rule shadow hits on this stream, and whether it carried a
             // tool call at all — what the trace's shadow reports are built from.
             let mut hook_shadow_hits: Vec<crate::plugins::hook_rules::HookRuleHit> = Vec::new();
@@ -7559,7 +7758,26 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             // goes no further until its block is complete.
                             let sql_denial = match sql_hold.as_mut() {
                                 Some(hold) if !replayed && name_denial.is_none() => {
-                                    let step = hold.push(std::mem::take(&mut line));
+                                    let mut step = hold.push(std::mem::take(&mut line));
+                                    // A complete block the rules above allowed
+                                    // and a decide rule names: asked here, then
+                                    // released or refused.
+                                    let mut decide_refusal = None;
+                                    while let Some(call) = step.decide.take() {
+                                        match decide_rules_clone
+                                            .check_tool_call(&call.tool, &call.args)
+                                            .await
+                                        {
+                                            Some(r) => {
+                                                decide_refusal = Some((r, call.block_index));
+                                                break;
+                                            }
+                                            None => {
+                                                let next = hold.release_decided();
+                                                step.absorb(next);
+                                            }
+                                        }
+                                    }
                                     for v in &step.notes {
                                         tracing::warn!(
                                             workspace_id = %workspace_id_clone,
@@ -7576,16 +7794,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             hook_shadow_hits.push(hit);
                                         }
                                     }
-                                    match (step.refuse, step.refuse_hook) {
-                                        (Some((v, idx)), _) => Some(crate::plugins::response_gate::Denial {
+                                    match (step.refuse, step.refuse_hook, decide_refusal) {
+                                        (Some((v, idx)), _, _) => Some(crate::plugins::response_gate::Denial {
                                             reason: crate::plugins::response_gate::DenialReason::DestructiveSql(v),
                                             block_index: idx,
                                         }),
-                                        (None, Some((hit, idx))) => Some(crate::plugins::response_gate::Denial {
+                                        (None, Some((hit, idx)), _) => Some(crate::plugins::response_gate::Denial {
                                             reason: crate::plugins::response_gate::DenialReason::HookRule(hit),
                                             block_index: idx,
                                         }),
-                                        (None, None) => {
+                                        (None, None, Some((r, idx))) => Some(crate::plugins::response_gate::Denial {
+                                            reason: crate::plugins::response_gate::DenialReason::Decide(r),
+                                            block_index: idx,
+                                        }),
+                                        (None, None, None) => {
                                             sql_replay.extend(step.emit);
                                             continue;
                                         }
@@ -7829,6 +8051,48 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                     }
                                 }
 
+                                // ── Decide: on: response rules ──────────────
+                                // The text is complete and the terminal not
+                                // yet forwarded: a verdict's note goes in
+                                // ahead of it, as its own block. A Responses
+                                // terminal is recognised on its `data:` line,
+                                // so the `event:` line before it waits here,
+                                // to go out after the note.
+                                let holds_event_line = decide_judges_responses
+                                    && !decide_noted
+                                    && stream_shape == DeltaShape::ResponsesOutputText
+                                    && is_responses_terminal_event_line(&line);
+                                if holds_event_line {
+                                    decide_held_event = Some(std::mem::take(&mut line));
+                                    continue;
+                                }
+                                if is_done && decide_judges_responses && !decide_noted {
+                                    decide_noted = true;
+                                    if let Some(v) = decide_rules_clone
+                                        .check_response(&accumulated_content)
+                                        .await
+                                    {
+                                        decide_verdict = true;
+                                        let b = decide_note_sse(
+                                            stream_shape,
+                                            &v.note(),
+                                            decide_next_block,
+                                        );
+                                        if tx.send(Ok(axum::body::Bytes::from(b))).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                }
+                                if let Some(ev) = decide_held_event.take() {
+                                    if tx
+                                        .send(Ok(axum::body::Bytes::from(format!("{ev}\n"))))
+                                        .await
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                }
+
                                 let mut skip_forward = false;
                                 if judge_active_clone && (done_received || is_content_block_stop) {
                                     skip_forward = true;
@@ -7910,6 +8174,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             {
                                                 accumulated_content.push_str(t);
                                             }
+                                            if decide_judges_responses {
+                                                if let Some(i) = json_val
+                                                    .get("index")
+                                                    .or_else(|| json_val.get("output_index"))
+                                                    .and_then(|i| i.as_u64())
+                                                {
+                                                    decide_next_block =
+                                                        decide_next_block.max(i + 1);
+                                                }
+                                            }
                                             let usage = stream_usage(&json_val, stream_shape);
                                             usage_acc.merge_from(usage);
                                             if usage.uncached_input.is_some() {
@@ -7988,6 +8262,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                                         )))
                                                         .await;
                                                 }
+                                            }
+                                        }
+                                        if decide_judges_responses && !decide_noted {
+                                            decide_noted = true;
+                                            if let Some(v) = decide_rules_clone
+                                                .check_response(&accumulated_content)
+                                                .await
+                                            {
+                                                decide_verdict = true;
+                                                let _ = tx
+                                                    .send(Ok(axum::body::Bytes::from(
+                                                        decide_note_sse(
+                                                            translated_shape(&protocol),
+                                                            &v.note(),
+                                                            0,
+                                                        ),
+                                                    )))
+                                                    .await;
                                             }
                                         }
                                         let _ = tx
@@ -8151,6 +8443,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             sop_shadow_reports: sop_shadow_reports.clone(),
                             tool_result_bytes_saved: 0,
                             routing_shadow_model: shadow_selection_clone.clone(),
+                            decision_traffic: None,
                             trace_id: uuid::Uuid::new_v4().to_string(),
                             session_id: session_id_clone.clone(),
                             proxy_instance_id: proxy_instance_id().to_string(),
@@ -8217,6 +8510,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // not count against the routed model's latency SLO.
             let upstream_latency_ms = start.elapsed().as_millis() as u32;
 
+            // A Responses terminal `event:` line the upstream sent no `data:`
+            // line after: forwarded as it came.
+            if let Some(ev) = decide_held_event.take() {
+                if !gate_tripped {
+                    let _ = tx
+                        .send(Ok(axum::body::Bytes::from(format!("{ev}\n"))))
+                        .await;
+                }
+            }
             // A shell-tool block the SQL hold was still waiting on when the
             // upstream ended: the call never completed, so it is dropped rather
             // than forwarded unverified. Logged, because the client sees a
@@ -8322,6 +8624,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     patterns = ?dlp_stream_redactions,
                     "Output DLP redacted secrets from a streamed response"
                 );
+            }
+
+            // A cross-provider stream's terminal event is written below, so
+            // its `on: response` verdict goes in here, ahead of it. A
+            // same-provider stream was judged at its terminal, in the loop.
+            if decide_judges_responses && !decide_noted && !gate_tripped && !is_same_provider {
+                if let Some(v) = decide_rules_clone
+                    .check_response(&accumulated_content)
+                    .await
+                {
+                    decide_verdict = true;
+                    let b = decide_note_sse(translated_shape(&protocol_clone), &v.note(), 0);
+                    let _ = tx.send(Ok(axum::body::Bytes::from(b))).await;
+                }
             }
 
             // `!gate_tripped`: the judge's finalize step appends a synthesis
@@ -8574,6 +8890,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             if let Some(cache_keys) = &response_cache_keys_clone {
                 if stream_complete
                     && !gate_tripped
+                    && !decide_verdict
                     && !stream_beyond_text
                     && !accumulated_content.is_empty()
                     && upstream_fallback_clone.is_none()
@@ -8717,6 +9034,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // before this branch, so the old "never reached routing" here was
                 // simply untrue and streamed requests recorded no counterfactual.
                 routing_shadow_model: shadow_selection_clone.clone(),
+                decision_traffic: None,
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id_clone,
                 proxy_instance_id: proxy_instance_id().to_string(),
@@ -8873,6 +9191,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 sop_shadow_reports: sop_shadow_reports.clone(),
                 tool_result_bytes_saved: 0,
                 routing_shadow_model: None,
+                decision_traffic: None,
                 trace_id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.clone(),
                 proxy_instance_id: proxy_instance_id().to_string(),
@@ -9210,6 +9529,21 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         }
     }
 
+    // ── Decide: on: response rules ───────────────────────────────────────
+    // The response's text, judged whole before anything is sent; a verdict's
+    // note is written into the body, where the judge writes its synthesis.
+    let mut decide_verdict = false;
+    if state.config.intutic_settings.response_gate.enabled && decide_rules.judges_responses() {
+        if let Some(v) = decide_rules.check_response(&accumulated_content).await {
+            let note = v.note();
+            if let Some(bytes) = body_with_note(&final_body_bytes, &note) {
+                final_body_bytes = bytes;
+            }
+            accumulated_content.push_str(&note);
+            decide_verdict = true;
+        }
+    }
+
     // ── Output DLP, and the one place a substituted tool call can be seen ────
     //
     // `dlp::scan` is whole-string and structure-blind and `dlp::redact` is
@@ -9394,6 +9728,19 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         );
     }
     let response_denial = response_denial.or(hook_denial);
+    // Decide rules on the calls every gate above allowed (protection 1: a
+    // deterministic refusal asks no engine anything).
+    let response_denial = match response_denial {
+        Some(d) => Some(d),
+        None => {
+            crate::plugins::response_gate::gate_response_decide(
+                &state.config.intutic_settings.response_gate,
+                parsed_response.as_ref(),
+                &decide_rules,
+            )
+            .await
+        }
+    };
     let final_body = match &response_denial {
         Some(denial) => {
             tracing::warn!(
@@ -9432,6 +9779,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     if let Some(cache_keys) = &response_cache_keys {
         if !output_dlp_redacted
             && response_denial.is_none()
+            && !decide_verdict
             && parsed_response
                 .as_ref()
                 .is_some_and(crate::plugins::semantic_cache::is_text_only_response)
@@ -9763,6 +10111,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         // The one path that actually evaluated rules.
         wasm_shadow_reports: wasm_shadow_reports.clone(),
         sop_shadow_reports: sop_shadow_reports.clone(),
+        decision_traffic: None,
         trace_id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.clone(),
         proxy_instance_id: proxy_instance_id().to_string(),
@@ -10165,6 +10514,100 @@ enum DeltaShape {
     Unparsed,
 }
 
+/// `body` with `note` added after the model's text: as a text block of its own
+/// (Anthropic `content[]`), appended to the first choice's message (chat
+/// completions; a message with no text gets the note as its text), or as an
+/// output message of its own (Responses `output[]`). `None` when the body is
+/// none of these.
+fn body_with_note(body: &[u8], note: &str) -> Option<Vec<u8>> {
+    let mut v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    if let Some(content) = v.get_mut("content").and_then(|c| c.as_array_mut()) {
+        content.push(serde_json::json!({ "type": "text", "text": note }));
+    } else if let Some(msg) = v
+        .get_mut("choices")
+        .and_then(|c| c.get_mut(0))
+        .and_then(|c| c.get_mut("message"))
+        .and_then(|m| m.as_object_mut())
+    {
+        let text = match msg.get("content") {
+            Some(serde_json::Value::String(t)) => format!("{t}{note}"),
+            None | Some(serde_json::Value::Null) => note.to_string(),
+            Some(_) => return None,
+        };
+        msg.insert("content".into(), serde_json::Value::String(text));
+    } else {
+        let output = v.get_mut("output").and_then(|o| o.as_array_mut())?;
+        output.push(serde_json::json!({
+            "id": "msg_intutic_decide",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": note, "annotations": [] }]
+        }));
+    }
+    serde_json::to_vec(&v).ok()
+}
+
+/// The `event:` line of a Responses terminal event (`is_responses_terminal`
+/// reads the `data:` line that follows it).
+fn is_responses_terminal_event_line(line: &str) -> bool {
+    matches!(
+        line.strip_prefix("event:").map(str::trim),
+        Some("response.completed" | "response.failed" | "response.incomplete")
+    )
+}
+
+/// The shape a cross-provider stream reaches the client in: Responses events
+/// for a Responses client, chat-completion chunks for every other.
+fn translated_shape(protocol: &crate::protocol::Protocol) -> DeltaShape {
+    match protocol {
+        crate::protocol::Protocol::OpenAIResponses => DeltaShape::ResponsesOutputText,
+        _ => DeltaShape::OpenAIChatContent,
+    }
+}
+
+/// A decide verdict's note as stream bytes in `shape`: a text block of its
+/// own at `next_block`, after every block the model opened (Anthropic); an
+/// output item of its own at `next_block` (Responses); a content delta
+/// otherwise.
+fn decide_note_sse(shape: DeltaShape, note: &str, next_block: u64) -> String {
+    match shape {
+        DeltaShape::AnthropicText => {
+            let start = serde_json::json!({
+                "type": "content_block_start",
+                "index": next_block,
+                "content_block": { "type": "text", "text": "" }
+            });
+            let delta = serde_json::json!({
+                "type": "content_block_delta",
+                "index": next_block,
+                "delta": { "type": "text_delta", "text": note }
+            });
+            let stop = serde_json::json!({ "type": "content_block_stop", "index": next_block });
+            format!(
+                "event: content_block_start\ndata: {start}\n\n\
+                 event: content_block_delta\ndata: {delta}\n\n\
+                 event: content_block_stop\ndata: {stop}\n\n"
+            )
+        }
+        DeltaShape::ResponsesOutputText => {
+            crate::commands::responses_message_events(note, next_block, "msg_intutic_decide")
+        }
+        DeltaShape::OpenAIChatContent | DeltaShape::Unparsed => format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "id": "intutic-decide",
+                "object": "chat.completion.chunk",
+                "choices": [{
+                    "index": 0,
+                    "delta": { "content": note },
+                    "finish_reason": serde_json::Value::Null
+                }]
+            })
+        ),
+    }
+}
+
 /// The wire shape for a same-provider stream on `protocol`.
 ///
 /// `protocol` is derived from the request path and `provider` is derived from
@@ -10177,7 +10620,8 @@ fn delta_shape(protocol: &crate::protocol::Protocol, provider: &Provider) -> Del
         P::Anthropic => DeltaShape::AnthropicText,
         P::OpenAIChatCompletions => DeltaShape::OpenAIChatContent,
         P::OpenAIResponses => DeltaShape::ResponsesOutputText,
-        P::Gemini => DeltaShape::Unparsed,
+        // Decision calls are answered by `decision_traffic` and never stream.
+        P::Gemini | P::SystemOne | P::OpenAIDecisions => DeltaShape::Unparsed,
         P::Unknown => match provider.wire_shape() {
             Provider::Anthropic => DeltaShape::AnthropicText,
             Provider::Gemini => DeltaShape::Unparsed,
@@ -10240,6 +10684,8 @@ fn wire_for(
         P::OpenAIChatCompletions => W::OpenAI,
         P::OpenAIResponses => W::OpenAIResponses,
         P::Gemini => W::Gemini,
+        // JSON in OpenAI's error shape, which both decision APIs use.
+        P::SystemOne | P::OpenAIDecisions => W::OpenAI,
         P::Unknown => match provider.wire_shape() {
             Provider::Anthropic => W::Anthropic,
             Provider::Gemini => W::Gemini,
@@ -10332,6 +10778,8 @@ fn postprocessor_protocol(
         P::OpenAIChatCompletions => PP::OpenAI,
         P::OpenAIResponses => PP::OpenAIResponses,
         P::Gemini => PP::Gemini,
+        // Never reached: `decision_traffic` answers decision calls.
+        P::SystemOne | P::OpenAIDecisions => PP::OpenAI,
         P::Unknown => match provider.wire_shape() {
             Provider::Anthropic => PP::Anthropic,
             Provider::Gemini => PP::Gemini,
@@ -10719,7 +11167,9 @@ fn arg_flush_bytes(
                 "delta": args,
             })
         ),
-        crate::protocol::Protocol::Gemini => return None,
+        crate::protocol::Protocol::Gemini
+        | crate::protocol::Protocol::SystemOne
+        | crate::protocol::Protocol::OpenAIDecisions => return None,
     })
 }
 
@@ -13921,7 +14371,9 @@ mod tests {
         /// proxy forwards requests to a provider. It is true exactly for the
         /// providers this proxy has an upstream for — Gemini included, which
         /// `tests/cloud_providers_test.rs` and `tests/smart_routing_test.rs`
-        /// serve end to end on the Messages and Chat Completions routes.
+        /// serve end to end on the Messages and Chat Completions routes. A
+        /// `kind: 'decision'` provider is reached by decision traffic, never as
+        /// an LLM target, and is live exactly when `decision_traffic` knows it.
         #[test]
         fn routing_live_in_the_registry_matches_the_upstreams_this_proxy_has() {
             let registry = include_str!("../../shared-types/src/providers.ts");
@@ -13930,6 +14382,7 @@ mod tests {
                 .nth(1)
                 .expect("the registry");
             let mut seen = 0;
+            let mut decision: Vec<String> = Vec::new();
             for entry in registry.split("\n    id: '").skip(1) {
                 let id = entry.split('\'').next().unwrap();
                 let live = entry
@@ -13937,10 +14390,22 @@ mod tests {
                     .nth(1)
                     .expect("every entry says routingLive")
                     .starts_with("true");
-                assert_eq!(live, provider_from_wire_id(id).is_some(), "{id}");
+                let entry = entry.split("\n  },").next().unwrap_or(entry);
+                if entry.contains("kind: 'decision'") {
+                    assert!(provider_from_wire_id(id).is_none(), "{id} is no LLM target");
+                    assert_eq!(
+                        live,
+                        crate::decision_traffic::DECISION_PROVIDERS.contains(&id),
+                        "{id}"
+                    );
+                    decision.push(id.to_string());
+                } else {
+                    assert_eq!(live, provider_from_wire_id(id).is_some(), "{id}");
+                }
                 seen += 1;
             }
             assert!(seen >= 10, "parsed {seen} registry entries");
+            assert_eq!(decision, crate::decision_traffic::DECISION_PROVIDERS);
         }
     }
 

@@ -725,6 +725,42 @@ export interface WorkspaceSettings {
    * dataset, not governance itself.
    */
   governanceCardLabelingEnabled: boolean
+
+  /**
+   * Upload this workspace's decide log: whether the sync
+   * daemon sends the decisions its machine's gates logged
+   * (`~/.intutic/logs/decide-*.jsonl`) to `POST /api/v1/decide/events`.
+   * What goes is counts, probabilities and hashes: per rule, the rule ref and
+   * hash, the model id and digest, each answer's probability and value, the
+   * outcome and the mode. Never the question text, never the state sent.
+   *
+   * Off by default: decision records leaving developer machines is a choice
+   * a workspace makes. With it off nothing new leaves a machine, and the
+   * control plane refuses an upload.
+   */
+  decideLogUploadEnabled?: boolean
+
+  /**
+   * Also upload each decision's arguments excerpt: the call's arguments as
+   * the gate logged them, after redaction and cut to 2 KB. Only read when
+   * {@link decideLogUploadEnabled} is on. Off by default; the daemon drops
+   * the excerpt before sending while it is off, and the control plane drops
+   * one it receives anyway. Excerpts are cleared after 30 days.
+   */
+  decideLogUploadArgs?: boolean
+
+  /**
+   * Let the daily decide calibration job promote a candidate calibration
+   * itself once it meets every mark of the decide exit rule: a
+   * passing pre-registered eval run, the adversarial report and 200 shadow
+   * evaluations. Promotion pins the model digest and lets a
+   * `rollout: enforce` rule enforce.
+   *
+   * Off by default: a named OWNER, ADMIN or EM promotes through
+   * `POST /api/v1/decide/calibrations/:calibrationId/promote`. Turning it on
+   * removes only that person (mark 6), never a measured mark.
+   */
+  decideAutoPromote?: boolean
 }
 
 /**
@@ -816,6 +852,12 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   configBodyUpload: false,
   // Off by default — opt-in, see the field doc. Never gates card delivery itself.
   governanceCardLabelingEnabled: false,
+  // Off by default — decision records stay on the machine unless the
+  // workspace opts in. See the field docs.
+  decideLogUploadEnabled: false,
+  decideLogUploadArgs: false,
+  // Off by default — a named member promotes a decide calibration.
+  decideAutoPromote: false,
   // 1.0 = every trace, matching the unconditional behavior this knob
   // replaces exactly. See the field doc for what a lower value gates.
   securityProbeSampleRate: 1.0,

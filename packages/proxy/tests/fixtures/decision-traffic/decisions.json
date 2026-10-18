@@ -1,0 +1,108 @@
+{
+  "request": {
+    "model": "gpt-6-luna",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Support ticket 5521: the customer cannot sign in after changing phones and asks to reset two-factor authentication. Account age 3 years; last sign-in from a new country."
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "name": "escalate",
+        "type": "predicate",
+        "instructions": "Does this ticket need a human security review before any action?"
+      },
+      {
+        "name": "queue",
+        "type": "choice",
+        "instructions": "Which queue should take the ticket?",
+        "choices": [
+          { "value": "account_security", "description": "Sign-in, 2FA and account takeover" },
+          { "value": "billing", "description": "Payments" },
+          { "value": "general", "description": "Everything else" }
+        ]
+      },
+      {
+        "name": "severity",
+        "type": "score",
+        "instructions": "How severe is the risk to the account?",
+        "levels": [
+          { "label": "low", "description": "Routine" },
+          { "label": "medium", "description": "Some risk" },
+          { "label": "high", "description": "Likely takeover attempt" }
+        ]
+      },
+      {
+        "name": "refund_due",
+        "type": "predicate",
+        "instructions": "Is the customer owed a refund?"
+      }
+    ],
+    "safety_identifier": "user-7f3a"
+  },
+  "response": {
+    "model": "gpt-6-luna",
+    "answers": [
+      {
+        "type": "predicate",
+        "name": "escalate",
+        "probability": 0.91
+      },
+      {
+        "type": "choice",
+        "name": "queue",
+        "choice": "account_security",
+        "probabilities": [
+          { "value": "account_security", "probability": 0.88 },
+          { "value": "billing", "probability": 0.02 },
+          { "value": "general", "probability": 0.1 }
+        ],
+        "confidence": 0.86
+      },
+      {
+        "type": "score",
+        "name": "severity",
+        "score": 1.42,
+        "probabilities": [
+          { "value": 0, "label": "low", "probability": 0.12 },
+          { "value": 1, "label": "medium", "probability": 0.34 },
+          { "value": 2, "label": "high", "probability": 0.54 }
+        ],
+        "confidence": 0.31
+      },
+      {
+        "type": "refusal",
+        "name": "refund_due"
+      }
+    ],
+    "usage": {
+      "input_tokens": 187,
+      "output_tokens": 0,
+      "total_tokens": 187
+    }
+  },
+  "normalised": {
+    "model": "gpt-6-luna",
+    "questions": [
+      { "name": "escalate", "type": "yes_no" },
+      { "name": "queue", "type": "choice", "options": ["account_security", "billing", "general"] },
+      { "name": "severity", "type": "score", "options": ["low", "medium", "high"] },
+      { "name": "refund_due", "type": "yes_no" }
+    ],
+    "modelVersion": "gpt-6-luna",
+    "answers": {
+      "escalate": 0.91,
+      "queue": { "account_security": 0.88, "billing": 0.02, "general": 0.1 },
+      "severity": { "high": 0.54, "low": 0.12, "medium": 0.34 },
+      "refund_due": null
+    },
+    "inputTokens": 187,
+    "outputTokens": 0
+  }
+}

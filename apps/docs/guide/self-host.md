@@ -90,7 +90,9 @@ Check against `../SHA256SUMS`, the copy you just verified, not the copy inside
 the bundle.
 
 The bundle holds every image (`images.tar`), the installer, the Compose files and
-the Helm charts. On Kubernetes with registry access, the images and charts are
+the Helm charts. That includes the self-hosted gateway's CPU model server for
+[decide rules](./decide) (llama.cpp), but no model weights: you choose and place
+those ([decide model](../external/self-hosted-gateway#decide-model)). On Kubernetes with registry access, the images and charts are
 also at `ghcr.io/intutic`, with a pull token Intutic issues to you.
 
 ## Rotate the encryption key

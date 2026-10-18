@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { ChangeClassification, ComplexityTier, RiskLevel, SopLifecycleState } from '../enums.js'
 import { PII_ACTIONS, PII_DETECTOR_IDS } from '../piiDetectors.js'
 import { DeletedResponse, IsoTimestamp, listEnvelope } from './common.js'
+import { ServedDecideRuleResponse } from './decide.js'
 
 const InterventionMode = z.enum(['TRANSPARENT', 'OPAQUE', 'SILENT_LOG'])
 
@@ -207,6 +208,10 @@ export const PolicyResolveResponse = McpCuration.extend({
   sopRules: z.array(SopRuleResponse),
   interventionMode: InterventionMode,
   sqlDropStrictBlock: z.boolean().describe('`ff_sql_drop_strict_block`: the daemon\'s destructive-SQL hook rule blocks instead of warning.'),
+  decideRules: z
+    .array(ServedDecideRuleResponse)
+    .optional()
+    .describe('The `decide:` lines of the enforced SOPs and decide guardrails, with their active calibrations as pins. Empty under `INTUTIC_DECIDE=off`; absent from a control plane before 3.0.'),
 })
 export type PolicyResolveResponse = z.infer<typeof PolicyResolveResponse>
 
@@ -328,6 +333,10 @@ export const JudgeFinalizeResponse = z.object({
     .optional(),
   cascade: CascadeSummary.optional(),
   personalCascade: z.object({ decision: z.enum(['clean', 'violation', 'review']), score: z.number() }).optional(),
+  deprecation: z
+    .object({ code: z.literal('FREE_TEXT_VERDICT_DEPRECATED'), removedIn: z.literal('4.0'), message: z.string() })
+    .optional()
+    .describe('When `builtin:finalize` has no band for the workspace: the free-text verdict decided, as before 3.0. Deprecated; retired in 4.0.'),
 })
 export type JudgeFinalizeResponse = z.infer<typeof JudgeFinalizeResponse>
 

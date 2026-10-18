@@ -55,7 +55,7 @@ The gate SDKs throw `IntuticGateEscalation`, a subclass of `IntuticGateRefusal`,
 
 ## What 3.0 reads but does not enforce {#not-enforced}
 
-- **`on: response` rules are not enforced in 3.0.** They are read and validated, and nothing evaluates them: the gates see tool calls, and the gateway evaluates no `decide:` line. The only decide rule the gateway runs is the `local-judge` rule it builds from the deprecated variables below. The gateway logs each SOP's response rules when it loads them, and `intutic decide lint`, `intutic gates install` and `intutic doctor` name each one. A `decide:` line that does not read refuses its tools at every gate; the gateway only logs it.
+- **`on: response` rules are enforced at the gateway**, not by the gates, which see tool calls only. The gateway judges each complete response by them and writes a `VIOLATION` or `AMBIGUOUS` note into it, and asks `on: tool_call` rules about the tool calls in a response too ([Decide rules at the gateway](/guide/decide#at-the-gateway)). It reads the decide engine from `~/.intutic/decide/engine.json` and the `INTUTIC_DECIDE_*` variables when it starts. A `decide:` line that does not read refuses its tools at every gate, and every response at the gateway.
 - **`context: ["last_user_turn"]` is reserved.** A rule may declare it, and the rule's hash includes it, but no gate supplies the user's last turn, so the rule is asked without it. `intutic decide test` and `intutic decide eval` ask without it too, even when the file has a `lastUserTurn`, so an eval measures what a gate will ask. `intutic decide lint` and `intutic gates install` warn about each rule that declares it.
 
 ---
@@ -87,7 +87,19 @@ Without the band variables there is no equivalent decide rule. The free-text ver
 
 <!-- ENTERPRISE_ONLY_START -->
 `intutic judge configure` now also writes the decide engine's configuration, `~/.intutic/decide/engine.json`, and prints the deprecated variables with a warning. See [On-Prem Judge Setup](/external/on-prem-judge#typed-stage-the-local-judge-decide-rule) for the walkthrough.
+
+### The control plane's judge {#control-plane-judge}
+
+The control plane's governance judge follows the same rule. With a band (`INTUTIC_JUDGE_CASCADE=on`, `INTUTIC_JUDGE_CASCADE_LO` below `INTUTIC_JUDGE_CASCADE_HI`, `HI` above 0, and the workspace on `INTUTIC_TYPED_JUDGE_WORKSPACES` when that is set), the built-in decide rule `builtin:finalize` decides each finished response: clean, a violation, or held for a person's ruling in the [Review Queue](/guide/decisions#judge-reviews). The free-text judge only writes a violation's correction text.
+
+Without a band there is no equivalent rule, so the free-text verdict keeps deciding, as in 2.x. A self-hosted control plane sets no band unless you add one. Each such verdict carries a deprecation: the finalize answer has a `deprecation` field (`FREE_TEXT_VERDICT_DEPRECATED`, `removedIn: "4.0"`), an incident it opens shows **Judge: free-text**, and the control plane logs `judge_free_text_verdict_deprecated` once per process. 4.0 retires the free-text verdict; measure a band for your judge model before then.
 <!-- ENTERPRISE_ONLY_END -->
+
+---
+
+## Decision calls are governed {#decision-traffic}
+
+The proxy now answers `POST /v1/systemone` and `POST /v1/decisions` itself, as [decision traffic](/guide/decision-traffic), instead of passing them through as unrecognised requests. Two things can refuse a call that 2.9 forwarded: a DLP `block` pattern in the state, and, in the default `enforce` mode, a model with no pinned version, such as `jev-latest` (`403 policy_denied`). Pin the version, or set `decision_traffic.mode: shadow` or `decision_traffic.allow_unpinned: true` while you move.
 
 ---
 

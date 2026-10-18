@@ -95,6 +95,62 @@ pub struct IntuticSettings {
     /// Cloud upstreams — Bedrock, Vertex AI, Azure OpenAI (`crate::cloud`).
     #[serde(default)]
     pub providers: crate::cloud::config::ProvidersConfig,
+    /// Customer calls to decision models (`/v1/systemone`, `/v1/decisions`).
+    #[serde(default)]
+    pub decision_traffic: DecisionTrafficConfig,
+}
+
+/// Whether the decision-traffic version pin refuses or only logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DecisionTrafficMode {
+    /// A call naming a moving alias, or a model with no version, is refused.
+    #[default]
+    Enforce,
+    /// Such a call is forwarded and logged as `would_refuse_unpinned`.
+    Shadow,
+}
+
+/// Governing customer calls to decision models (`crate::decision_traffic`).
+///
+/// DLP and egress apply to these calls with their own settings; this block
+/// holds what is particular to decision traffic.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct DecisionTrafficConfig {
+    #[serde(default)]
+    pub mode: DecisionTrafficMode,
+    /// Admit a model with no pinned version, such as `jev-latest`.
+    #[serde(default)]
+    pub allow_unpinned: bool,
+    /// The lowest acceptable top probability per question name, `*` for every
+    /// question. A question answered below its floor is named in the
+    /// `x-intutic-decision-abstain` response header.
+    #[serde(default)]
+    pub floors: std::collections::BTreeMap<String, f64>,
+    /// Models whose every call needs a person before the app acts on it
+    /// (`x-intutic-decision-requires-human: 1`).
+    #[serde(default)]
+    pub consequential_models: Vec<String>,
+    /// Where `/v1/systemone` calls go: `UPSTREAM_URL`, else TypeSafe's API.
+    #[serde(default)]
+    pub systemone_upstream: Option<String>,
+    /// Where `/v1/decisions` calls go: `UPSTREAM_URL`, else OpenAI's API.
+    #[serde(default)]
+    pub decisions_upstream: Option<String>,
+}
+
+impl DecisionTrafficConfig {
+    /// A floor outside `[0, 1]` is a mistake in the file, not a setting.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        for (name, floor) in &self.floors {
+            if !(floor.is_finite() && (0.0..=1.0).contains(floor)) {
+                anyhow::bail!(
+                    "decision_traffic.floors.{name} = {floor} is not a probability between 0 and 1"
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Refusing a forbidden tool call in the model's *response*, before the client
@@ -896,6 +952,8 @@ pub fn load_config(path: &str) -> anyhow::Result<ProxyConfig> {
         tracing::warn!("{warning}");
     }
 
+    config.intutic_settings.decision_traffic.validate()?;
+
     Ok(config)
 }
 
@@ -1268,5 +1326,52 @@ intutic_settings:
              it has never heard of — that is precisely the model this field \
              exists to let an operator test"
         );
+    }
+}
+
+#[cfg(test)]
+mod decision_traffic_tests {
+    use super::*;
+
+    #[test]
+    fn decision_traffic_defaults_to_enforce_and_reads_every_setting() {
+        let cfg: ProxyConfig = serde_yaml::from_str("{}").unwrap();
+        let dt = &cfg.intutic_settings.decision_traffic;
+        assert_eq!(dt.mode, DecisionTrafficMode::Enforce);
+        assert!(!dt.allow_unpinned && dt.floors.is_empty());
+
+        let cfg: ProxyConfig = serde_yaml::from_str(
+            "intutic_settings:\n  decision_traffic:\n    mode: shadow\n    allow_unpinned: true\n    \
+             floors: {approve: 0.8, \"*\": 0.5}\n    consequential_models: [jev-1.14.0]\n    \
+             systemone_upstream: http://kev.internal:8009\n",
+        )
+        .unwrap();
+        let dt = &cfg.intutic_settings.decision_traffic;
+        assert_eq!(dt.mode, DecisionTrafficMode::Shadow);
+        assert!(dt.allow_unpinned);
+        assert_eq!(dt.floors.get("*"), Some(&0.5));
+        assert_eq!(dt.consequential_models, ["jev-1.14.0"]);
+        assert_eq!(
+            dt.systemone_upstream.as_deref(),
+            Some("http://kev.internal:8009")
+        );
+        assert!(dt.validate().is_ok());
+    }
+
+    #[test]
+    fn a_floor_that_is_not_a_probability_is_refused() {
+        for bad in ["1.5", "-0.1", ".nan"] {
+            let cfg: ProxyConfig = serde_yaml::from_str(&format!(
+                "intutic_settings:\n  decision_traffic:\n    floors: {{approve: {bad}}}\n"
+            ))
+            .unwrap();
+            assert!(
+                cfg.intutic_settings.decision_traffic.validate().is_err(),
+                "{bad}"
+            );
+        }
+        let unknown_mode: Result<ProxyConfig, _> =
+            serde_yaml::from_str("intutic_settings:\n  decision_traffic:\n    mode: off\n");
+        assert!(unknown_mode.is_err(), "a mode typo must not pass silently");
     }
 }

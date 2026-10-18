@@ -66,6 +66,15 @@ const INCLUDED_PREFIXES = [
 // proxy.
 const EXCLUDED_MODEL_PATTERNS: RegExp[] = [/(^|\/)lyria[-\d.]*/i]
 
+// Decision models, for customer decision traffic (packages/proxy/src/decision_traffic.rs).
+// Upstream lists them under their provider's prefix (`typesafe/jev-1.14.0`)
+// with `mode: evaluation`, and the proxy prices a call by that same key
+// (`metering::decision_call_cost`). They return probabilities, not text, so a
+// zero output rate is the published rate, not a missing one; the input rate
+// keeps the budget gate live. OpenAI's Decisions model is a chat-priced entry.
+const DECISION_MODEL_PROVIDERS = new Set(['typesafe'])
+const DECISION_MODELS = new Set(['gpt-6-luna'])
+
 // ─── Family fallback definitions ─────────────────────────────────────────────
 // Manually curated prefix fallbacks for unknown model version aliases.
 const FAMILY_FALLBACKS: Record<string, { input_cost_per_1k: number; output_cost_per_1k: number }> = {
@@ -373,7 +382,9 @@ async function main() {
 
     // Include only models matching our curated prefix list
     const lower = name.toLowerCase()
-    const matches = INCLUDED_PREFIXES.some(prefix => lower.startsWith(prefix))
+    const decision = DECISION_MODEL_PROVIDERS.has(String(data.litellm_provider ?? ''))
+      || DECISION_MODELS.has(lower)
+    const matches = (decision || INCLUDED_PREFIXES.some(prefix => lower.startsWith(prefix)))
       && !EXCLUDED_MODEL_PATTERNS.some(re => re.test(lower))
     if (!matches) { skipped++; continue }
 
@@ -383,7 +394,8 @@ async function main() {
     // one value that makes a budget gate silently unenforceable. They are also not
     // what this proxy prices: it costs chat completions. Skip at the source rather
     // than special-casing a zero downstream.
-    if (data.mode && data.mode !== 'chat' && data.mode !== 'completion') { skipped++; continue }
+    const priced = data.mode === 'chat' || data.mode === 'completion' || (decision && data.mode === 'evaluation')
+    if (data.mode && !priced) { skipped++; continue }
 
     // Must have at least input cost
     const input = data.input_cost_per_token ?? data.input_cost_per_1k_tokens

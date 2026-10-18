@@ -275,6 +275,23 @@ describe('localDecideRules — the local SOPs', () => {
     expect(flipped).toEqual({ ...pinned, rollout: 'shadow' })
   })
 
+  it('stamps the rules of an SOP in `mode: shadow` shadow, as the control plane\'s resolve does, with no fallback line', async () => {
+    const decideDir = tempDir()
+    const evals = join(decideDir, 'evals', 'be5cbda58b93cf90e90d1b994c32331b05459aefba564ab9e2d190396a1b3291')
+    mkdirSync(evals, { recursive: true })
+    writeFileSync(join(evals, 'sha256-5f1c0e2a9b7d.json'), JSON.stringify(PIN))
+    const shadowSop = SOP.replace('---\ndecide:', '---\nmode: shadow\ndecide:')
+    const rules = await localDecideRules([entry(shadowSop)], { decideDir })
+    // What listServedDecideRules serves for the same SOP: `rollout: 'shadow'`.
+    expect(rules).toEqual([expect.objectContaining({ rollout: 'shadow', pins: [PIN] })])
+    const dir = tempDir()
+    await writeLocalPolicySnapshot({ snapshotDir: dir, decideRules: rules })
+    expect(records(dir).map((r) => [r.rollout, r.stampedBy, r.fallbackId, r.pins.length])).toEqual([['shadow', 'server-shadow', null, 1]])
+    expect(dataLines(dir).filter((l) => l.startsWith('decide-fallback:'))).toEqual([])
+    // `mode: enforce` (or none) leaves the rule its own rollout.
+    expect((await localDecideRules([entry(SOP.replace('---\ndecide:', '---\nmode: enforce\ndecide:'))], { decideDir }))[0]!.rollout).toBeUndefined()
+  })
+
   it('keeps each line as written, unreadable ones included, and reads no pins for them', async () => {
     const decideDir = tempDir()
     const rules = await localDecideRules(
