@@ -6,7 +6,6 @@ that answers with the vectors' recorded responses; no model runs."""
 from __future__ import annotations
 
 import json
-import socket
 import threading
 import time
 from dataclasses import asdict
@@ -125,11 +124,8 @@ def replay():
 
 
 def closed_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    # Port 1 is privileged, so no mock server another test starts can take it.
+    return 1
 
 
 def config(url, c, parallel=1):

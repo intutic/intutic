@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import socket
 from pathlib import Path
 
 import pytest
@@ -90,11 +89,8 @@ def _gate(tmp_path, monkeypatch, rules=(RECORD, FALLBACK, OTHER)):
 
 
 def _closed_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    # Port 1 is privileged, so no mock server another test starts can take it.
+    return 1
 
 
 def test_is_on_with_the_shared_budget():

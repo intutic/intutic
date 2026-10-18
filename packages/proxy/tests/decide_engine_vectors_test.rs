@@ -116,9 +116,12 @@ async fn replay(entries: &[Value]) -> MockServer {
     server
 }
 
+/// A port nothing listens on. Port 1 is privileged, so no mock server a
+/// parallel test starts can ever take it. A port borrowed from the OS and
+/// released could be handed straight to another test's server, and a "down"
+/// case would then consume that server's replies.
 fn closed_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    l.local_addr().unwrap().port()
+    1
 }
 
 fn approx(a: f64, b: f64) -> bool {

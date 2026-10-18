@@ -115,7 +115,7 @@ export async function uploadDecideLogs(opts: DecideUploadOptions): Promise<numbe
     const flush = async (): Promise<boolean> => {
       if (batch.length === 0) return true
       try {
-        const res = await doFetch(`${opts.controlPlaneUrl.replace(/\/+$/, '')}/api/v1/decide/events`, {
+        const res = await doFetch(`${trimTrailingSlashes(opts.controlPlaneUrl)}/api/v1/decide/events`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${opts.apiKey}` },
           body: JSON.stringify({ events: batch.map((b) => b.row) }),
@@ -155,4 +155,11 @@ export async function uploadDecideLogs(opts: DecideUploadOptions): Promise<numbe
     if (!(await flush())) return sent
   }
   return sent
+}
+
+/** Trailing slashes trimmed by a scan, not a `/+$` regex, which is quadratic on a run of slashes. */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length
+  while (end > 0 && url.charCodeAt(end - 1) === 0x2f) end--
+  return url.slice(0, end)
 }

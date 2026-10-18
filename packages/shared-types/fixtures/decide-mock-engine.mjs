@@ -71,11 +71,11 @@ export async function startDecideMockEngine(replay = []) {
   }
 }
 
-/** A port nothing listens on: bound, then released. */
+/**
+ * A port nothing listens on. Port 1 is privileged, so no mock server a
+ * parallel test starts can take it; a port borrowed from the OS and released
+ * could be handed straight to another test's server.
+ */
 export async function closedPort() {
-  const server = createServer()
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const { port } = server.address()
-  await new Promise((resolve) => server.close(() => resolve()))
-  return port
+  return 1
 }
