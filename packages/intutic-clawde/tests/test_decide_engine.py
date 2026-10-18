@@ -136,6 +136,7 @@ def config(url, c, parallel=1):
     return DecideEngineConfig(
         url=url, adapter=c["adapter"], model=c["model"], timeout_ms=c.get("timeoutMs", 5000), parallel=parallel,
         structured=c.get("structured", False), ollama=c.get("ollama", False), model_digest=c.get("modelDigest"),
+        max_response_state_bytes=c.get("maxResponseStateBytes"),
     )
 
 
@@ -145,7 +146,8 @@ def test_host_guard(case):
     assert (v.ok, v.reason) == (case["ok"], case["reason"])
 
 
-CONFIG_KEYS = {"timeout_ms": "timeoutMs", "api_key": "apiKey", "model_digest": "modelDigest", "self_hosted_hosts": "selfHostedHosts"}
+CONFIG_KEYS = {"timeout_ms": "timeoutMs", "api_key": "apiKey", "model_digest": "modelDigest", "self_hosted_hosts": "selfHostedHosts",
+               "max_response_state_bytes": "maxResponseStateBytes"}
 
 
 @pytest.mark.parametrize("case", VECTORS["config"], ids=[c["name"] for c in VECTORS["config"]])
@@ -170,7 +172,7 @@ def test_state(case):
 
     def build():
         if i["kind"] == "response":
-            return build_decide_response_state(i["ruleText"], i["content"])
+            return build_decide_response_state(i["ruleText"], i["content"], i.get("maxBytes"))
         return build_decide_tool_call_state(i["ruleId"], i["sopTitle"], i["ruleText"], i["tool"], i["cwd"],
                                             i["toolInput"], i.get("lastUserTurn"))
 

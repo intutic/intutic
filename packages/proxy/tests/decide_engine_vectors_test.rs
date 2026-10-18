@@ -6,7 +6,7 @@
 use intutic_proxy::decide::engine::{
     build_response_state, build_tool_call_state, question_prompts, resolve_config, DecideAdapter,
     DecideEngine, DecideEngineConfig, ErrorOutcome, QuestionCall, QuestionType, ToolCallStateInput,
-    DECIDE_UNAVAILABLE_REFUSAL,
+    DECIDE_MAX_RESPONSE_STATE_BYTES, DECIDE_UNAVAILABLE_REFUSAL,
 };
 use intutic_proxy::decide::guard::check_self_hosted_decision_host;
 use serde_json::{json, Value};
@@ -83,6 +83,10 @@ fn config(url: &str, c: &Value, parallel: usize) -> DecideEngineConfig {
             .and_then(Value::as_str)
             .map(str::to_string),
         self_hosted_hosts: None,
+        max_response_state_bytes: c
+            .get("maxResponseStateBytes")
+            .and_then(Value::as_u64)
+            .map(|n| n as usize),
     }
 }
 
@@ -170,6 +174,9 @@ fn config_vectors() {
                         seen[k] = json!(v);
                     }
                 }
+                if let Some(n) = cfg.max_response_state_bytes {
+                    seen["maxResponseStateBytes"] = json!(n);
+                }
                 assert_eq!(seen, c["expect"], "{}", c["name"]);
             }
         }
@@ -183,7 +190,13 @@ fn state_vectors() {
         let i = expand(&c["input"]);
         let s = |k: &str| i[k].as_str().unwrap_or_default().to_string();
         let got = if i["kind"] == "response" {
-            build_response_state(&s("ruleText"), &s("content"))
+            build_response_state(
+                &s("ruleText"),
+                &s("content"),
+                i.get("maxBytes")
+                    .and_then(Value::as_u64)
+                    .map_or(DECIDE_MAX_RESPONSE_STATE_BYTES, |n| n as usize),
+            )
         } else {
             build_tool_call_state(&ToolCallStateInput {
                 rule_id: &s("ruleId"),

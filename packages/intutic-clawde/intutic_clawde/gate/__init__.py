@@ -32,8 +32,8 @@ from .actions import classify, is_deploy, is_test, touches_infra
 from .client import GateClient, GateResponse
 from .framework import guard, guard_tools, intutic_headers
 from .gate import (
-    GATE_REFUSAL_CODES, READ_ONLY_TOOLS, Gate, GateConfig, IntuticGateHold, IntuticGateRefusal,
-    active, install,
+    GATE_REFUSAL_CODES, READ_ONLY_TOOLS, Gate, GateConfig, IntuticGateEscalation, IntuticGateHold,
+    IntuticGateRefusal, active, install,
 )
 from .hold import canonical_json, hold_key, hold_message
 from .imagecheck import Verdict as ImageVerdict
@@ -48,7 +48,8 @@ __all__ = [
     "classify", "is_deploy", "is_test", "touches_infra",
     "GateClient", "GateResponse",
     "guard", "guard_tools", "intutic_headers",
-    "Gate", "GateConfig", "GATE_REFUSAL_CODES", "IntuticGateHold", "IntuticGateRefusal", "READ_ONLY_TOOLS",
+    "Gate", "GateConfig", "GATE_REFUSAL_CODES", "IntuticGateEscalation", "IntuticGateHold", "IntuticGateRefusal",
+    "READ_ONLY_TOOLS",
     "active", "install",
     "canonical_json", "hold_key", "hold_message",
     "ARGUMENTS_SIZE_LIMIT", "COMMAND_SIZE_LIMIT",

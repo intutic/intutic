@@ -15,10 +15,13 @@
  * @module
  */
 
+import * as node_fs from 'node:fs'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
+import { createHash } from 'node:crypto'
 import pc from 'picocolors'
-import { HarnessType } from '@intutic/shared-types'
+import { DECIDE_RECORD_TAG, decideRuleHash, decodeDecideRecord, HarnessType, validateDecideRule } from '@intutic/shared-types'
+import { SNAPSHOT_RULES } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
 import { loadConfig, loadCredentials, saveConfig } from '../config/store.js'
 import { installLocalGates, type LocalGate } from '../lib/localGates.js'
@@ -46,6 +49,38 @@ function describeGate(gate: LocalGate): string {
   if (gate.kind === 'delegated') return pc.dim('gated by the harness it runs inside')
   if (gate.kind === 'bridge') return pc.dim('gated through its MCP bridge')
   return pc.dim('no tool-call gate; rules file only')
+}
+
+/**
+ * The decide rules the snapshot just written carries, as one line: how many
+ * enforce, and why the others run as shadow. Null when it carries none.
+ */
+export function decideSummary(rulesPath: string): string | null {
+  let text: string
+  try {
+    text = node_fs.readFileSync(rulesPath, 'utf-8')
+  } catch {
+    return null
+  }
+  const check = (ir: unknown) => {
+    const v = validateDecideRule(ir)
+    return v.ok ? decideRuleHash(v.rule, (t) => createHash('sha256').update(t, 'utf8').digest('hex')) : null
+  }
+  const records = text
+    .split('\n')
+    .filter((l) => l.startsWith(`${DECIDE_RECORD_TAG}\t`))
+    .map((l) => decodeDecideRecord(l, check))
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+  if (records.length === 0) return null
+  const enforce = records.filter((r) => r.rollout === 'enforce').length
+  const why = new Map<string, number>()
+  for (const r of records) if (r.rollout === 'shadow') why.set(r.stampedBy === 'rule' ? 'rollout: shadow' : r.stampedBy, (why.get(r.stampedBy === 'rule' ? 'rollout: shadow' : r.stampedBy) ?? 0) + 1)
+  const shadow = [...why].map(([k, n]) => `${n} ${k}`).join(', ')
+  return (
+    `Decide rules: ${records.length} compiled, ${enforce} stamped enforce` +
+    (shadow ? `; shadow: ${shadow}` : '') +
+    (why.has('no-pins') ? ' (a rule enforces only after `intutic decide eval` passes for the engine\'s model)' : '')
+  )
 }
 
 export async function runGatesInstall(opts: GatesInstallOptions): Promise<void> {
@@ -122,6 +157,10 @@ export async function runGatesInstall(opts: GatesInstallOptions): Promise<void> 
       (result.snapshot.digest ? `, digest ${result.snapshot.digest}` : '') +
       (result.holdTokens.length > 0 ? `; review_before: ${result.holdTokens.join(', ')} refused (no control plane to hold for)` : ''),
   )
+  if (!opts.dryRun) {
+    const decide = decideSummary(node_path.join(node_os.homedir(), '.intutic', 'hooks', SNAPSHOT_RULES))
+    if (decide) log.info(decide)
+  }
   console.log('')
   log.info('Gates:')
   const width = Math.max(...result.gates.map((g) => g.harness.length))

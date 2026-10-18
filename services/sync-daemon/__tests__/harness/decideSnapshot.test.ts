@@ -144,6 +144,26 @@ describe('writePolicySnapshot — decide lines', () => {
     expect(await stamp(policy({ decideRules: [served({ ruleHash: check(RULE)! })] }))).toEqual({ rollout: 'enforce', stampedBy: 'rule', fallback: true, lines: 1 })
   })
 
+  it('stamps every rule local-disable while `intutic decide disable` is in force, and keeps an unreadable line refusing', async () => {
+    const home = tempDir()
+    vi.stubEnv('HOME', home)
+    try {
+      mkdirSync(join(home, '.intutic', 'decide'), { recursive: true })
+      writeFileSync(join(home, '.intutic', 'decide', 'disabled'), '{}\n')
+      const dir = tempDir()
+      await writePolicySnapshot(policy({ decideRules: [served(), served({ rule: { ...RULE, id: 'other', rollout: 'shadow' } }), served({ rule: { id: 'half' } })] }), dir)
+      expect(records(dir).map((r) => [r!.ref, r!.rollout, r!.stampedBy, r!.fallbackId])).toEqual([
+        ['sop_1#prod-data-export', 'shadow', 'local-disable', null],
+        ['sop_1#other', 'shadow', 'rule', null],
+      ])
+      expect(dataLines(dir).filter((l) => l.startsWith('decide-fallback:')).map((l) => l.split('\t').slice(0, 2))).toEqual([
+        [`decide-fallback:unreadable.3@${sha256('sop_1').slice(0, 12)}`, 'block'],
+      ])
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('refuses the tools of a line it cannot read, every tool when it names none, and writes no record for it', () => {
     const hash = sha256('sop_1').slice(0, 12)
     const rules = buildSnapshotRules(

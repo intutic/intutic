@@ -17,6 +17,11 @@ COMMAND_SIZE_LIMIT = 256 * 1024
 #: The largest tool arguments, in UTF-8 bytes of compact JSON, the gate evaluates.
 ARGUMENTS_SIZE_LIMIT = 1024 * 1024
 
+#: How long the decide tier may spend on one call unless INTUTIC_DECIDE_BUDGET_MS
+#: says otherwise: a JavaScript hook gate's budget under a 10 s timeout
+#: (DECIDE_SDK_BUDGET_MS in gateLimits.ts).
+DECIDE_BUDGET_MS = 7300
+
 
 def too_large_reason(command: str, tool_input: Optional[dict]) -> Optional[str]:
     """Why a call is too large to evaluate, or None.

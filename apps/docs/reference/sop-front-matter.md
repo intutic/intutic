@@ -9,9 +9,10 @@ looks and what `INTUTIC_SOPS_DIR` is for.
 
 ## The keys
 
-Eleven keys can block, steer or hold a run, and a twelfth, `decide:`, is
-reserved for Decide (3.0). Everything else in a SOP is prose, injected into the
-agent's context and advisory by construction — the model may ignore it.
+Eleven keys can block, steer or hold a run, and a twelfth, `decide:`, asks a
+self-hosted model about a tool call before the hook gates let it run. Everything
+else in a SOP is prose, injected into the agent's context and advisory by
+construction — the model may ignore it.
 
 | Key | Shape | What it does |
 | :--- | :--- | :--- |
@@ -26,7 +27,7 @@ agent's context and advisory by construction — the model may ignore it.
 | `forbid_with:` | `taint(), token` | Refuses the two together in one request. |
 | `sql_guard:` | `refuse` or `warn`, with `sql_allow_dsns:` | Refuses (or logs) destructive SQL in a shell call aimed at a database not on the allowlist. See [Destructive SQL](#destructive-sql). |
 | `hook_rule:` | one JSON object per line | Refuses a tool call by tool name and argument literals. See [Hook rules](#hook-rules). |
-| `decide:` | one JSON object per line | Reserved for Decide (3.0): narrow questions a self-hosted model answers about a tool call or a response. Read and validated today; evaluates nothing yet. |
+| `decide:` | one JSON object per line | Narrow questions a self-hosted model answers about a tool call; the hook gates and gate SDKs refuse, allow or ask a person from the answers. The proxy reads and validates the line and evaluates nothing. See [Decide rules](#decide-rules). |
 
 ::: warning Two shapes that look right and match nothing
 
@@ -309,6 +310,100 @@ literal, or a key it does not know — is not ignored: it refuses every tool cal
 while it is in force, and the load names it. A call whose arguments are not
 JSON is refused by a rule that constrains arguments, since whether a literal is
 in them cannot be shown. A rule that names only tools decides on the name.
+
+## Decide rules {#decide-rules}
+
+A [decide rule](/guide/decide) is one `decide:` line holding one JSON object,
+one rule per line, like `hook_rule:`. It is read at any indentation. The JSON is
+never split on commas, and a YAML block under `decide:` is not read: a bare
+`decide:` line does not read.
+
+```yaml
+---
+decide: {"id":"prod-data-export","on":"tool_call","tools":["Bash"],"questions":{"exports":{"type":"yes_no","ask":"Does this command copy customer data out of the production database?"},"dest":{"type":"choice","ask":"Where does the data go?","options":["local_file","cloud_bucket","external_host"]}},"when":"exports AND dest != none_of_these","band":{"yes_at":0.85,"no_below":0.15},"escalate":"ask","rollout":"shadow"}
+---
+```
+
+| Field | Required | Value |
+| :--- | :--- | :--- |
+| `id` | yes | A lower-case letter, then up to 47 of `a-z`, `0-9`, `_` or `-`. Unique within the SOP: a second line with the same id does not read |
+| `title` | no | 1 to 80 characters, no tab or newline. Default: the SOP's title (its first `# ` heading, else its file name) |
+| `on` | yes | `tool_call`, or `response`. A `response` rule is not enforced in 3.0: it is read and validated, and no gate or gateway evaluates it |
+| `tools` | with `on: tool_call` only | 1 to 8 tool names, each a letter then up to 63 of `A-Z`, `a-z`, `0-9`, `_`, `.`, `:` or `-`. Matched exactly, case included, against the name the harness reports. No wildcards |
+| `questions` | yes | 1 to 8 questions, by name: a lower-case letter, then up to 31 of `a-z`, `0-9` or `_`, and not `and`, `or`, `not` or `in` |
+| `questions.<q>.type` | yes | `yes_no` or `choice` |
+| `questions.<q>.ask` | yes | 8 to 300 characters, no tab or newline, never about approval (below) |
+| `questions.<q>.options` | with `choice` only | 2 to 8 distinct option names, written like question names. `none_of_these` is appended when absent and moved last when present |
+| `questions.<q>.band` | no | This question's band, as `band`. Default: the rule's |
+| `when` | yes | The expression below, at most 256 characters, using every question at least once |
+| `band` | no | `{"yes_at": …, "no_below": …}`: `yes_at` above 0.5 and below 1, `no_below` above 0 and below `yes_at`. Default `{"yes_at": 0.85, "no_below": 0.15}` |
+| `escalate` | no | What an unknown `when` does: `ask` (default), `review` (treated as `ask`) or `refuse` |
+| `rollout` | no | `shadow` (default) or `enforce`. The author's ceiling: the rule enforces only once a pre-registered `intutic decide eval` has pinned a model for it |
+| `context` | no, `on: tool_call` only | `["last_user_turn"]` or `[]`. Reserved in 3.0: no gate supplies the last user turn, so the rule is asked without it |
+
+Any other field makes the line unreadable, `mode` included: a rule's rollout is
+`rollout`, and a SOP's own `mode: shadow` does not apply to its decide rules.
+
+### `when`
+
+```
+expr  := or
+or    := and ( "OR" and )*
+and   := unary ( "AND" unary )*
+unary := "NOT" unary | atom
+atom  := "(" expr ")" | name | name "==" option | name "!=" option
+       | name "IN" "(" option ( "," option )* ")"
+```
+
+- A bare `name` is a `yes_no` question and means "the answer is yes".
+- `==`, `!=` and `IN` take a `choice` question and options it has
+  (`none_of_these` included). `q != o` is `NOT (q == o)`; `q IN (a, b)` is
+  `(q == a) OR (q == b)`.
+- Keywords are upper case; names and options are lower case. There are no
+  numbers, functions or other operators.
+
+Each answer is yes, no or unknown through its band, and `when` is evaluated in
+three-valued logic: true refuses (`DECIDE_REFUSED`), false allows, and unknown
+escalates through `escalate`. Every question is asked before `when` is
+evaluated.
+
+### What makes a line unreadable
+
+The first failure is the reason, in this order: the JSON's shape (a missing or
+unknown field, or a value out of range), then:
+
+| Check | Reason |
+| :--- | :--- |
+| `tools` with `on: tool_call` only | `decide: tools is required for on: tool_call and not allowed for on: response` |
+| `context` with `on: tool_call` only | `decide: context applies to on: tool_call only` |
+| 1 to 8 questions | `decide: a rule asks 1 to 8 questions` |
+| Each band's `no_below` below its `yes_at` | `decide: <q>: no_below must be below yes_at` |
+| `when` parses | `decide: when: <message> at column <n>` |
+| `when` names questions and options that exist, with the right types | `decide: when: <q> is not a yes_no question`, `… is not a choice question`, `decide: when: unknown option <o> for <q>` |
+| Every question is used in `when` | `decide: question <q> is never used in when` |
+| No question asks about approval | `decide: <q> asks about approval; approval comes from the harness ask or the review queue, never from a question` |
+
+The approval check refuses wording that contains a word starting `approv`,
+`authoris` or `authoriz`, `consent`, `permit` or `permission`, or the phrase
+`sign off` or `signed off` (with a space or a hyphen), in any case.
+
+An unreadable line is kept, not dropped. The policy snapshot turns it into a
+block rule on the tools it names, or on every tool when it names none that can
+be read, so the calls it would have judged are refused until it is fixed.
+`intutic gates install`, `intutic decide lint` and the proxy's load name it with
+its file.
+
+### Identity
+
+- **ref:** `<sopId>#<id>`, for example `local:data.md#prod-data-export` for
+  `.intutic/sops/data.md`. A refusal names the rule as `decide.<ref>`.
+- **rule hash:** the SHA-256 of the rule's canonical form: `on`, `tools`, the
+  questions with every band written out and `none_of_these` placed, `when`
+  fully parenthesised (`exports AND dest != none_of_these` becomes
+  `(exports AND (NOT (dest == none_of_these)))`) and `context`. It leaves out
+  `id`, `title`, `escalate` and `rollout`. A pin belongs to one rule hash, so
+  changing a word, an option or a band returns the rule to shadow, and changing
+  its rollout does not.
 
 ## The `action:` vocabulary
 

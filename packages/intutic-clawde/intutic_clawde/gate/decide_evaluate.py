@@ -9,7 +9,10 @@ hash) is for the model digest the engine reports; and a known-answer canary,
 cached per engine URL and digest in ``~/.intutic/decide/canary.json`` for ten
 minutes, runs beside the rule's questions when the cache is missing, failed or
 stale. A failed canary discards every answer: the engine is unavailable, which
-refuses an enforcing rule with GOVERNANCE_UNAVAILABLE.
+refuses an enforcing rule with GOVERNANCE_UNAVAILABLE. With the engine's
+per-call p95 (``q95Ms``, which ``intutic doctor`` stores in engine.json), a
+rule whose estimate does not fit the time left is not asked: an enforcing one
+escalates, a shadow one is logged and allowed.
 
 All three ports run the ``rollout`` and ``evaluate`` cases of
 packages/shared-types/fixtures/decide-engine-vectors.json.
@@ -149,7 +152,8 @@ class DecideRuleReport:
     outcome: str
     code: Optional[str]
     via: Optional[str]
-    #: The engine error that made the rule unavailable or unknown.
+    #: The engine error that made the rule unavailable or unknown, or
+    #: "budget_skip": its estimate did not fit the time left, so it was not asked.
     error: Optional[str]
     model_digest: Optional[str]
     #: None when nothing came back, or when a failed canary discarded it.
@@ -163,7 +167,8 @@ class DecideEvaluation:
     skipped: List[str]
     #: The engine's identity before the questions (``describe``), or None.
     engine: Optional[Dict[str, str]]
-    #: "cached", "ok", "failed", or None when not needed.
+    #: "cached", "ok", "failed" (answered wrongly), or None when not needed
+    #: or when the engine gave the canary no answer.
     canary: Optional[str]
 
 
@@ -172,6 +177,35 @@ _ALLOW = {"outcome": "allow", "code": None, "ruleRef": None, "via": None, "reaso
 
 def _error_code(err: BaseException) -> str:
     return err.code if isinstance(err, DecideEngineError) else "bad_response"
+
+
+# ---------------------------------------------------------------------------
+# The latency budget
+# ---------------------------------------------------------------------------
+
+
+def decide_rule_calls(rule: Dict[str, Any]) -> int:
+    """The engine calls one evaluation of ``rule`` makes: a yes/no question
+    one, a choice two, or three past three options (none_of_these counted)."""
+    n = 0
+    for q in rule["questions"].values():
+        n += 1 if q["type"] == "yes_no" else (3 if len(decide.decide_options(q)) > 3 else 2)
+    return n
+
+
+def decide_rule_estimate_ms(rule: Dict[str, Any], q95_ms: float, parallel: int) -> int:
+    """The estimated time to evaluate ``rule``: the per-call p95 times its calls over ``parallel``."""
+    # Rounded half up, as JavaScript's Math.round, not Python's half to even.
+    return int(math.floor(q95_ms * math.ceil(decide_rule_calls(rule) / max(1, parallel)) + 0.5))
+
+
+def decide_stored_q95_ms(file: Any) -> Optional[float]:
+    """The per-call p95 ``intutic doctor`` stored in engine.json (``q95Ms``,
+    parsed), or None when there is none."""
+    v = file.get("q95Ms") if isinstance(file, dict) else None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
+        return None
+    return v
 
 
 def evaluate_decide_call(
@@ -187,13 +221,79 @@ def evaluate_decide_call(
     canary: CanaryFileStore,
     last_user_turn: Optional[str] = None,
     now_ms=lambda: time.time() * 1000,
+    q95_ms: Optional[float] = None,
+    parallel: int = 1,
 ) -> DecideEvaluation:
     """Evaluates the decide rules a tool call matches. ``rules`` are decoded
     ``@decide`` records, in snapshot order; ``engine`` is a DecideEngine (or
     anything with its ``ask`` and ``describe``), or the DecideEngineError that
     creating it raised; ``deadline_s`` is an absolute time.monotonic() time.
     Never raises on an engine error: the rule is unavailable (or, for
-    too_large, unknown)."""
+    too_large, unknown).
+
+    With the engine's p95 (``q95_ms``, see decide_stored_q95_ms), a rule
+    whose estimate does not fit the time left before ``deadline_s`` is not
+    asked: its report carries ``budget_skip`` and it is unknown. An enforcing
+    one escalates (or refuses, with ``escalate: refuse``); a shadow one is
+    allowed. The rest are asked."""
+    args = dict(deterministic=deterministic, tool=tool, tool_input=tool_input, cwd=cwd, deadline_s=deadline_s,
+                engine=engine, engine_url=engine_url, canary=canary, last_user_turn=last_user_turn, now_ms=now_ms)
+    if q95_ms is None or deterministic != "allow":
+        return _evaluate_decide_rules(rules=rules, **args)
+    left_ms = (deadline_s - time.monotonic()) * 1000
+    in_budget, over_budget = [], []
+    for r in rules:
+        v = decide.validate_decide_rule(r["ir"])
+        named = r["ir"].get("on") == "tool_call" and tool in (r["ir"].get("tools") or [])
+        if named and v["ok"] and decide_rule_estimate_ms(v["rule"], q95_ms, parallel) > left_ms:
+            over_budget.append(r)
+        else:
+            in_budget.append(r)
+    ev = _evaluate_decide_rules(rules=in_budget, **args)
+    if not over_budget:
+        return ev
+
+    digest = ev.engine["model_digest"] if ev.engine else None
+    skipped = []
+    for r in over_budget:
+        v = decide.validate_decide_rule(r["ir"])
+        pins = r["pins"] if v["ok"] and decide.decide_rule_hash(v["rule"]) == r["ruleHash"] else []
+        eff = decide_effective_rollout(dict(r, pins=pins), digest)
+        escalate = (v["rule"].get("escalate") if v["ok"] else None) or "ask"
+        base = dict(ref=r["ref"], rule_hash=r["ruleHash"], effective=eff["effective"], why=eff["why"],
+                    error="budget_skip", model_digest=digest, answers=None)
+        if eff["effective"] == "shadow":
+            skipped.append(DecideRuleReport(**base, outcome="allow", code=None, via=None))
+        elif escalate == "refuse":
+            skipped.append(DecideRuleReport(**base, outcome="refuse", code="DECIDE_ESCALATED", via=None))
+        else:
+            skipped.append(DecideRuleReport(**base, outcome="escalate", code="DECIDE_ESCALATED", via=escalate))
+    reports = ev.rules + skipped
+    # A refusal for too many rules on the tool comes before any rule is asked, and stands.
+    if not ev.rules and ev.call["outcome"] != "allow":
+        call = ev.call
+    else:
+        results = [{"ref": r.ref, "effective": r.effective, "outcome": r.outcome, "code": r.code, "via": r.via}
+                   for r in reports]
+        call = decide.decide_call_outcome({"unavailable": None}, results)
+    return DecideEvaluation(call, reports, ev.skipped, ev.engine, ev.canary)
+
+
+def _evaluate_decide_rules(
+    *,
+    deterministic: str,
+    tool: str,
+    tool_input: Any,
+    cwd: str,
+    rules: List[Dict[str, Any]],
+    deadline_s: float,
+    engine: Any,
+    engine_url: str,
+    canary: CanaryFileStore,
+    last_user_turn: Optional[str],
+    now_ms,
+) -> DecideEvaluation:
+    """evaluate_decide_call on every rule it is given, with no budget estimate."""
     if deterministic != "allow":
         refused = {"outcome": "refuse", "code": None, "ruleRef": None, "via": None,
                    "reason": "a deterministic rule refused the call"}
@@ -257,26 +357,29 @@ def evaluate_decide_call(
         if decide_canary_fresh(canary.read(engine_url, described), now_ms()):
             canary_state = "cached"
         else:
+            # None on a pass; "canary_failed" when the canary was answered
+            # wrongly; the engine's own error code (upstream, timeout) when
+            # it got no answer at all.
             def run_canary():
                 try:
                     r = run_decide_canary(client.ask, deadline_s)
-                except Exception:  # noqa: BLE001 - an engine that cannot answer it has failed it
-                    return False
+                except Exception as err:  # noqa: BLE001 - an engine that cannot answer it is unavailable
+                    return _error_code(err)
                 try:
                     canary.write({"url": engine_url, "modelDigest": described, "ok": r.ok, "atMs": now_ms(),
                                   "pViolation": r.p_violation, "pClean": r.p_clean, "choiceTop": r.choice_top})
                 except OSError:
                     pass  # An unwritable cache only means the canary runs again next call.
-                return r.ok
+                return None if r.ok else "canary_failed"
             canary_job = run_canary
 
     evaluated = selection["evaluate"]
     with ThreadPoolExecutor(max_workers=len(evaluated) + 1) as pool:
         canary_future = pool.submit(canary_job) if canary_job else None
         asked = [f.result() for f in [pool.submit(ask_rule, c["e"]) for c in evaluated]]
-        canary_ok = canary_future.result() if canary_future else True
+        canary_error = canary_future.result() if canary_future else None
     if canary_job:
-        canary_state = "ok" if canary_ok else "failed"
+        canary_state = "ok" if canary_error is None else "failed" if canary_error == "canary_failed" else None
 
     reports: List[DecideRuleReport] = []
     for c, (answers, error, digest) in zip(evaluated, asked):
@@ -285,8 +388,12 @@ def evaluate_decide_call(
         eff = decide_effective_rollout(e["entry"], digest)
         base = dict(ref=e["entry"]["ref"], rule_hash=e["entry"]["ruleHash"], effective=eff["effective"],
                     why=eff["why"], model_digest=digest)
-        if not canary_ok:
-            reports.append(DecideRuleReport(**base, outcome="unavailable", code=None, via=None, error="canary_failed", answers=None))
+        if canary_error is not None:
+            # A canary that got no answer: the rule's own engine error when it
+            # has one (it asked the same engine), else the canary's.
+            own = canary_error != "canary_failed" and error and decide_engine_error_outcome(error) == "unavailable"
+            reports.append(DecideRuleReport(**base, outcome="unavailable", code=None, via=None,
+                                            error=error if own else canary_error, answers=None))
             continue
         if error and decide_engine_error_outcome(error) == "unavailable":
             reports.append(DecideRuleReport(**base, outcome="unavailable", code=None, via=None, error=error, answers=None))
@@ -308,3 +415,88 @@ def evaluate_decide_call(
 
     results = [{"ref": r.ref, "effective": r.effective, "outcome": r.outcome, "code": r.code, "via": r.via} for r in reports]
     return DecideEvaluation(decide.decide_call_outcome(selection, results), reports, skipped, identity, canary_state)
+
+
+# ---------------------------------------------------------------------------
+# What a gate says (decideDecision and its helpers in decideEvaluate.ts)
+# ---------------------------------------------------------------------------
+
+
+def _unknown_questions(entry: Dict[str, Any], answers: Optional[Dict[str, Any]]) -> List[str]:
+    """The asks of the questions a rule could not answer: a yes/no between its
+    bands, a choice none of whose options cleared yes_at while one stayed
+    unknown. Every question when none can be named."""
+    v = decide.validate_decide_rule(entry["ir"])
+    if not v["ok"]:
+        return []
+    rule = v["rule"]
+    names = list(rule["questions"])
+    if answers:
+        inputs = {n: {"p": a.p, "perOrder": a.per_order} for n, a in answers.items()}
+        atoms = decide.decide_atoms(rule, inputs)
+
+        def unknown(name):
+            if name in atoms["yes"]:
+                return atoms["yes"][name] == "U"
+            values = list(atoms["eq"].get(name, {}).values())
+            return "T" not in values and "U" in values
+
+        named = [n for n in names if unknown(n)]
+        if named:
+            return [rule["questions"][n]["ask"] for n in named]
+    return [rule["questions"][n]["ask"] for n in names]
+
+
+def _rule_reason(report: DecideRuleReport, entry: Dict[str, Any]) -> str:
+    title = entry["ir"].get("title") or entry["sopTitle"]
+    if report.error == "budget_skip" and report.outcome != "allow":
+        return (f"Needs a person: {title} — the decide engine cannot answer rule {entry['ir']['id']} "
+                "within this call's time budget")
+    if report.outcome == "unavailable":
+        return (f"GOVERNANCE_UNAVAILABLE — the decide engine could not evaluate rule {entry['ir']['id']} "
+                f"({title}): {report.error or 'unavailable'}")
+    if report.code == "DECIDE_REFUSED":
+        return f"Decide rule {entry['ir']['id']} ({title}) refused this call"
+    return f"Needs a person: {title} — " + " ".join(_unknown_questions(entry, report.answers))
+
+
+def decide_decision(ev: DecideEvaluation, rules: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """``{"outcome", "code", "ruleId", "via", "reason"}``: what a gate acts on
+    for a call's evaluation of ``rules``, the reason without the rule id."""
+    call = ev.call
+    if call["outcome"] == "allow":
+        return {"outcome": "allow", "code": None, "ruleId": None, "via": None, "reason": ""}
+    ref = call["ruleRef"]
+    entry = next((r for r in rules if r["ref"] == ref), None)
+    report = next((r for r in ev.rules if r.ref == ref), None)
+    if entry is not None and report is not None:
+        reason = _rule_reason(report, entry)
+    else:
+        reason = "GOVERNANCE_UNAVAILABLE — " + (call.get("reason") or "the decide rules for this call could not be evaluated")
+    return {"outcome": call["outcome"], "code": call["code"], "ruleId": None if ref is None else f"decide.{ref}",
+            "via": (call.get("via") or "ask") if call["outcome"] == "escalate" else None, "reason": reason}
+
+
+def decide_shadow_findings(ev: DecideEvaluation, rules: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """The evaluated shadow rules that would have refused, escalated or found
+    the engine unavailable: what a gate records while the call goes on."""
+    out = []
+    for report in ev.rules:
+        if report.effective != "shadow" or report.outcome == "allow":
+            continue
+        entry = next((r for r in rules if r["ref"] == report.ref), None)
+        if entry is not None:
+            out.append({"ruleId": f"decide.{report.ref}", "reason": _rule_reason(report, entry)})
+    return out
+
+
+def decide_unavailable_decision(rules: List[Dict[str, Any]], tool: str, why: str) -> Dict[str, Any]:
+    """The decision when the evaluation could not run or finish: refuse with
+    GOVERNANCE_UNAVAILABLE under the first matched rule stamped enforce,
+    unless every rule on the tool is stamped shadow, which allows."""
+    matched = [r for r in rules if r["ir"].get("on") == "tool_call" and tool in (r["ir"].get("tools") or [])]
+    enforcing = next((r for r in matched if r["rollout"] == "enforce"), None)
+    if enforcing is None:
+        return {"outcome": "allow", "code": None, "ruleId": None, "via": None, "reason": ""}
+    return {"outcome": "refuse", "code": "GOVERNANCE_UNAVAILABLE", "ruleId": f"decide.{enforcing['ref']}", "via": None,
+            "reason": f"GOVERNANCE_UNAVAILABLE — {why}"}

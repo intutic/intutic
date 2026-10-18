@@ -103,12 +103,13 @@ Settings for a proxy deployed as a shared or self-hosted gateway.<!-- ENTERPRISE
 | `INTUTIC_GATEWAY_TOKEN_STATE_FILE` | unset | A file where a rotated token is kept, so a restart does not fall back to the original |
 | `INTUTIC_GATEWAY_K8S_SECRET_NAME` | unset | In Kubernetes, the Secret a rotated token is written back to |
 | `INTUTIC_GATEWAY_K8S_SECRET_KEY` | `INTUTIC_GATEWAY_TOKEN` | The key in that Secret |
-| `INTUTIC_GATEWAY_LOCAL_JUDGE` | `false` | `true`: judge responses with your own model server instead of the control plane's, so content stays on your infrastructure |
-| `LITELLM_LOCAL_URL` | `http://litellm:4000` | The local judge's LiteLLM address |
+| `INTUTIC_GATEWAY_LOCAL_JUDGE` | `false` | `true`: judge responses with your own model server instead of the control plane's, so content stays on your infrastructure. Deprecated since 3.0, removed in 4.0, like the five below |
+| `LITELLM_LOCAL_URL` | `http://litellm:4000` | The local judge's model server. Its host is allowed as self-hosted; a hosted decision API is refused |
 | `LITELLM_LOCAL_API_KEY` | unset | Bearer token for it, when it has one |
 | `LITELLM_LOCAL_JUDGE_MODEL` | none (required) | The judge model's name on that server |
-| `LITELLM_LOCAL_TYPED_JUDGE_MODEL` | `LITELLM_LOCAL_JUDGE_MODEL` | A separate model for the scored first stage |
-| `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI` | unset | The first stage's review band, in log-odds: below `LO` is clean, above `HI` a violation. Set both to turn the first stage on |
+| `LITELLM_LOCAL_TYPED_JUDGE_MODEL` | `LITELLM_LOCAL_JUDGE_MODEL` | A separate model for the two typed questions |
+| `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI` | unset | The band, in log-odds. With both set, the judge is the decide rule `local-judge` with the band `{no_below: σ(LO), yes_at: σ(HI)}`: below `LO` is `COMPLIANT`, at or above `HI` a `VIOLATION`, between them `AMBIGUOUS`. `HI` must be above 0. Without a band the free-text verdict decides (deprecated) |
+| `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` | `32768` | The most bytes the SOP text and a response may hold together for the `local-judge` rule (an `on: response` state), 1 to 1048576. A larger one is `AMBIGUOUS`, never truncated. A tool call's state keeps its own 16,384-byte limit |
 
 #### Connected services
 
@@ -143,6 +144,15 @@ Settings for a proxy deployed as a shared or self-hosted gateway.<!-- ENTERPRISE
 | `INTUTIC_GRAPH_ID` | unset (a new graph) | Set by `intutic exec` on the agent it starts, and read by a nested `intutic exec`: the [agent graph](/guide/graph-guardrails) the agent belongs to |
 | `INTUTIC_NODE_ID` | unset | Likewise: the agent that ran the nested `intutic exec`, which becomes its parent |
 | `INTUTIC_DEPTH` | `0` | Likewise: how deep in the graph that agent is |
+| `INTUTIC_DECIDE_ENGINE_URL` | `url` in `~/.intutic/decide/engine.json`, else `http://127.0.0.1:11434` | The self-hosted engine `intutic decide` asks (and the gates that call `intutic decide check`). Overrides `engine.json` |
+| `INTUTIC_DECIDE_ADAPTER` | `adapter` in `engine.json`, else `logprobs` | `logprobs`, `systemone` or `decisions` |
+| `INTUTIC_DECIDE_MODEL` | `model` in `engine.json`; none otherwise | The model the engine serves. With none, the engine is not configured and enforcing decide rules refuse their tools |
+| `INTUTIC_DECIDE_TIMEOUT_MS` | `timeoutMs` in `engine.json`, else `5000` | Per-call timeout |
+| `INTUTIC_DECIDE_PARALLEL` | `parallel` in `engine.json`, else `1` for Ollama and `8` otherwise | Most engine requests in flight at once |
+| `INTUTIC_DECIDE_API_KEY` | unset | The engine's key, if it needs one. Read from the environment only: never written to `engine.json`, never logged |
+| `INTUTIC_DECIDE_MODEL_DIGEST` | unset | The weights digest, for a server that cannot report one (any engine but Ollama). Pins are keyed by it |
+| `INTUTIC_SELF_HOSTED_DECISION_HOSTS` | unset | Comma list of host names (or `.suffix`es) the engine may run on besides loopback and private addresses. Hosted decision APIs are refused whatever this says |
+| `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` | `32768` | The most bytes an `on: response` rule's state (its rule text and the response) may hold, 1 to 1048576; a larger one makes the rule unknown, never truncated. A tool call's state keeps its 16,384-byte limit |
 
 <!-- ENTERPRISE_ONLY_START -->
 `intutic connect` also passes `ANTHROPIC_API_KEY` from its own environment to the proxy it starts.
@@ -161,6 +171,9 @@ Read by `@intutic/gate`. The MCP daemon and the Python `intutic-clawde` gate rea
 | `INTUTIC_SESSION_ID` | none | The session id reported with each verdict. `GateClient.fromEnv()` throws without it or a `sessionId`; the OpenAI Agents and dsh installers generate one |
 | `INTUTIC_SNAPSHOT_RULES` | `~/.intutic/hooks/policy-snapshot.rules` | The local policy snapshot |
 | `INTUTIC_GUARD_DISABLE` | unset | `1` turns the local snapshot guard off |
+| `INTUTIC_DECIDE_BUDGET_MS` | `7300` | How long the decide tier, or one `decide()` call that passes no `budgetMs`, may spend, in milliseconds; the Python gate reads it too. A rule its engine cannot answer within it is unavailable, which refuses an enforcing rule. A rule the engine's p95 (which `intutic doctor` stores) says cannot fit is not asked: an enforcing one escalates |
+
+`decide()` finds its engine in `~/.intutic/decide/engine.json`, which `INTUTIC_DECIDE_ENGINE_URL`, `INTUTIC_DECIDE_ADAPTER`, `INTUTIC_DECIDE_MODEL`, `INTUTIC_DECIDE_TIMEOUT_MS` and `INTUTIC_DECIDE_PARALLEL` override. The key is `INTUTIC_DECIDE_API_KEY`, a weights digest for a server that cannot report one `INTUTIC_DECIDE_MODEL_DIGEST`, and `INTUTIC_SELF_HOSTED_DECISION_HOSTS` lists host names the engine's self-hosted guard allows.
 
 ### Sync daemon
 
@@ -212,6 +225,7 @@ Read by the TypeScript `@intutic/clawde-sdk` and the Python `intutic-clawde` cli
 | `INTUTIC_DEBUG` | unset | `true`: log retries and circuit-breaker trips to the console |
 | `GIT_BRANCH` | unset | The branch reported with each call when the sync daemon is not running |
 | `PD_INCIDENT_ID` | unset | A PagerDuty incident reported with each call, likewise |
+| `INTUTIC_DECIDE_BUDGET_MS` | `7300` | Milliseconds `decide()` may spend on one call, when `budgetMs` (`budget_ms`) is not passed. The engine comes from the same configuration as the Gate SDK's `decide()` |
 
 They also read `INTUTIC_CONTROL_PLANE_URL`, `INTUTIC_WORKSPACE_ID` and `INTUTIC_SESSION_ID`; the Python gate reads the Gate SDK's variables above, and the TypeScript client the agent-graph variables `intutic exec` sets (`INTUTIC_GRAPH_ID`, `INTUTIC_NODE_ID`, `INTUTIC_DEPTH`). Without the sync daemon, the CI run id comes from the variable GitHub Actions, Buildkite or CircleCI sets. See [Clawde SDK](/reference/clawde-sdk).
 

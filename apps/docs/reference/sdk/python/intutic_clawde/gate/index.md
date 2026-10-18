@@ -371,6 +371,22 @@ class Verdict(
 
 Defined as `intutic_clawde.gate.imagecheck.Verdict`.
 
+### IntuticGateEscalation
+
+```python
+class IntuticGateEscalation(reason: str, rule_id: Optional[str])
+```
+
+Bases: `IntuticGateRefusal`
+
+Raised when a decide rule could not decide the call and a person
+should (`code` DECIDE_ESCALATED): the answers fell between its bands, or
+the option orders disagreed. A subclass, so a caller that stops on every
+refusal stops on this too; one that can ask its user asks with `reason`
+and runs the call only on a yes. `rule_id` names the rule
+(`decide.<ruleRef>`), and is None in an OPAQUE workspace.
+
+
 ### IntuticGateHold
 
 ```python

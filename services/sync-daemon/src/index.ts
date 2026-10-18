@@ -91,6 +91,8 @@ export {
   localResolvedPolicy,
   localDecideRules,
   DEFAULT_DECIDE_DIR,
+  DECIDE_DISABLED_FILE,
+  decideLocallyDisabled,
   offlineHoldReason,
   snapshotRulesVerify,
   fetchResolvedPolicy,
@@ -103,6 +105,8 @@ export {
   VERIFIED_SNAPSHOT_DIR,
 } from './lib/policySnapshot.js'
 export type { LocalHoldMode, ServedDecideRule } from './lib/policySnapshot.js'
+export { pruneDecideLogs, uploadDecideLogs, DECIDE_UPLOAD_CURSOR, DECIDE_UPLOAD_BATCH } from './lib/decideLogs.js'
+export type { DecideUploadOptions } from './lib/decideLogs.js'
 export { findGateFile, GATE_ARTIFACTS } from './harness/gateArtifacts.js'
 export { runComplianceProbes } from './lib/complianceProbes.js'
 export { getActiveAgentProcesses } from './lib/processPoller.js'

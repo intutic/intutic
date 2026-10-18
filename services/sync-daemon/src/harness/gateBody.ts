@@ -65,10 +65,15 @@ import {
   ARGUMENTS_SIZE_LIMIT,
   CHAOS_GATE_JS_SOURCE,
   COMMAND_SIZE_LIMIT,
+  DECIDE_BUDGET_MARGIN_MS,
   DECIDE_FALLBACK_PREFIX,
-  DECIDE_JS_SOURCE,
-  DECIDE_RECORD_JS_SOURCE,
+  DECIDE_GATE_JS_SOURCE,
+  DECIDE_MIN_CALL_MS,
   DECIDE_RECORD_TAG,
+  decideBudgetMs,
+  decideLogRedactionSources,
+  GATE_DEADLINE_MARGIN_MS,
+  HOOK_TIMEOUT_SECONDS,
   SNAPSHOT_FORMAT,
   SNAPSHOT_FORMAT_RECORD_TAG,
   gateDeadlineMs,
@@ -292,13 +297,26 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * tools with an id starting `decide-fallback:`, placed right after the
  * SSO-group rules. The JS gates decode each record, rule and hash checked
  * (`decide.ts`, emitted as source), and carry the ones that decode as
- * `decideRules`; the bash gates keep the records whole for the CLI. No v22
- * gate evaluates a decide rule yet ({@link GATE_EVALUATES_DECIDE} is false
- * for every family), so every v22 gate enforces every fallback line and
- * refuses a decide rule's tools exactly as a v21 gate does. A family that
- * evaluates decide rules skips a fallback line only when a decoded record
- * names it (the bash gates: an `@decide` record of five columns), so a record
- * that does not decode leaves its fallback line in force. An unverified
+ * `decideRules`; the bash gates keep the records whole for the CLI. Every
+ * family evaluates decide rules ({@link GATE_EVALUATES_DECIDE}), so it skips
+ * a fallback line, but only when a decoded record names it (the bash gates:
+ * an `@decide` record of five columns); a record that does not decode leaves
+ * its fallback line in force. The decide tier runs after every deterministic
+ * tier allowed the call, and only then (a deterministic refusal asks the
+ * engine nothing): the JS gates ask the self-hosted engine in process
+ * (`intuticGateWithDecide`, an async wrapper around the synchronous tiers),
+ * the bash gates and the n8n gate through `intutic decide check --stdin`,
+ * each within its harness's budget (`decideBudgetMs` in gateLimits.ts). A
+ * rule refuses with `DECIDE_REFUSED`; one that cannot decide asks a person
+ * through the harness's {@link AskContract}, or refuses with
+ * `DECIDE_ESCALATED` where there is none; an engine (or CLI) that cannot
+ * answer refuses an enforcing rule with `GOVERNANCE_UNAVAILABLE` and lets a
+ * shadow rule's call on. Each evaluated call is written to the decide log
+ * (`~/.intutic/logs/decide-<date>.jsonl`, `decideLog.ts`): the JS gates write
+ * it in process, with the record, redaction and drift stats the CLI writes
+ * for the bash and n8n gates; a write that fails changes nothing. The
+ * synchronous `intuticGate`, which cannot ask
+ * the engine, refuses any call an enforcing decide rule names. An unverified
  * snapshot drops the records with the rest of the dynamic tier. A gate
  * reading a format above 2 reports `snapshot_format_newer` and enforces what
  * it reads. A v21 gate skips the records, as it skips any line under six
@@ -314,7 +332,7 @@ export const GATE_VERSION = 22
  * records does; it never skips a fallback line it cannot stand in for. Set a
  * family only where its decide tier runs.
  */
-export const GATE_EVALUATES_DECIDE: Readonly<Record<'js' | 'bash' | 'n8n', boolean>> = { js: false, bash: false, n8n: false }
+export const GATE_EVALUATES_DECIDE: Readonly<Record<'js' | 'bash' | 'n8n', boolean>> = { js: true, bash: true, n8n: true }
 
 /**
  * The refusal codes a hook gate's JSON decision carries, as `code` beside the
@@ -508,6 +526,63 @@ def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key="")
     if fault is None:
         return ""
     return fault["kind"] + "\\t" + fault["reason"]
+
+
+_INTUTIC_DECIDE_CODES = {
+    "allow": (None,),
+    "refuse": ("DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE"),
+    "escalate": ("DECIDE_ESCALATED",),
+}
+
+
+def intutic_decide_check(harness, tool, budget_ms, session_id, enforce, tool_input_json):
+    # The decide tier of a bash gate: \`intutic decide check --stdin\` on a call
+    # an @decide record names. Returns outcome, code, rule id and reason,
+    # joined by the unit separator (an empty field where there is none). A
+    # missing CLI, a non-zero exit, a timeout or an answer that does not read
+    # is unavailable: refused with GOVERNANCE_UNAVAILABLE when a matched
+    # record is stamped enforce (enforce "1"), allowed, with the reason, when
+    # every one is shadow. The CLI spends the budget, its own start included.
+    import json, shutil, subprocess
+    sep = chr(31)
+
+    def clean(text):
+        return " ".join(str(text).split())
+
+    def unavailable(why):
+        if enforce != "1":
+            return sep.join(["allow", "", "", clean(why)])
+        return sep.join(["refuse", "GOVERNANCE_UNAVAILABLE", "", clean("GOVERNANCE_UNAVAILABLE — " + why)])
+
+    try:
+        tool_input = json.loads(tool_input_json or "{}")
+    except ValueError:
+        tool_input = {}
+    exe = shutil.which("intutic")
+    if not exe:
+        return unavailable("the decide rules on " + tool + " need the intutic CLI, which is not on PATH")
+    payload = {"v": 1, "harness": harness, "tool": tool, "toolInput": tool_input, "cwd": os.getcwd(),
+               "sessionId": session_id, "budgetMs": int(budget_ms), "lastUserTurn": None}
+    try:
+        done = subprocess.run([exe, "decide", "check", "--stdin"], input=json.dumps(payload), capture_output=True,
+                              text=True, timeout=int(budget_ms) / 1000.0)
+    except subprocess.TimeoutExpired:
+        return unavailable("intutic decide check did not answer within " + str(budget_ms) + " ms")
+    except OSError as err:
+        return unavailable("intutic decide check could not run (" + type(err).__name__ + ")")
+    if done.returncode != 0:
+        return unavailable("intutic decide check exited " + str(done.returncode))
+    try:
+        out = json.loads(done.stdout)
+    except ValueError:
+        out = None
+    rule_id = out.get("ruleId") if isinstance(out, dict) else None
+    if (not isinstance(out, dict) or out.get("v") != 1 or out.get("outcome") not in _INTUTIC_DECIDE_CODES
+            or out.get("code") not in _INTUTIC_DECIDE_CODES[out.get("outcome")]
+            or not (rule_id is None or (isinstance(rule_id, str) and rule_id.startswith("decide.")))
+            or not isinstance(out.get("reason", ""), str)):
+        return unavailable("intutic decide check gave an answer this gate does not read")
+    return sep.join([out["outcome"], out.get("code") or "", clean(rule_id or ""), clean(out.get("reason") or "")])
 `
 
 /**
@@ -552,6 +627,39 @@ export const FORMAT_NEWER_MESSAGE =
  * the n8n workflow gate takes.
  */
 export type BlockContract = 'exit2' | 'stdout-cancel' | 'stdout-decision-deny' | 'throw'
+
+/**
+ * How a gate asks a person about a call a decide rule could not decide
+ * (`escalate`), beside the {@link BlockContract} it refuses with. Only the
+ * shapes each harness documents on its pre-tool path:
+ *
+ * - `claude-pretooluse`: exit 0 with
+ *   `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":…}}`;
+ * - `copilot-decision`: exit 0 with `permissionDecision: "ask"` and its
+ *   reason both at the top level (the Copilot CLI) and under
+ *   `hookSpecificOutput` (VS Code);
+ * - `cursor-permission`: exit 0 with `{"permission":"ask","user_message":…,"agent_message":…}`,
+ *   on the shell and MCP hooks only (Cursor accepts an ask on `preToolUse`
+ *   and does not enforce it, so the writer says when the call can ask);
+ * - `antigravity-force-ask`: exit 0 with `{"decision":"force_ask","reason":…}`,
+ *   which prompts even where the user chose "Always Allow";
+ * - `hermes-approve`: exit 0 with `{"action":"approve","message":…,"rule_key":…}`,
+ *   Hermes' human approval (never `{"decision":"approve"}`, which Hermes
+ *   reads as an allow);
+ * - `throw-ask`: an in-process gate throws an error carrying `intuticAsk`,
+ *   which the writer turns into its host's approval request;
+ * - `none`: the harness cannot ask, or asks and then runs the call (Codex),
+ *   so an escalation refuses through the {@link BlockContract} with
+ *   `DECIDE_ESCALATED`. An escalation never allows.
+ */
+export type AskContract =
+  | 'none'
+  | 'claude-pretooluse'
+  | 'copilot-decision'
+  | 'cursor-permission'
+  | 'antigravity-force-ask'
+  | 'hermes-approve'
+  | 'throw-ask'
 
 /** Single-quotes a string for shell, safely. */
 function shq(s: string): string {
@@ -756,6 +864,8 @@ export interface ShellGateOptions {
    * writer whose artifact lives elsewhere passes it.
    */
   reviewRequestFile?: string
+  /** How this harness asks a person about an escalated decide rule; `none` (the default) refuses. */
+  ask?: AskContract
 }
 
 /**
@@ -988,6 +1098,98 @@ function shellDecideFallbackSkip(evaluatesDecide: boolean): string {
     if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
   fi
 
+`
+}
+
+/**
+ * The bash gate's decide tier, after every deterministic tier allowed the
+ * call: a call whose tool an `@decide` record names (column 4) goes to
+ * `intutic decide check --stdin` through `intutic_decide_check` in
+ * {@link GATE_PY_LIB}, within the harness's budget (decideBudgetMs in gateLimits.ts), capped
+ * by what the deadline has left. The CLI decodes the records, so a record that
+ * does not decode refuses there.
+ */
+function shellDecideTier(opts: ShellGateOptions): string {
+  const log = opts.logFn ?? 'log_event'
+  const ask = opts.ask ?? 'none'
+  if (ask !== 'none' && ask !== 'hermes-approve') throw new Error(`gateBody: the ${ask} ask contract is not one a bash gate speaks`)
+  const askBlock =
+    ask === 'hermes-approve'
+      ? `    if [ "$_intutic_dec_out" = "escalate" ]; then
+      # Hermes' human approval: {"action":"approve"}. Never {"decision":"approve"},
+      # which Hermes reads as an allow.
+      intutic_shown "$_intutic_dec_full"
+      echo "[Intutic Governance] ASK: \${_intutic_shown}" >&2
+      ${log} "tool_flagged" "\${TOOL:-}" "DECIDE_ESCALATED — asked a person: $_intutic_dec_full" || true
+      _intutic_chaos_rule="$_intutic_dec_rid"; _intutic_chaos_hit=1
+      intutic_chaos_decide hold >/dev/null 2>&1 || true
+      _intutic_chaos_done=1
+      printf '{"action":"approve","message":"%s"}\\n' "$(intutic_json_escape "$_intutic_shown")"
+      exit 0
+    fi
+`
+      : `    # ${opts.harness} cannot ask a person, so an escalation refuses (DECIDE_ESCALATED).
+`
+  return `# ── Decide tier (gate body v22) ──────────────────────────────────────────────
+# Only after every tier above allowed the call, and only for a tool an @decide
+# record names in its fourth column: intutic decide check --stdin asks the
+# self-hosted engine, within ${decideBudgetMs('bash', opts.harness)} ms less what the deadline has left.
+# A CLI that is missing, fails, times out or answers what this gate cannot
+# read is unavailable, which refuses unless every record on the tool is
+# stamped shadow.
+_intutic_decide_match=0
+_intutic_decide_enforce=0
+if [ -z "\${1:-}" ] && [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+    IFS=$'\\t' read -r _ _d_fb _d_roll _d_tools _d_rest <<< "$_rec"
+    case ",\${_d_tools}," in
+      *",\${TOOL:-},"*)
+        _intutic_decide_match=1
+        [ "$_d_roll" = "enforce" ] && _intutic_decide_enforce=1
+        ;;
+    esac
+  done
+fi
+if [ "$_intutic_decide_match" = "1" ]; then
+  _intutic_decide_budget=$(( ${gateDeadlineMs(opts.harness)} - (SECONDS + 1) * 1000 - ${DECIDE_BUDGET_MARGIN_MS} ))
+  [ "$_intutic_decide_budget" -gt ${decideBudgetMs('bash', opts.harness)} ] && _intutic_decide_budget=${decideBudgetMs('bash', opts.harness)}
+  if [ "$_intutic_decide_budget" -lt ${DECIDE_MIN_CALL_MS} ]; then
+    if [ "$_intutic_decide_enforce" = "1" ]; then
+      _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    else
+      _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"no time was left for the decide rules on \${TOOL:-} within the gate deadline"
+    fi
+  else
+    _intutic_dec="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_decide_check"](*sys.argv[1:6], sys.stdin.read()))' ${shq(opts.harness)} "\${TOOL:-}" "$_intutic_decide_budget" "\${SESSION_ID:-}" "$_intutic_decide_enforce" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || true)"
+    if [ -z "$_intutic_dec" ]; then
+      # python3 could not say (it is required, and checked, before any rule
+      # runs): unavailable, as a CLI that did not answer is.
+      if [ "$_intutic_decide_enforce" = "1" ]; then
+        _intutic_dec="refuse"$'\\x1f'"GOVERNANCE_UNAVAILABLE"$'\\x1f'$'\\x1f'"GOVERNANCE_UNAVAILABLE — the decide check could not run"
+      else
+        _intutic_dec="allow"$'\\x1f'$'\\x1f'$'\\x1f'"the decide check could not run"
+      fi
+    fi
+  fi
+  IFS=$'\\x1f' read -r _intutic_dec_out _intutic_dec_code _intutic_dec_rid _intutic_dec_reason <<< "$_intutic_dec"
+  if [ "$_intutic_dec_out" = "allow" ]; then
+    # A shadow rule's engine that could not answer: recorded, and the call goes on.
+    if [ -n "$_intutic_dec_reason" ]; then
+      ${log} "tool_would_block" "\${TOOL:-}" "GOVERNANCE_UNAVAILABLE — $_intutic_dec_reason" || true
+    fi
+  else
+    _intutic_dec_full="$_intutic_dec_reason"
+    [ -n "$_intutic_dec_rid" ] && _intutic_dec_full="$_intutic_dec_full [$_intutic_dec_rid]"
+${askBlock}    _intutic_chaos_rule="$_intutic_dec_rid"; _intutic_chaos_hit=1
+    intutic_shown "$_intutic_dec_full"
+    echo "[Intutic Governance] BLOCKED: \${_intutic_shown} (refusal code \${_intutic_dec_code:-DECIDE_ESCALATED})" >&2
+    ${log} "tool_blocked" "\${TOOL:-}" "$_intutic_dec_full"
+    exit 2
+  fi
+fi
 `
 }
 
@@ -1647,6 +1849,7 @@ case "\${TOOL:-}" in
     ;;
 esac
 
+${shellDecideTier(opts)}
 # ── Agent fault injection: the call is allowed ───────────────────────────────
 # Recorded as allowed, then the fault that is due, if any. A permission delay
 # never waits here: the call is held, and its identical retry (the same key an
@@ -1686,26 +1889,23 @@ export interface JsGateOptions {
   /** See {@link ShellGateOptions.reviewRequestFile}. Writers whose artifact
    *  does not live in `.intutic/hooks/` (cline, opencode) pass it. */
   reviewRequestFile?: string
+  /** How this harness asks a person about an escalated decide rule; `none` (the default) refuses. */
+  ask?: AskContract
 }
 
 /**
- * The decide decoders every JS-family gate embeds beside
- * {@link jsSnapshotLoader}, in one scope so their helpers cannot collide
- * with the gate's names.
+ * The decide modules every JS-family gate embeds beside
+ * {@link jsSnapshotLoader}: the snapshot's decoders and, for the decide
+ * tier, the engine client and the protections around it (`DECIDE_GATE_JS_SOURCE`
+ * in `@intutic/shared-types`), each module in a scope of its own.
  */
-const JS_DECIDE_LIB = `// Decide rules in the snapshot, emitted from decide.ts and decideRecord.ts in
-// @intutic/shared-types inside one scope: the @format record, and each
-// @decide record checked against the rule it carries.
-const intuticDecideLib = (function () {
-${DECIDE_JS_SOURCE}
-${DECIDE_RECORD_JS_SOURCE}
-  function sha256(text) { return require('crypto').createHash('sha256').update(text, 'utf8').digest('hex'); }
-  function check(ir) { const v = validateDecideRule(ir); return v.ok ? decideRuleHash(v.rule, sha256) : null; }
-  return {
-    format: decodeSnapshotFormatRecord,
-    record: function (line) { return decodeDecideRecord(line, check); },
-  };
-})();`
+const JS_DECIDE_LIB = `// Decide rules, emitted from decide.ts, decideRecord.ts, decideHostGuard.ts,
+// decideEngine.ts and decideEvaluate.ts in @intutic/shared-types: the @format
+// record, each @decide record checked against the rule it carries, and the
+// engine client and protections the decide tier runs.
+const intuticDecideLib = (${DECIDE_GATE_JS_SOURCE})(function (text) {
+  return require('crypto').createHash('sha256').update(text, 'utf8').digest('hex');
+});`
 
 /** A JS gate that evaluates decide rules skips each fallback line a decoded record names. */
 const JS_DECIDE_FALLBACK_SKIP = `  // A fallback line stands in for a decide rule a gate cannot evaluate. This
@@ -1968,6 +2168,47 @@ function intuticChaosKey(toolName, command, target) {
 export function emitJsGate(opts: JsGateOptions): string {
   const floor = staticFloorPatterns()
   const deadlineMs = gateDeadlineMs(opts.harness)
+  // The most the decide tier spends on a call (decideBudgetMs in gateLimits.ts).
+  const decideBudget = decideBudgetMs('js', opts.harness)
+  const ask: AskContract = opts.ask ?? 'none'
+
+  /**
+   * Asks a person through this harness's {@link AskContract}, for a `reason`
+   * in scope. Exactly the documented fields: a harness that reads a decision
+   * object may reject one with fields it does not know.
+   */
+  const askWith = (): string => {
+    switch (ask) {
+      case 'claude-pretooluse':
+        return (
+          `    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: reason } }) + '\\n');\n` +
+          `    process.exit(0);`
+        )
+      case 'copilot-decision':
+        // The Copilot CLI reads the decision at the top level, VS Code under
+        // hookSpecificOutput.
+        return (
+          `    process.stdout.write(JSON.stringify({ permissionDecision: 'ask', permissionDecisionReason: reason,\n` +
+          `      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: reason } }) + '\\n');\n` +
+          `    process.exit(0);`
+        )
+      case 'cursor-permission':
+        return (
+          `    process.stdout.write(JSON.stringify({ permission: 'ask', user_message: reason, agent_message: reason }) + '\\n');\n` +
+          `    process.exit(0);`
+        )
+      case 'antigravity-force-ask':
+        return `    process.stdout.write(JSON.stringify({ decision: 'force_ask', reason: reason }) + '\\n');\n    process.exit(0);`
+      case 'throw-ask':
+        return (
+          `    var _ask = new Error('[Intutic Governance] ASK: ' + reason);\n` +
+          `    _ask.intuticAsk = { reason: reason, ruleId: snap.opaque ? null : dec.ruleId };\n` +
+          `    throw _ask;`
+        )
+      default:
+        throw new Error(`gateBody: the ${ask} ask contract is not one a JavaScript gate speaks`)
+    }
+  }
 
   /**
    * The refusal, through this harness's contract, for a `reason` in scope.
@@ -2098,8 +2339,10 @@ ${MCP_ALLOWLIST_JS_SOURCE}
 ${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
 
 /**
- * Evaluates one tool call. Returns normally to allow; refuses via this harness's
- * contract otherwise.
+ * Evaluates one tool call's deterministic tiers: returns the call's tool name
+ * (as the rules read it) and the snapshot to allow; refuses via this
+ * harness's contract otherwise. {@link intuticGateWithDecide} and
+ * {@link intuticGate} run it first.
  *
  * Takes its inputs as parameters rather than closing over the writer's locals:
  * the eight JS writers name and shape those differently, and a gate that
@@ -2112,7 +2355,7 @@ ${MCP_SNAPSHOT_UNVERIFIED_JS_SOURCE}
  * matchSopRule and the intutic-clawde gate port pin — and the gate serializes
  * it itself so no writer can hand it a differently-shaped string.
  */
-function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId, more) {
+function intuticGateDeterministic(toolName, target, command, record, workspaceId, toolInput, sessionId) {
   // A chaos run's record of this call (see intuticChaosDecide). A plan that is
   // set but unreadable refuses, as an unreadable payload does: an experiment
   // run without the faults it asked for reports a resilience it never measured.
@@ -2156,7 +2399,7 @@ ${
     return _intuticGateRules(toolName, target, command, record, workspaceId, toolInput, sessionId);
   };
   try {
-    require('vm').runInThisContext('__intuticGateRules()', { timeout: _deadlineMs });
+    return require('vm').runInThisContext('__intuticGateRules()', { timeout: _deadlineMs });
   } catch (err) {
     if (!err || err.code !== 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw err;
     var reason = 'GATE_DEADLINE — the gate did not finish evaluating this call within ${deadlineMs / 1000} s, and refuses it rather than let the hook timeout allow it';
@@ -2164,10 +2407,14 @@ ${
     try { record('tool_blocked', toolName, reason); } catch (e) {}
 ${refuseWith("'GATE_DEADLINE'", 'null')}
   }
+}
 
-  // The call is allowed. A writer that runs this once per target of one call
-  // (OpenClaw's apply_patch) passes more for all but the last, so the
-  // call is reported, and faulted, once.
+/**
+ * Every tier allowed the call. A writer that runs the gate once per target of
+ * one call (OpenClaw's apply_patch) passes more for all but the last, so the
+ * call is reported, and faulted, once.
+ */
+function intuticGateAllowed(toolName, target, command, more) {
   if (more) {
     if (_intuticChaosCall) _intuticChaosCall.more = true;
     return;
@@ -2182,6 +2429,166 @@ ${refuseFault("'HELD'")}
   }
   var reason = _fault.reason;
 ${refuseFault('null')}
+}
+
+// ── Decide tier (gate body v22) ──────────────────────────────────────────────
+// After every deterministic tier allowed the call, and only then: the
+// snapshot's decide rules on this tool, asked of the self-hosted engine
+// (~/.intutic/decide/engine.json, INTUTIC_DECIDE_* in the environment) within
+// ${decideBudget} ms, less what the deadline has left. A rule refuses, asks a person
+// or allows; an engine that cannot answer refuses an enforcing rule
+// (GOVERNANCE_UNAVAILABLE) and lets a shadow rule's call on. A rule whose
+// estimate (the engine's per-call p95 \`intutic doctor\` stored) does not fit
+// the time left is not asked: an enforcing one escalates.
+
+/**
+ * The engine, its URL, the canary cache and the stored p95, read for each call
+ * that needs them, and the resolved configuration (cfg) for the decide log.
+ */
+function intuticDecideDeps() {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = path.join(os.homedir(), '.intutic', 'decide');
+  var engine, url = '', q95 = null, parallel = 1, resolved = null;
+  try {
+    var file = null;
+    try { file = JSON.parse(fs.readFileSync(path.join(dir, 'engine.json'), 'utf8')); } catch (e) {
+      if (!e || e.code !== 'ENOENT') throw new intuticDecideLib.EngineError('not_configured', 'engine.json does not read: ' + String((e && e.message) || e));
+    }
+    q95 = intuticDecideLib.storedQ95(file);
+    var cfg = intuticDecideLib.resolveConfig(file, process.env);
+    resolved = cfg;
+    url = cfg.url;
+    parallel = cfg.parallel;
+    engine = intuticDecideLib.createEngine(cfg);
+  } catch (e) {
+    engine = e instanceof intuticDecideLib.EngineError ? e : new intuticDecideLib.EngineError('not_configured', String((e && e.message) || e));
+  }
+  return { engine: engine, engineUrl: url, canary: intuticDecideLib.canaryStore(path.join(dir, 'canary.json'), fs),
+    sha256Hex: function (t) { return require('crypto').createHash('sha256').update(t, 'utf8').digest('hex'); },
+    q95Ms: q95, parallel: parallel, cfg: resolved };
+}
+
+// The patterns the decide log's arguments excerpt is redacted with
+// (decideLogRedactionSources in @intutic/shared-types).
+const INTUTIC_DECIDE_REDACT = ${JSON.stringify(decideLogRedactionSources())};
+
+/**
+ * Appends this call's decide record to ~/.intutic/logs/decide-<date>.jsonl and
+ * updates each rule's drift stats, as \`intutic decide check\` does for the
+ * shell gates. Never throws: a log that cannot be written never changes the
+ * decision.
+ */
+function intuticDecideLog(ev, rules, call, deps) {
+  try {
+    const fs = require('fs'), os = require('os'), crypto = require('crypto');
+    intuticDecideLib.writeLog(ev, rules, { atMs: Date.now(), harness: ${JSON.stringify(opts.harness)},
+      workspaceId: call.workspaceId || '', sessionId: call.sessionId || '', tool: call.tool, toolInput: call.toolInput,
+      cwd: call.cwd, budgetMs: call.budgetMs, latencyMs: Date.now() - call.startedMs,
+      engine: intuticDecideLib.logEngine(deps.cfg, ev), redact: INTUTIC_DECIDE_REDACT },
+      intuticDecideLib.logDeps(fs, os.homedir(), function (t) { return crypto.createHash('sha256').update(t, 'utf8').digest('hex'); }));
+  } catch (e) {}
+}
+
+/**
+ * The decide tier's decision on a call the deterministic tiers allowed:
+ * { outcome, code, ruleId, via, reason }, or null when no decide rule names
+ * the tool. Records each shadow rule's finding. Never throws: a tier that
+ * cannot finish is unavailable, which refuses unless every rule on the tool
+ * is stamped shadow.
+ */
+async function intuticDecideTier(toolName, toolInput, snap, record, startedMs, opts, workspaceId, sessionId) {
+  const rules = snap.decideRules.filter(function (r) { return r.ir.on === 'tool_call' && (r.ir.tools || []).indexOf(toolName) !== -1; });
+  if (rules.length === 0) return null;
+${
+  opts.contract === 'throw'
+    ? `  var _elapsed = Date.now() - startedMs;`
+    : `  var _elapsed = Math.round(process.uptime() * 1000);`
+}
+  var _budget = Math.min(${decideBudget}, ${deadlineMs} - _elapsed - ${DECIDE_BUDGET_MARGIN_MS});
+  if (_budget < ${DECIDE_MIN_CALL_MS}) {
+    return intuticDecideLib.unavailable(rules, toolName, 'no time was left for the decide rules on ' + toolName + ' within the gate deadline');
+  }
+  var _timer = null, ev = null, _asked = Date.now();
+  var _call = { tool: toolName, toolInput: toolInput == null ? {} : toolInput, cwd: (opts && opts.cwd) || process.cwd(),
+    budgetMs: _budget, startedMs: _asked, workspaceId: workspaceId, sessionId: sessionId };
+  var _deps = null;
+  try {
+    _deps = intuticDecideDeps();
+    ev = await Promise.race([
+      intuticDecideLib.evaluate({ deterministic: 'allow', tool: toolName, toolInput: _call.toolInput,
+        cwd: _call.cwd, lastUserTurn: (opts && opts.lastUserTurn) || null, rules: rules,
+        deadlineMs: _asked + _budget }, _deps),
+      new Promise(function (resolve) { _timer = setTimeout(function () { resolve(null); }, _budget + ${DECIDE_BUDGET_MARGIN_MS / 2}); }),
+    ]);
+  } catch (e) {
+    ev = null;
+  } finally {
+    if (_timer) clearTimeout(_timer);
+  }
+  if (!ev) return intuticDecideLib.unavailable(rules, toolName, 'the decide rules on ' + toolName + ' were not evaluated within ' + _budget + ' ms');
+  intuticDecideLog(ev, rules, _call, _deps);
+  for (const f of intuticDecideLib.shadowFindings(ev, rules)) {
+    try { record('tool_would_block', toolName, f.reason + ' [' + f.ruleId + ']'); } catch (e) {}
+  }
+  return intuticDecideLib.decision(ev, rules);
+}
+
+/**
+ * Acts on a decide decision that is not an allow: asks a person through this
+ * harness's ask where it has one and the call can ask (\`canAsk\`), and
+ * otherwise refuses, an escalation with DECIDE_ESCALATED.
+ */
+function intuticDecideAct(dec, toolName, snap, record, canAsk) {
+  var _full = dec.reason + (dec.ruleId ? ' [' + dec.ruleId + ']' : '');
+${
+  ask === 'none'
+    ? `  // ${opts.harness} cannot ask a person on this path, so an escalation refuses.`
+    : `  if (dec.outcome === 'escalate' && canAsk) {
+    var reason = intuticShown(snap, _full);
+    try { console.error('[Intutic Governance] ASK: ' + reason); } catch (e) {}
+    try { record('tool_flagged', toolName, 'DECIDE_ESCALATED — asked a person: ' + _full); } catch (e) {}
+    intuticChaosDecide(toolName, 'hold', dec.ruleId, dec.ruleId != null);
+${askWith()}
+  }`
+}
+  var reason = intuticShown(snap, _full);
+  try { console.error('[Intutic Governance] BLOCKED: ' + reason); } catch (e) {}
+  try { record('tool_blocked', toolName, _full); } catch (e) {}
+${refuseWith('dec.code', 'dec.ruleId', '', 'toolName', '(snap.opaque ? null : dec.ruleId)')}
+}
+
+/**
+ * Evaluates one tool call: the deterministic tiers, then the decide tier.
+ * Resolves to allow; refuses, or asks, via this harness's contracts.
+ * \`opts\`: \`more\` (as {@link intuticGateAllowed}), \`canAsk\` (false where
+ * this call's hook cannot ask), \`cwd\`, \`lastUserTurn\`, and \`before\`, the
+ * writer's own deterministic checks, run after the shared ones and before
+ * any engine call.
+ */
+async function intuticGateWithDecide(toolName, target, command, record, workspaceId, toolInput, sessionId, opts) {
+  opts = opts || {};
+  var _started = Date.now();
+  var _d = intuticGateDeterministic(toolName, target, command, record, workspaceId, toolInput, sessionId);
+  if (typeof opts.before === 'function') opts.before();
+  var _dec = await intuticDecideTier(_d.toolName, toolInput, _d.snap, record, _started, opts, workspaceId, sessionId);
+  if (_dec && _dec.outcome !== 'allow') intuticDecideAct(_dec, _d.toolName, _d.snap, record, opts.canAsk !== false);
+  intuticGateAllowed(toolName, target, command, opts.more);
+}
+
+/**
+ * The deterministic tiers alone, synchronously. It cannot ask the decide
+ * engine, so a call a decide rule names is refused here, unless every such
+ * rule is stamped shadow: a caller that has not moved to
+ * {@link intuticGateWithDecide} never opens what the rule's skipped fallback
+ * line would have refused. \`more\` as {@link intuticGateAllowed}.
+ */
+function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId, more) {
+  var _d = intuticGateDeterministic(toolName, target, command, record, workspaceId, toolInput, sessionId);
+  if (!more) {
+    var _dec = intuticDecideLib.unavailable(_d.snap.decideRules, _d.toolName, 'this gate entry cannot evaluate the decide rules on ' + _d.toolName);
+    if (_dec.outcome !== 'allow') intuticDecideAct(_dec, _d.toolName, _d.snap, record, false);
+  }
+  intuticGateAllowed(toolName, target, command, more);
 }
 
 /**
@@ -2404,6 +2811,9 @@ ${refuseWith('_mcp.code', '_mcp.ruleId', '', 'toolName', '(snap.opaque ? null : 
       }
     }
   }
+  // Allowed by every deterministic tier: the decide tier reads the tool name
+  // as the rules did, and the snapshot's decide rules.
+  return { toolName: toolName, snap: snap };
 }
 // ── end Intutic gate body ────────────────────────────────────────────────────
 `
@@ -2994,6 +3404,12 @@ def _intutic_evaluate(text):
  */
 export function emitN8nWorkflowGate(): string {
   const floor = staticFloorPatterns()
+  // The decide tier's budget and deadline (decideBudgetMs in gateLimits.ts): the host waits
+  // without a limit, so the deadline is a hook's under a 10 s timeout.
+  const budget = decideBudgetMs('js', null)
+  const deadline = HOOK_TIMEOUT_SECONDS * 1000 - GATE_DEADLINE_MARGIN_MS
+  const margin = DECIDE_BUDGET_MARGIN_MS
+  const minCall = DECIDE_MIN_CALL_MS
   return `
 // ── Intutic gate body v${GATE_VERSION} — harness: n8n (workflow-level) ───────
 // Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
@@ -3174,6 +3590,106 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
         throw new Error('[Intutic Governance] BLOCKED: ' + shown);
       }
     }
+  }
+  // Allowed by every deterministic tier: the decide tier reads the nodes and
+  // the snapshot's decide rules.
+  return { snap: snap, nodes: nodes };
+}
+
+// ── Decide tier (gate body v22) ──────────────────────────────────────────────
+// After every deterministic tier allowed the workflow, and only then: each
+// node whose type (or its basename, as the tool rules read it) a decide rule
+// names goes to \`intutic decide check --stdin\`, which asks the self-hosted
+// engine within ${budget} ms less what the deadline has left. n8n cannot ask
+// a person, so an escalation refuses (DECIDE_ESCALATED). A CLI that is
+// missing, fails, times out or answers what this gate cannot read is
+// unavailable, which refuses unless every rule on the node is stamped shadow.
+
+const INTUTIC_DECIDE_CODES = { allow: [null], refuse: ['DECIDE_REFUSED', 'DECIDE_ESCALATED', 'GOVERNANCE_UNAVAILABLE'], escalate: ['DECIDE_ESCALATED'] };
+
+/** Unavailable: a refusal unless every rule on the tool is stamped shadow, whose allow keeps the reason to record. */
+function intuticDecideUnavailable(rules, tool, why) {
+  const d = intuticDecideLib.unavailable(rules, tool, why);
+  if (d.outcome === 'allow') d.reason = why;
+  return d;
+}
+
+/** One node's decide check through the CLI: a decision { outcome, code, ruleId, reason }. Never throws. */
+function intuticDecideCheck(tool, toolInput, budgetMs, rules) {
+  const unavailable = function (why) { return intuticDecideUnavailable(rules, tool, why); };
+  return new Promise(function (resolve) {
+    var child, out = '', done = false, timer = null;
+    const finish = function (d) {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(d);
+    };
+    try {
+      child = require('child_process').spawn('intutic', ['decide', 'check', '--stdin'], { stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch (e) {
+      return finish(unavailable('intutic decide check could not run (' + String((e && e.code) || e) + ')'));
+    }
+    timer = setTimeout(function () {
+      try { child.kill('SIGKILL'); } catch (e) {}
+      finish(unavailable('intutic decide check did not answer within ' + budgetMs + ' ms'));
+    }, budgetMs);
+    child.on('error', function (e) {
+      finish(unavailable(e && e.code === 'ENOENT'
+        ? 'the decide rules on ' + tool + ' need the intutic CLI, which is not on PATH'
+        : 'intutic decide check could not run (' + String((e && e.code) || e) + ')'));
+    });
+    child.stdout.on('data', function (c) { out += c; });
+    child.on('close', function (code) {
+      if (code !== 0) return finish(unavailable('intutic decide check exited ' + code));
+      var r = null;
+      try { r = JSON.parse(out); } catch (e) {}
+      const ok = r && typeof r === 'object' && r.v === 1 && Object.prototype.hasOwnProperty.call(INTUTIC_DECIDE_CODES, r.outcome) &&
+        INTUTIC_DECIDE_CODES[r.outcome].indexOf(r.code === undefined ? null : r.code) !== -1 &&
+        (r.ruleId === null || r.ruleId === undefined || (typeof r.ruleId === 'string' && r.ruleId.indexOf('decide.') === 0)) &&
+        (r.reason === undefined || typeof r.reason === 'string');
+      if (!ok) return finish(unavailable('intutic decide check gave an answer this gate does not read'));
+      finish({ outcome: r.outcome, code: r.code || null, ruleId: r.ruleId || null, reason: String(r.reason || '') });
+    });
+    child.stdin.on('error', function () {});
+    child.stdin.end(JSON.stringify({ v: 1, harness: 'n8n', tool: tool, toolInput: toolInput, cwd: process.cwd(), sessionId: '',
+      budgetMs: budgetMs, lastUserTurn: null }));
+  });
+}
+
+/**
+ * Evaluates one workflow: the deterministic tiers, then each node a decide
+ * rule names. Resolves to allow; throws to abort the execution.
+ */
+async function intuticGateWorkflowWithDecide(workflow, record, workspaceId) {
+  const started = Date.now();
+  const r = intuticGateWorkflow(workflow, record, workspaceId);
+  if (r.snap.decideRules.length === 0) return;
+  for (const node of r.nodes) {
+    if (!node || typeof node !== 'object') continue;
+    const nodeType = String(node.type || '');
+    const nodeName = String(node.name || nodeType || 'node');
+    const base = nodeType.indexOf('.') >= 0 ? nodeType.slice(nodeType.lastIndexOf('.') + 1) : nodeType;
+    var tool = null;
+    for (const name of [nodeType, base]) {
+      if (!tool && r.snap.decideRules.some(function (d) { return d.ir.on === 'tool_call' && (d.ir.tools || []).indexOf(name) !== -1; })) tool = name;
+    }
+    if (!tool) continue;
+    const rules = r.snap.decideRules.filter(function (d) { return d.ir.on === 'tool_call' && (d.ir.tools || []).indexOf(tool) !== -1; });
+    const budget = Math.min(${budget}, ${deadline} - (Date.now() - started) - ${margin});
+    const dec = budget < ${minCall}
+      ? intuticDecideUnavailable(rules, tool, 'no time was left for the decide rules on ' + tool + ' within the gate deadline')
+      : await intuticDecideCheck(tool, node.parameters == null ? {} : node.parameters, budget, rules);
+    if (dec.outcome === 'allow') {
+      // A shadow rule whose engine could not answer: recorded, and the workflow goes on.
+      if (dec.reason) { try { record('tool_would_block', 'n8n:' + nodeName, 'GOVERNANCE_UNAVAILABLE — ' + dec.reason); } catch (e) {} }
+      continue;
+    }
+    const reason = dec.reason + (dec.ruleId ? ' [' + dec.ruleId + ']' : '') + ' (node "' + nodeName + '", type ' + nodeType + ')';
+    const shown = r.snap.opaque ? INTUTIC_OPAQUE_MESSAGE + ' (node "' + nodeName + '")' : reason;
+    try { console.error('[Intutic Governance] BLOCKED: ' + shown + ' (refusal code ' + (dec.code || 'DECIDE_ESCALATED') + ')'); } catch (e) {}
+    try { record('tool_blocked', 'n8n:' + nodeName, reason); } catch (e) {}
+    throw new Error('[Intutic Governance] BLOCKED: ' + shown);
   }
 }
 // ── end Intutic gate body ────────────────────────────────────────────────────

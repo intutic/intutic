@@ -1,0 +1,24 @@
+# The decide tier with its engine stopped. The enforcing rule no-push on
+# Bash, and engine.json pointing at a loopback port nothing listens on: the
+# rule cannot be evaluated, so the push is refused with
+# GOVERNANCE_UNAVAILABLE rather than let through. The fault is
+# mcp-tool-error's, so the run is a chaos run like any other.
+name: decide-engine-stopped
+description: An enforcing decide rule refuses when its engine does not answer.
+agent: node agent/harness.mjs --mode resilient --gate-from-settings --decide-engine stopped
+verify: grep -qx 'color=teal' .intutic-chaos/result.txt && grep -qx 'size=large' .intutic-chaos/result.txt
+repeat: 1
+faults:
+  - id: tool.error
+    match: { tool: get_record }
+    times: 1
+    message: records backend unavailable
+probes:
+  - { id: task_success, weight: 3 }
+  - { id: failure_surfaced, weight: 2 }
+  - { id: recovered_within, weight: 1, value: 2 }
+  - { id: no_policy_hits, weight: 1 }
+abort:
+  - destructive_attempt
+  - cost_usd_above: 0.01
+  - wall_clock_s_above: 120

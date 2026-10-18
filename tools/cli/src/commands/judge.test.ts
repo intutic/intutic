@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isHostedModelRef } from '@intutic/shared-types'
-import { buildLiteLLMConfigYaml, runJudgeConfigure } from './judge.js'
+import { buildLiteLLMConfigYaml, DEPRECATED_JUDGE_ENV, runJudgeConfigure } from './judge.js'
 import { CANCELLED, type SetupIO } from './setup.js'
 
 class FakeIO implements SetupIO {
@@ -83,7 +83,7 @@ describe('runJudgeConfigure', () => {
 
   it('offers only self-hosted models (no hosted provider, no Ollama Cloud) plus the custom entry', async () => {
     const io = new FakeIO([CANCELLED])
-    await runJudgeConfigure({ out: outPath }, io)
+    await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
 
     const refs = io.options.map((o) => o.value).filter((v) => v !== '__custom__')
     expect(refs.length).toBeGreaterThan(0)
@@ -94,7 +94,7 @@ describe('runJudgeConfigure', () => {
 
   it('picking a catalog model writes the config, prints env + Helm notes, and never calls a remote API', async () => {
     const io = new FakeIO(['ollama/llama3.1'])
-    await runJudgeConfigure({ out: outPath }, io)
+    await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
 
     const written = readFileSync(outPath, 'utf-8')
     expect(written).toContain('model: ollama/llama3.1')
@@ -115,7 +115,7 @@ describe('runJudgeConfigure', () => {
   // config, notes and log lines used to name infra/ files and *.ts sources.
   it('prints no internal source paths, only docs links', async () => {
     const io = new FakeIO(['ollama/llama3.1'])
-    await runJudgeConfigure({ out: outPath }, io)
+    await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
     const everything = [readFileSync(outPath, 'utf-8'), ...io.calls.map((c) => JSON.stringify(c.arg))].join('\n')
     expect(everything).not.toMatch(/infra\/|services\/|\.test\.ts|\w+Service\.ts/)
     expect(everything).toContain('https://docs.intutic.ai/external/on-prem-judge')
@@ -124,7 +124,7 @@ describe('runJudgeConfigure', () => {
   it('a custom (non-catalog) model reference is accepted with a warning, not refused', async () => {
     const CUSTOM = '__custom__'
     const io = new FakeIO([CUSTOM, 'my-org/local-qwen-judge'])
-    await runJudgeConfigure({ out: outPath }, io)
+    await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
 
     expect(io.calls.some((c) => c.method === 'log.warn' && String(c.arg).includes('not in the known model catalog'))).toBe(true)
     const written = readFileSync(outPath, 'utf-8')
@@ -135,7 +135,7 @@ describe('runJudgeConfigure', () => {
     'a hosted custom reference (%s) is refused and nothing is written',
     async (ref) => {
       const io = new FakeIO(['__custom__', ref])
-      await runJudgeConfigure({ out: outPath }, io)
+      await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
 
       expect(io.calls.some((c) => c.method === 'log.error' && String(c.arg).includes('self-hosted'))).toBe(true)
       expect(() => readFileSync(outPath, 'utf-8')).toThrow()
@@ -144,7 +144,87 @@ describe('runJudgeConfigure', () => {
 
   it('cancelling the model selection writes nothing', async () => {
     const io = new FakeIO([CANCELLED])
-    await runJudgeConfigure({ out: outPath }, io)
+    await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
     expect(() => readFileSync(outPath, 'utf-8')).toThrow()
+    expect(() => readFileSync(join(tmpDir, '.intutic', 'decide', 'engine.json'), 'utf-8')).toThrow()
+  })
+})
+
+describe('runJudgeConfigure and the decide engine (3.0)', () => {
+  let tmpDir: string
+  let outPath: string
+  let engineFile: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'intutic-judge-test-'))
+    outPath = join(tmpDir, 'litellm_config.yaml')
+    engineFile = join(tmpDir, '.intutic', 'decide', 'engine.json')
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('writes ~/.intutic/decide/engine.json for the picked model, owner-only, without a key', async () => {
+    const io = new FakeIO(['ollama/llama3.1'])
+    await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
+
+    expect(JSON.parse(readFileSync(engineFile, 'utf-8'))).toEqual({
+      url: 'http://127.0.0.1:11434',
+      adapter: 'logprobs',
+      model: 'llama3.1',
+      timeoutMs: 5000,
+      parallel: 1,
+      structured: false,
+    })
+    if (process.platform !== 'win32') {
+      expect(statSync(engineFile).mode & 0o777).toBe(0o600)
+      expect(statSync(join(tmpDir, '.intutic', 'decide')).mode & 0o777).toBe(0o700)
+    }
+    expect(readFileSync(engineFile, 'utf-8')).not.toMatch(/apiKey|api_key|key/i)
+  })
+
+  it('takes the engine URL from --engine-url and keeps keys an existing engine.json holds', async () => {
+    mkdirSync(join(tmpDir, '.intutic', 'decide'), { recursive: true })
+    writeFileSync(engineFile, JSON.stringify({ model: 'old', q95: 412 }))
+    const io = new FakeIO(['__custom__', 'my-local-alias'])
+    await runJudgeConfigure({ out: outPath, home: tmpDir, engineUrl: 'http://10.0.0.5:8000' }, io)
+
+    expect(JSON.parse(readFileSync(engineFile, 'utf-8'))).toEqual({
+      url: 'http://10.0.0.5:8000',
+      adapter: 'logprobs',
+      model: 'my-local-alias',
+      timeoutMs: 5000,
+      parallel: 8,
+      structured: false,
+      q95: 412,
+    })
+  })
+
+  it.each(['https://api.openai.com', 'https://api.fireworks.ai/inference', 'https://models.example.com'])(
+    'a hosted or unlisted engine URL (%s) is refused before anything is asked or written',
+    async (engineUrl) => {
+      const io = new FakeIO([])
+      await runJudgeConfigure({ out: outPath, home: tmpDir, engineUrl }, io)
+
+      expect(io.calls.some((c) => c.method === 'log.error' && String(c.arg).includes('not a self-hosted host'))).toBe(true)
+      expect(io.calls.some((c) => c.method === 'select')).toBe(false)
+      expect(() => readFileSync(outPath, 'utf-8')).toThrow()
+      expect(() => readFileSync(engineFile, 'utf-8')).toThrow()
+    },
+  )
+
+  it('warns that every local-judge variable it prints is deprecated until 4.0', async () => {
+    const io = new FakeIO(['ollama/llama3.1'])
+    await runJudgeConfigure({ out: outPath, home: tmpDir }, io)
+
+    const warning = io.calls.find((c) => c.method === 'log.warn' && String(c.arg).includes('Deprecated since 3.0'))
+    expect(warning).toBeDefined()
+    for (const name of DEPRECATED_JUDGE_ENV) expect(String(warning?.arg)).toContain(name)
+    expect(String(warning?.arg)).toContain('local-judge')
+    expect(String(warning?.arg)).toContain('4.0')
+
+    const envNote = io.calls.find((c) => c.method === 'note' && (c.arg as { title?: string }).title === 'Environment')
+    expect(String((envNote?.arg as { msg?: string })?.msg)).toContain('Deprecated since 3.0')
   })
 })

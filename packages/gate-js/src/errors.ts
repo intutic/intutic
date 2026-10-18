@@ -122,3 +122,21 @@ export class IntuticGateHold extends IntuticGateRefusal {
     this.holdId = holdId
   }
 }
+
+/**
+ * Raised when a decide rule could not decide the call and a person should
+ * (`code` `DECIDE_ESCALATED`): the answers fell between its bands, or the
+ * option orders disagreed. A subclass, so a caller that stops on every
+ * refusal stops on this too; one that can ask its user (dsh's approval) asks
+ * with `reason` and runs the call only on a yes. `ruleId` names the rule
+ * (`decide.<ruleRef>`), and is `undefined` in an OPAQUE workspace.
+ */
+export class IntuticGateEscalation extends IntuticGateRefusal {
+  public readonly ruleId: string | undefined
+
+  constructor(reason: string, ruleId: string | undefined) {
+    super(reason, 'DECIDE_ESCALATED')
+    this.name = 'IntuticGateEscalation'
+    this.ruleId = ruleId
+  }
+}

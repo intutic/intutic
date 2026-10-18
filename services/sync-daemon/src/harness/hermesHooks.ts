@@ -107,7 +107,7 @@ log_event() {
   fi
 }
 
-${emitShellGate({ harness: "hermes" })}
+${emitShellGate({ harness: "hermes", ask: "hermes-approve" })}
 log_event "tool_allowed" "$TOOL_NAME" ""
 exit 0
 `

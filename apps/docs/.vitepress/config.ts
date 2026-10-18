@@ -189,6 +189,7 @@ const sidebarGuide = [
       ...(!IS_OSS ? [{ text: 'Plans & Pricing', link: '/guide/plans' }] : []),
       { text: 'Core Concepts', link: '/guide/concepts' },
       { text: 'How It Works', link: '/guide/how-it-works' },
+      { text: 'Upgrading to 3.0', link: '/guide/upgrading-to-3' },
       { text: 'FAQs', link: '/guide/faqs' },
     ],
   },
@@ -245,6 +246,7 @@ sidebarGuide.push({
     { text: 'Custom Filters (Open-Core)', link: '/guide/wasm-rules' },
     { text: 'Rego Policies (Open-Core)', link: '/guide/rego-policies' },
     { text: 'Graph Guardrails (Open-Core)', link: '/guide/graph-guardrails' },
+    { text: 'Decide Rules (Open-Core)', link: '/guide/decide' },
     { text: 'Sandboxed Execution (Open-Core)', link: '/guide/sandboxed-execution' },
     { text: 'Chaos Engineering for Agents (Open-Core)', link: '/guide/chaos-engineering' },
     { text: 'Governance Controls Checklist (Open-Core)', link: '/guide/governance-controls' },
@@ -555,6 +557,7 @@ export default defineConfig({
             { text: 'MCP Governance Proxy', link: '/integrations/mcp-proxy' },
             { text: 'Kitkat Agent Custom Skill', link: '/integrations/kitkat' },
             { text: 'Rule Author Agent Skill', link: '/integrations/rule-author' },
+            { text: 'Decide Escalation by Harness', link: '/integrations/decide-escalation' },
           ],
         },
         {

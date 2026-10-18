@@ -92,14 +92,115 @@ program
     await runSetup(opts)
   })
 
+// ── Decide rules: a self-hosted model answers a rule's questions ──────────
+const decideCmd = program.command('decide').description('Decide rules: test and evaluate them, configure the self-hosted engine, and check a call')
+
+decideCmd
+  .command('test <rule>')
+  .description('Ask a rule\'s questions about one call and show each answer, the when value and the outcome')
+  .requiredOption('--state <file>', 'A JSON file with the call: {"tool","toolInput","cwd"?}')
+  .option('--json', 'Print the result as JSON')
+  .option('--log-state', 'Also write the exact state sent to ~/.intutic/logs/decide-state-<date>.jsonl')
+  .option('--workspace <dir>', 'The workspace whose .intutic/sops to read (default: the recorded one, else the current directory)')
+  .action(async (rule, opts) => {
+    const { runDecideTest } = await import('./commands/decide.js')
+    await runDecideTest(rule, opts)
+  })
+
+decideCmd
+  .command('eval <rule>')
+  .description('Measure a rule on labelled calls; under a pre-registration, a pass pins the engine\'s model so the rule may enforce')
+  .option('--labels <file>', 'JSONL, one call per line: {"id","label":"refuse"|"allow","tool","toolInput","cwd"?}')
+  .option('--preregister <file>', 'Write the pre-registration here when it is absent (reading no label); evaluate against it when present')
+  .option('--adversarial', 'Add the planted-approval, instruction-in-arguments and paraphrase families (always on under a pre-registration)')
+  .option('--json', 'Print the run report as JSON')
+  .option('--log-state', 'Also write each exact state sent to ~/.intutic/logs/decide-state-<date>.jsonl')
+  .option('--workspace <dir>', 'The workspace whose .intutic/sops to read')
+  .action(async (rule, opts) => {
+    const { runDecideEval } = await import('./commands/decide.js')
+    await runDecideEval(rule, opts)
+  })
+
+decideCmd
+  .command('calibrate <rule>')
+  .description('Fit a combiner over the questions and a band to labelled calls, saved as a candidate for the next pre-registered eval')
+  .requiredOption('--labels <file>', 'JSONL labels, as for decide eval')
+  .option('--json', 'Print the candidate as JSON')
+  .option('--workspace <dir>', 'The workspace whose .intutic/sops to read')
+  .action(async (rule, opts) => {
+    const { runDecideCalibrate } = await import('./commands/decide.js')
+    await runDecideCalibrate(rule, opts)
+  })
+
+decideCmd
+  .command('models')
+  .description('The models the bake-off validated (none for a laptop) — nothing is downloaded')
+  .option('--json', 'Print as JSON')
+  .action(async (opts) => {
+    const { runDecideModels } = await import('./commands/decide.js')
+    runDecideModels(opts)
+  })
+
+decideCmd
+  .command('check')
+  .description('Evaluate one call\'s decide rules for a shell or n8n gate: a JSON request on stdin, one JSON line out')
+  .option('--stdin', 'Read the request from stdin')
+  .action(async (opts) => {
+    const { runDecideCheck } = await import('./commands/decide.js')
+    await runDecideCheck(opts)
+  })
+
+decideCmd
+  .command('configure')
+  .description('Write ~/.intutic/decide/engine.json: the self-hosted engine\'s URL, adapter and model (the key stays in INTUTIC_DECIDE_API_KEY)')
+  .option('--url <url>', 'The engine\'s base URL (default http://127.0.0.1:11434, Ollama)')
+  .option('--adapter <adapter>', 'logprobs, systemone or decisions')
+  .option('--model <model>', 'The model the engine serves')
+  .option('--timeout-ms <ms>', 'Per-call timeout')
+  .option('--parallel <n>', 'Most requests in flight at once')
+  .option('--structured', 'Send structured_outputs with logprobs requests')
+  .option('--no-structured', 'Do not send structured_outputs')
+  .option('--json', 'Print the written configuration as JSON')
+  .action(async (opts) => {
+    const { runDecideConfigure } = await import('./commands/decide.js')
+    runDecideConfigure(opts)
+  })
+
+decideCmd
+  .command('disable')
+  .description('Run every decide rule as shadow on this machine (logged, never refusing) until `intutic decide enable`')
+  .action(async () => {
+    const { runDecideDisable } = await import('./commands/decide.js')
+    await runDecideDisable(true)
+  })
+
+decideCmd
+  .command('enable')
+  .description('Undo `intutic decide disable`')
+  .action(async () => {
+    const { runDecideDisable } = await import('./commands/decide.js')
+    await runDecideDisable(false)
+  })
+
+decideCmd
+  .command('lint')
+  .description('Read every local decide: line: name the ones that do not read, and tools more than 4 rules name')
+  .option('--json', 'Print as JSON')
+  .option('--workspace <dir>', 'The workspace whose .intutic/sops to read')
+  .action(async (opts) => {
+    const { runDecideLint } = await import('./commands/decide.js')
+    await runDecideLint(opts)
+  })
+
 const judgeCmd = program
   .command('judge', needsSelfHost)
   .description('Configure the LLM-as-judge path')
 
 judgeCmd
   .command('configure')
-  .description('Generate local artifacts (litellm_config.yaml, env, Helm values) for an on-prem judge on a self-hosted model — never a remote API call')
+  .description('Generate local artifacts (litellm_config.yaml, the decide engine config, env, Helm values) for an on-prem judge on a self-hosted model — never a remote API call')
   .option('--out <path>', 'Where to write litellm_config.yaml', './litellm_config.yaml')
+  .option('--engine-url <url>', 'Where this machine reaches the model server, for the decide engine (~/.intutic/decide/engine.json)')
   .action(async (opts) => {
     const { runJudgeConfigure } = await import('./commands/judge.js')
     await runJudgeConfigure(opts)

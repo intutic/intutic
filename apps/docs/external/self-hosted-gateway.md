@@ -288,11 +288,12 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
     that generates the `litellm_config.yaml`, env block, and Helm values a local judge needs —
     local files only, never a remote API call, matching this document's own point that
     local-judge config is not remotely settable.
-  - An optional typed stage clears clean responses without a free-text call
-    (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI`,
-    `LITELLM_LOCAL_TYPED_JUDGE_MODEL`). It needs a model that returns log-probabilities and a
-    band you measured for that model — see
-    [On-Prem Judge Setup](/external/on-prem-judge#typed-stage-optional).
+  - A typed band (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`, `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI`,
+    `LITELLM_LOCAL_TYPED_JUDGE_MODEL`) makes the judge the decide rule `local-judge`: two yes/no
+    questions scored from log-probabilities, with the free-text judge writing only the note on a
+    violation. It needs a model that returns log-probabilities and a band you measured for that
+    model. These variables are deprecated since 3.0 and removed in 4.0 — see
+    [On-Prem Judge Setup](/external/on-prem-judge#typed-stage-the-local-judge-decide-rule).
 - **If your judge LLM is unreachable** — local or SaaS — the proxy reports
   this honestly rather than silently passing every check: a response is annotated `Intutic
   LLM-as-a-Judge: verdict UNAVAILABLE`, with the reason and "Treat it as unverified, not as

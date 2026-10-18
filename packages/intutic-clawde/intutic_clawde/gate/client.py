@@ -60,7 +60,10 @@ VALID_EVENTS = {
     "tool_blocked", "tool_allowed", "tool_flagged", "tool_would_block",
     "config_tamper", "network_bypass", "guards_disabled",
     "snapshot_absent", "snapshot_stale", "snapshot_invalid", "snapshot_empty",
-    "tool_held", "hold_approved_bypass_used",
+    "snapshot_format_newer", "tool_held", "hold_approved_bypass_used",
+    # `intutic rollback` writes it; listed so a caller reporting a restore of
+    # its own is not dropped.
+    "tool_reverted",
 }
 
 REASON_MAX = 512   # control plane truncates at 512; do it here so logs match

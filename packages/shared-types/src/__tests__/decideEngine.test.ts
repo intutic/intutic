@@ -61,6 +61,7 @@ function config(url: string, c: Record<string, unknown>): DecideEngineConfig {
     structured: (c.structured as boolean) ?? false,
     ollama: (c.ollama as boolean) ?? false,
     ...(c.modelDigest ? { modelDigest: c.modelDigest as string } : {}),
+    ...(c.maxResponseStateBytes ? { maxResponseStateBytes: c.maxResponseStateBytes as number } : {}),
   }
 }
 

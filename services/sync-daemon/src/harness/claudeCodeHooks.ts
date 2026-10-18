@@ -380,7 +380,7 @@ try {
 // It is emitted from harness/gateBody.ts now. That does not make the escaping
 // easier; it makes there be one of it, with one set of tests.
 ${emitPreImageCapture()}
-${emitJsGate({ harness: 'claude-code', contract: 'exit2', reviewRequestFile })}
+${emitJsGate({ harness: 'claude-code', contract: 'exit2', reviewRequestFile, ask: 'claude-pretooluse' })}
 ${emitRedactor()}
 
 /**
@@ -450,7 +450,7 @@ function logEvent(verdict, toolName, reason, sessionId) {
 // Read stdin containing Claude's tool context
 let inputData = '';
 process.stdin.on('data', (chunk) => { inputData += chunk; });
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
     const ctx = JSON.parse(inputData);
     // An envelope carrying none of the tool fields extracts to empty strings,
@@ -475,22 +475,25 @@ process.stdin.on('end', () => {
     const targetPath = toolInput.path || toolInput.file_path || toolInput.filePath ||
       toolInput.new_path || toolInput.target || toolInput.notebook_path || '';
     const shellCmd = String(toolInput.command || toolInput.cmd || toolInput.script || '');
-    intuticGate(rawToolName, targetPath, shellCmd,
-      (v, t, r) => logEvent(v, t, r, sessionId), _intuticWsId, toolInput, sessionId);
+    // 2. Review holds: handled inside the shared gate (gate body v8) — see
+    //    the note above the stdin handler.
 
-    // 2. Review holds: handled inside intuticGate (gate body v8) — see the
-    //    note above the stdin handler.
-
-    // 3. SOP-compiled pattern blacklist
+    // 3. SOP-compiled pattern blacklist: deterministic, so it runs after the
+    //    shared gate's own tiers and before any decide rule asks the engine.
     const patterns = ${JSON.stringify(constraints.patterns)};
-    for (const pattern of patterns) {
-      if (toolInputStr.includes(pattern)) {
-        const reason = \`Policy violation matching pattern: "\${pattern}"\`;
-        console.error(\`[Intutic Guardrail] Blocked execution of tool "\${toolName}" due to \${reason}\`);
-        logEvent('tool_blocked', toolName, reason, sessionId);
-        process.exit(2);
+    const patternBlacklist = () => {
+      for (const pattern of patterns) {
+        if (toolInputStr.includes(pattern)) {
+          const reason = \`Policy violation matching pattern: "\${pattern}"\`;
+          console.error(\`[Intutic Guardrail] Blocked execution of tool "\${toolName}" due to \${reason}\`);
+          logEvent('tool_blocked', toolName, reason, sessionId);
+          process.exit(2);
+        }
       }
-    }
+    };
+    await intuticGateWithDecide(rawToolName, targetPath, shellCmd,
+      (v, t, r) => logEvent(v, t, r, sessionId), _intuticWsId, toolInput, sessionId,
+      { before: patternBlacklist, cwd: ctx.cwd || process.cwd() });
 
     logEvent('tool_allowed', toolName, '', sessionId);
     process.exit(0);

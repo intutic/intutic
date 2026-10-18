@@ -13,14 +13,25 @@ stock Intutic before the call runs locally.
 This module is that enforcement point: the missing adapter, written against
 Intutic's own published gate contract.
 
-Six tiers, in order:
+Seven tiers, in order:
 
   A0  SSO group policy  from the policy snapshot       unknown groups refused
   A1  policy snapshot   port of intuticGate()          fails CLOSED
   M   MCP registry      from the policy snapshot       unverified snapshot admits none
   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
   A2  image integrity   local check                    fails CLOSED
+  D   decide rules      the self-hosted decide engine  fails CLOSED when enforcing
   B   POST /hook-gate   control-plane check            fail posture set by GateClient
+
+Tier D runs only on a call every deterministic tier allowed: the snapshot's
+decide rules on the tool, asked of the self-hosted engine configured in
+~/.intutic/decide/engine.json and INTUTIC_DECIDE_*, within
+INTUTIC_DECIDE_BUDGET_MS (default DECIDE_BUDGET_MS). A rule refuses with
+DECIDE_REFUSED; one that cannot decide raises IntuticGateEscalation
+(DECIDE_ESCALATED), which a caller that can ask its user turns into a
+question; an engine that cannot answer refuses an enforcing rule with
+GOVERNANCE_UNAVAILABLE and lets a shadow rule's call on (decide_evaluate.py
+holds the protections).
 
 Tier M applies the workspace's MCP server registry and mcpAllowedServers list
 to an mcp__<server>__<tool> call, from the snapshot's @mcp_registry and
@@ -69,15 +80,22 @@ import dataclasses
 import hashlib
 import json
 import os
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from ..errors import ClawdeError
-from . import chaos, decide_record, imagecheck, mcp_registry, snapshot, soprules, sso_groups
+from . import chaos, decide_log, decide_record, imagecheck, mcp_registry, snapshot, soprules, sso_groups
+from .decide_engine import DecideEngineError, create_decide_engine, resolve_decide_engine_config
+from .decide_evaluate import (
+    CanaryFileStore, decide_decision, decide_shadow_findings, decide_stored_q95_ms, decide_unavailable_decision,
+    evaluate_decide_call,
+)
 from .actions import is_deploy, touches_infra
 from .client import INSUFFICIENT_SCOPE, GateClient
 from .hold import hold_key, hold_message, request_hold
-from .limits import too_large_reason
+from .limits import DECIDE_BUDGET_MS, too_large_reason
 from .opaque import OPAQUE_REFUSAL_MESSAGE
 
 
@@ -86,11 +104,48 @@ from .opaque import OPAQUE_REFUSAL_MESSAGE
 READ_ONLY_TOOLS = frozenset({"read_file", "list_files", "read", "cat", "view"})
 
 
-# Whether this gate evaluates the decide rules a snapshot carries. Until it
-# does, a decide rule's fallback line refuses its tools, as in a gate that
-# reads no @decide records, so no decide rule goes unenforced. Set only where
-# the decide tier runs.
-CAN_EVALUATE_DECIDE = False
+# Whether this gate evaluates the decide rules a snapshot carries (Tier D).
+# Only a gate that does skips a decide rule's fallback line, and only when the
+# rule's record decoded; otherwise the fallback line refuses its tools, as in
+# a gate that reads no @decide records.
+CAN_EVALUATE_DECIDE = True
+
+
+def _decide_budget_ms() -> int:
+    """The decide tier's budget for one call: INTUTIC_DECIDE_BUDGET_MS, or DECIDE_BUDGET_MS."""
+    raw = os.environ.get("INTUTIC_DECIDE_BUDGET_MS", "").strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else DECIDE_BUDGET_MS
+
+
+def _decide_deps():
+    """The engine (or the error creating it raised), its URL, the canary cache,
+    the per-call p95 ``intutic doctor`` stored with the engine's parallel
+    (for the budget estimate), and the resolved configuration for the decide
+    log (None when it does not resolve), read from ~/.intutic/decide/ and the
+    environment for each call that needs them."""
+    folder = Path.home() / ".intutic" / "decide"
+    url = ""
+    q95_ms = None
+    parallel = 1
+    resolved = None
+    try:
+        try:
+            file = json.loads((folder / "engine.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            file = None
+        except (OSError, ValueError) as exc:
+            raise DecideEngineError("not_configured", f"engine.json does not read: {exc}")
+        q95_ms = decide_stored_q95_ms(file)
+        cfg = resolve_decide_engine_config(file, os.environ)
+        resolved = cfg
+        url = cfg.url
+        parallel = cfg.parallel
+        engine = create_decide_engine(cfg)
+    except DecideEngineError as err:
+        engine = err
+    except Exception as err:  # noqa: BLE001 - an engine that cannot be made is not configured
+        engine = DecideEngineError("not_configured", str(err))
+    return engine, url, CanaryFileStore(folder / "canary.json"), q95_ms, parallel, resolved
 
 
 #: Every `code` an IntuticGateRefusal can carry: the tier that refused, or for
@@ -167,6 +222,20 @@ class IntuticGateHold(IntuticGateRefusal):
         super().__init__(reason, "HELD")
         self.args = (f"[Intutic Governance] HELD: {reason}",)
         self.hold_id = hold_id
+
+
+class IntuticGateEscalation(IntuticGateRefusal):
+    """Raised when a decide rule could not decide the call and a person
+    should (`code` DECIDE_ESCALATED): the answers fell between its bands, or
+    the option orders disagreed. A subclass, so a caller that stops on every
+    refusal stops on this too; one that can ask its user asks with `reason`
+    and runs the call only on a yes. `rule_id` names the rule
+    (`decide.<ruleRef>`), and is None in an OPAQUE workspace.
+    """
+
+    def __init__(self, reason: str, rule_id: Optional[str]):
+        super().__init__(reason, "DECIDE_ESCALATED")
+        self.rule_id = rule_id
 
 
 @dataclass
@@ -376,7 +445,8 @@ class Gate:
             self._decide(tool_name, tool_input, note)
         except IntuticGateRefusal as exc:
             # A refusal a tier decided is a policy hit; a call too large to read is not.
-            report("hold" if isinstance(exc, IntuticGateHold) else "deny", exc.code != "COMMAND_TOO_LARGE")
+            held = isinstance(exc, (IntuticGateHold, IntuticGateEscalation))
+            report("hold" if held else "deny", exc.code != "COMMAND_TOO_LARGE")
             raise
         except BaseException:
             report("deny", False)
@@ -511,6 +581,11 @@ class Gate:
                            f"{v.reason} (authoring-time check; the apply will be refused)",
                            tool_input, file_path=target)
 
+        # ---- Tier D: decide rules -----------------------------------------
+        # Only here, after every deterministic tier allowed the call: a refusal
+        # above never reaches the engine.
+        self._guard_decide(tool_name, tool_input, note)
+
         # ---- Tier B: control plane gate -----------------------------------
         #
         # Skipped for read-only tools. Tier B is a network round trip whose
@@ -543,6 +618,75 @@ class Gate:
 
         if tool_name not in READ_ONLY_TOOLS:
             self._emit("tool_allowed", tool_name, "", tool_input, gate_decision_id=decision_id)
+
+    def _guard_decide(self, tool_name: str, tool_input: dict, note: Optional[dict] = None) -> None:
+        """Tier D. Raises when a decide rule on this tool refuses the call
+        (IntuticGateRefusal, DECIDE_REFUSED or GOVERNANCE_UNAVAILABLE) or could
+        not decide it (IntuticGateEscalation). Each shadow rule's finding is
+        recorded; the call goes on."""
+        if not CAN_EVALUATE_DECIDE:
+            return
+        rules = [r for r in self.snapshot().decide_rules
+                 if r["ir"].get("on") == "tool_call" and tool_name in (r["ir"].get("tools") or [])]
+        if not rules:
+            return
+        budget = _decide_budget_ms()
+        try:
+            engine, url, canary, q95_ms, parallel, cfg = _decide_deps()
+            started = time.monotonic()
+            cwd = os.getcwd()
+            # A rule the stored p95 says cannot be answered within the budget
+            # is not asked: an enforcing one escalates.
+            ev = evaluate_decide_call(
+                deterministic="allow", tool=tool_name, tool_input=tool_input, cwd=cwd, rules=rules,
+                deadline_s=started + budget / 1000.0, engine=engine, engine_url=url, canary=canary,
+                q95_ms=q95_ms, parallel=parallel,
+            )
+            self._log_decide(ev, rules, tool_name, tool_input, cwd, budget, started, cfg)
+            for f in decide_shadow_findings(ev, rules):
+                self._emit("tool_would_block", tool_name, f"{f['reason']} [{f['ruleId']}]", tool_input)
+            decision = decide_decision(ev, rules)
+        except Exception as exc:  # noqa: BLE001 - a tier that cannot finish is unavailable
+            decision = decide_unavailable_decision(
+                rules, tool_name, f"the decide rules on {tool_name} could not be evaluated ({type(exc).__name__})")
+        if decision["outcome"] == "allow":
+            return
+        rule_id = decision["ruleId"]
+        if note is not None and rule_id:
+            note["ruleId"] = rule_id
+        reason = f"{decision['reason']} [{rule_id}]" if rule_id else decision["reason"]
+        if decision["outcome"] == "escalate":
+            self._emit("tool_flagged", tool_name, f"DECIDE_ESCALATED — asked a person: {reason}", tool_input)
+            raise IntuticGateEscalation(self._shown(reason), None if self._opaque() else rule_id)
+        self._emit("tool_blocked", tool_name, reason, tool_input)
+        raise IntuticGateRefusal(self._shown(reason), decision["code"] or "GOVERNANCE_UNAVAILABLE")
+
+    def _log_decide(self, ev, rules, tool_name: str, tool_input: dict, cwd: str, budget_ms: int, started: float, cfg) -> None:
+        """Appends the call's decide record to ~/.intutic/logs/decide-<date>.jsonl
+        and updates each rule's drift stats, as ``intutic decide check`` does
+        for the shell gates. Never raises: a log that cannot be written never
+        changes the decision."""
+        try:
+            decide_log.write_decide_call_log(
+                ev, rules,
+                {
+                    "atMs": decide_log.now_ms(),
+                    "harness": self.client.harness if self.client is not None else "sdk",
+                    "workspaceId": self.cfg.workspace_id,
+                    "sessionId": self.client.session_id if self.client is not None else "",
+                    "tool": tool_name,
+                    "toolInput": tool_input,
+                    "cwd": cwd,
+                    "budgetMs": budget_ms,
+                    "latencyMs": round((time.monotonic() - started) * 1000),
+                    "engine": decide_log.decide_log_engine(cfg, ev),
+                    "redact": decide_log.DECIDE_LOG_REDACTION_SOURCES,
+                },
+                lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest(),
+                lambda rule_hash, run_id: decide_log.read_decide_eval_run_baseline(decide_log.default_decide_dir(), rule_hash, run_id),
+            )
+        except Exception:  # noqa: BLE001 - a log that cannot be written never changes the decision
+            pass
 
     def _guard_mcp(self, tool_name: str, tool_input: dict, note: Optional[dict] = None) -> None:
         """Raise when the workspace's MCP server registry or allowlist refuses

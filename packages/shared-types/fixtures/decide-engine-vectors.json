@@ -592,6 +592,72 @@
         "ollama": false,
         "selfHostedHosts": ".corp.example"
       }
+    },
+    {
+      "name": "an on: response state's limit from the environment",
+      "file": {
+        "model": "m"
+      },
+      "env": {
+        "INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES": "65536"
+      },
+      "expect": {
+        "url": "http://127.0.0.1:11434",
+        "adapter": "logprobs",
+        "model": "m",
+        "timeoutMs": 5000,
+        "parallel": 1,
+        "structured": false,
+        "ollama": true,
+        "maxResponseStateBytes": 65536
+      }
+    },
+    {
+      "name": "an on: response state's limit in the file is ignored",
+      "file": {
+        "model": "m",
+        "maxResponseStateBytes": 100
+      },
+      "env": {},
+      "expect": {
+        "url": "http://127.0.0.1:11434",
+        "adapter": "logprobs",
+        "model": "m",
+        "timeoutMs": 5000,
+        "parallel": 1,
+        "structured": false,
+        "ollama": true
+      }
+    },
+    {
+      "name": "an on: response state's limit that is not a number",
+      "file": {
+        "model": "m"
+      },
+      "env": {
+        "INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES": "32k"
+      },
+      "error": "not_configured"
+    },
+    {
+      "name": "a zero on: response state's limit",
+      "file": {
+        "model": "m"
+      },
+      "env": {
+        "INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES": "0"
+      },
+      "error": "not_configured"
+    },
+    {
+      "name": "an on: response state's limit over 1048576",
+      "file": {
+        "model": "m"
+      },
+      "env": {
+        "INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES": "1048577"
+      },
+      "error": "not_configured"
     }
   ],
   "state": [
@@ -737,6 +803,86 @@
         "content": "Here is the summary."
       },
       "expect": "ACTIVE SOP CONSTRAINTS:\nNever print secrets.\n\nASSISTANT RESPONSE:\nHere is the summary."
+    },
+    {
+      "name": "a response over 16384 bytes is inside its own limit, 32768",
+      "input": {
+        "kind": "response",
+        "ruleText": "Never print secrets.",
+        "content": {
+          "repeat": "x",
+          "times": 20000
+        }
+      },
+      "expect": [
+        "ACTIVE SOP CONSTRAINTS:\nNever print secrets.\n\nASSISTANT RESPONSE:\n",
+        {
+          "repeat": "x",
+          "times": 20000
+        }
+      ]
+    },
+    {
+      "name": "a response at exactly 32768 bytes",
+      "input": {
+        "kind": "response",
+        "ruleText": "Never print secrets.",
+        "content": {
+          "repeat": "x",
+          "times": 32702
+        }
+      },
+      "expect": [
+        "ACTIVE SOP CONSTRAINTS:\nNever print secrets.\n\nASSISTANT RESPONSE:\n",
+        {
+          "repeat": "x",
+          "times": 32702
+        }
+      ]
+    },
+    {
+      "name": "a response over 32768 bytes is too_large",
+      "input": {
+        "kind": "response",
+        "ruleText": "Never print secrets.",
+        "content": {
+          "repeat": "x",
+          "times": 32703
+        }
+      },
+      "error": "too_large"
+    },
+    {
+      "name": "a response under a configured limit",
+      "input": {
+        "kind": "response",
+        "ruleText": "Never print secrets.",
+        "content": {
+          "repeat": "x",
+          "times": 40000
+        },
+        "maxBytes": 65536
+      },
+      "expect": [
+        "ACTIVE SOP CONSTRAINTS:\nNever print secrets.\n\nASSISTANT RESPONSE:\n",
+        {
+          "repeat": "x",
+          "times": 40000
+        }
+      ]
+    },
+    {
+      "name": "a response over a configured limit is too_large",
+      "input": {
+        "kind": "response",
+        "ruleText": "Never print secrets.",
+        "content": {
+          "repeat": "x",
+          "times": 9000
+        },
+        "maxBytes": 8192
+      },
+      "error": "too_large"
     }
   ],
   "prompts": [
@@ -2126,12 +2272,288 @@
       }
     },
     {
-      "name": "a state over 16384 bytes is too_large and sends nothing",
+      "name": "a state over 16384 bytes is asked: the engine takes an on: response state up to its limit",
       "adapter": "logprobs",
       "model": "qwen3.5:4b",
       "state": {
         "repeat": "x",
-        "times": 16385
+        "times": 20000
+      },
+      "questions": [
+        {
+          "name": "exports",
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      ],
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "model": "qwen3.5:4b",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.121,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.121
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.496
+                        },
+                        {
+                          "token": "Yes",
+                          "logprob": -3.62
+                        },
+                        {
+                          "token": " yes",
+                          "logprob": -5.0
+                        },
+                        {
+                          "token": "No",
+                          "logprob": -6.25
+                        },
+                        {
+                          "token": "<think>",
+                          "logprob": -7.5
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.9159831342542806
+          }
+        },
+        "model": "qwen3.5:4b",
+        "modelDigest": "id:qwen3.5:4b",
+        "digestStrength": "weak"
+      }
+    },
+    {
+      "name": "a configured on: response limit raises what the engine takes",
+      "adapter": "logprobs",
+      "model": "qwen3.5:4b",
+      "state": {
+        "repeat": "x",
+        "times": 40000
+      },
+      "questions": [
+        {
+          "name": "exports",
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      ],
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "model": "qwen3.5:4b",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.121,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.121
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.496
+                        },
+                        {
+                          "token": "Yes",
+                          "logprob": -3.62
+                        },
+                        {
+                          "token": " yes",
+                          "logprob": -5.0
+                        },
+                        {
+                          "token": "No",
+                          "logprob": -6.25
+                        },
+                        {
+                          "token": "<think>",
+                          "logprob": -7.5
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.9159831342542806
+          }
+        },
+        "model": "qwen3.5:4b",
+        "modelDigest": "id:qwen3.5:4b",
+        "digestStrength": "weak"
+      },
+      "maxResponseStateBytes": 65536
+    },
+    {
+      "name": "a configured on: response limit below 16384 still lets a tool call's state through",
+      "adapter": "logprobs",
+      "model": "qwen3.5:4b",
+      "state": {
+        "repeat": "x",
+        "times": 16384
+      },
+      "questions": [
+        {
+          "name": "exports",
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      ],
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "model": "qwen3.5:4b",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.121,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.121
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.496
+                        },
+                        {
+                          "token": "Yes",
+                          "logprob": -3.62
+                        },
+                        {
+                          "token": " yes",
+                          "logprob": -5.0
+                        },
+                        {
+                          "token": "No",
+                          "logprob": -6.25
+                        },
+                        {
+                          "token": "<think>",
+                          "logprob": -7.5
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.9159831342542806
+          }
+        },
+        "model": "qwen3.5:4b",
+        "modelDigest": "id:qwen3.5:4b",
+        "digestStrength": "weak"
+      },
+      "maxResponseStateBytes": 1024
+    },
+    {
+      "name": "a state over 32768 bytes, the larger of the two limits, is too_large and sends nothing",
+      "adapter": "logprobs",
+      "model": "qwen3.5:4b",
+      "state": {
+        "repeat": "x",
+        "times": 32769
+      },
+      "questions": [
+        {
+          "name": "exports",
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      ],
+      "replay": [],
+      "requests": [],
+      "expect": {
+        "error": "too_large"
+      }
+    },
+    {
+      "name": "a state over a configured on: response limit is too_large and sends nothing",
+      "adapter": "logprobs",
+      "model": "qwen3.5:4b",
+      "maxResponseStateBytes": 65536,
+      "state": {
+        "repeat": "x",
+        "times": 65537
       },
       "questions": [
         {
@@ -5366,6 +5788,70 @@
         "adapter": "logprobs",
         "model": "m",
         "ollama": true
+      },
+      "replay": [],
+      "down": true,
+      "expect": {
+        "outcome": "refuse",
+        "code": "GOVERNANCE_UNAVAILABLE",
+        "ruleRef": "local:data.md#prod-data-export",
+        "rules": [
+          {
+            "ref": "local:data.md#prod-data-export",
+            "effective": "enforce",
+            "why": null,
+            "outcome": "unavailable",
+            "error": "upstream"
+          }
+        ],
+        "canary": null,
+        "canaryStored": null,
+        "requests": 0
+      }
+    },
+    {
+      "name": "an engine that is not Ollama and does not answer refuses with its transport error, not canary_failed",
+      "deterministic": "allow",
+      "tool": "Bash",
+      "toolInput": {
+        "command": "pg_dump -h prod > /tmp/x.sql"
+      },
+      "cwd": "/repo",
+      "rules": [
+        {
+          "ref": "local:data.md#prod-data-export",
+          "rule": {
+            "id": "prod-data-export",
+            "on": "tool_call",
+            "tools": [
+              "Bash"
+            ],
+            "questions": {
+              "exports": {
+                "type": "yes_no",
+                "ask": "Does this command copy customer data out of the production database?"
+              }
+            },
+            "when": "exports",
+            "rollout": "enforce"
+          },
+          "rollout": "enforce",
+          "stampedBy": "rule",
+          "sopTitle": "Production data handling",
+          "ruleText": "Customer data never leaves production.",
+          "pins": [
+            {
+              "modelDigest": "id:m",
+              "evalRunId": "eval_local_01",
+              "source": "local"
+            }
+          ]
+        }
+      ],
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m",
+        "ollama": false
       },
       "replay": [],
       "down": true,

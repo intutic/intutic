@@ -13,7 +13,7 @@ export { classify, isDeploy, isTest, touchesInfra } from './actions.js'
 export { GateClient } from './client.js'
 export type { GateClientOptions, GateResponse } from './client.js'
 
-export { GateError, GateConnectionError, IntuticGateHold, IntuticGateRefusal, GATE_REFUSAL_CODES } from './errors.js'
+export { GateError, GateConnectionError, IntuticGateEscalation, IntuticGateHold, IntuticGateRefusal, GATE_REFUSAL_CODES } from './errors.js'
 export type { GateRefusalCode } from './errors.js'
 
 export { canonicalJson, holdKey, holdMessage } from './hold.js'
@@ -57,6 +57,10 @@ export type { McpAllowlistRecord, McpRegistryRecord } from './mcpRegistryRecord.
 
 export type { DecidePin, DecideRecord, DecideStamp } from './decideRecord.js'
 export type { DecideBand, DecideQuestion, DecideRule } from './decide.js'
+export { decide } from './decideApi.js'
+export { DecideEngineError } from './decideEngine.js'
+export type { DecideEngineConfig, DecideEngineErrorCode } from './decideEngine.js'
+export type { DecideSdkAnswer, DecideSdkOptions, DecideSdkResult } from './decideSdk.js'
 
 export {
   firstMatch,

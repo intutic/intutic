@@ -1,0 +1,1332 @@
+{
+  "_comment": "decide(state, questions, opts) in the SDKs, run identically by packages/shared-types/src/__tests__/decideSdk.test.ts, packages/gate-js/src/__tests__/decideSdk.test.ts, packages/clawde-sdk/__tests__/decide.test.ts and packages/intutic-clawde/tests/test_decide_sdk.py against a mock engine that replays `replay` as decide-engine-vectors.json describes. The engine comes from `engine` (a configuration; its url is the mock's unless given) or from `engineFile` (engine.json) and `env`; `$MOCK` in either is the mock's URL. `state` may be {repeat, times}. `expect.error` is the engine error code thrown, `expect.invalid` the TypeError's message, and `expect.requests` counts every request the mock received. A yes/no answer's `p` and a choice's `perOrder` compare within 1e-12; `values` are each option's atom value; `sentModels` are the models every chat completion named.",
+  "sdk": [
+    {
+      "name": "without a when, each yes/no answer is read through the default band",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.9499981484571172,
+            "value": "T"
+          }
+        },
+        "value": null,
+        "outcome": null,
+        "code": null,
+        "via": null,
+        "error": null,
+        "model": "m",
+        "modelDigest": "id:m",
+        "digestStrength": "weak",
+        "requests": 1
+      }
+    },
+    {
+      "name": "a when that is true refuses",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.9499981484571172,
+            "value": "T"
+          }
+        },
+        "value": "T",
+        "outcome": "refuse",
+        "code": "DECIDE_REFUSED",
+        "via": null,
+        "error": null,
+        "requests": 1
+      }
+    },
+    {
+      "name": "a when that is false allows",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "no"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "no",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "no",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "yes",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.05000185154288292,
+            "value": "F"
+          }
+        },
+        "value": "F",
+        "outcome": "allow",
+        "code": null,
+        "via": null,
+        "error": null,
+        "requests": 1
+      }
+    },
+    {
+      "name": "an answer in the middle of the band escalates through ask",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.6931,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.6931
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -0.6931
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.5,
+            "value": "U"
+          }
+        },
+        "value": "U",
+        "outcome": "escalate",
+        "code": "DECIDE_ESCALATED",
+        "via": "ask",
+        "error": null,
+        "requests": 1
+      }
+    },
+    {
+      "name": "escalate refuse refuses an unknown answer",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "escalate": "refuse",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.6931,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.6931
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -0.6931
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.5,
+            "value": "U"
+          }
+        },
+        "value": "U",
+        "outcome": "refuse",
+        "code": "DECIDE_ESCALATED",
+        "via": null,
+        "error": null,
+        "requests": 1
+      }
+    },
+    {
+      "name": "a band in the options replaces the default",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "band": {
+        "yes_at": 0.6,
+        "no_below": 0.4
+      },
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.3567,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.3567
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -1.204
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.700000449318495,
+            "value": "T"
+          }
+        },
+        "value": "T",
+        "outcome": "refuse",
+        "code": "DECIDE_REFUSED",
+        "via": null,
+        "error": null,
+        "requests": 1
+      }
+    },
+    {
+      "name": "a question's own band wins over the options' band",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?",
+          "band": {
+            "yes_at": 0.9,
+            "no_below": 0.8
+          }
+        }
+      },
+      "when": "exports",
+      "band": {
+        "yes_at": 0.6,
+        "no_below": 0.4
+      },
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.3567,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.3567
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -1.204
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.700000449318495,
+            "value": "F"
+          }
+        },
+        "value": "F",
+        "outcome": "allow",
+        "code": null,
+        "via": null,
+        "error": null,
+        "requests": 1
+      }
+    },
+    {
+      "name": "a choice is asked in both orders and averaged; the confident option is the choice",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        },
+        "dest": {
+          "type": "choice",
+          "ask": "Where does the data go?",
+          "options": [
+            "local_file",
+            "external_host"
+          ]
+        }
+      },
+      "when": "exports AND dest != none_of_these",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "A) local_file",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "A"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "A",
+                      "logprob": -0.1054,
+                      "top_logprobs": [
+                        {
+                          "token": "A",
+                          "logprob": -0.1054
+                        },
+                        {
+                          "token": "B",
+                          "logprob": -2.9957
+                        },
+                        {
+                          "token": "C",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "A) none_of_these",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "C"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "C",
+                      "logprob": -0.1054,
+                      "top_logprobs": [
+                        {
+                          "token": "C",
+                          "logprob": -0.1054
+                        },
+                        {
+                          "token": "B",
+                          "logprob": -2.8134
+                        },
+                        {
+                          "token": "A",
+                          "logprob": -3.2189
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.9499981484571172,
+            "value": "T"
+          },
+          "dest": {
+            "type": "choice",
+            "perOrder": [
+              {
+                "local_file": 0.8999935416039716,
+                "external_host": 0.05000322919801422,
+                "none_of_these": 0.05000322919801422
+              },
+              {
+                "none_of_these": 0.040000467390814747,
+                "external_host": 0.060002794660718645,
+                "local_file": 0.8999967379484666
+              }
+            ],
+            "choice": "local_file",
+            "values": {
+              "local_file": "T",
+              "external_host": "F",
+              "none_of_these": "F"
+            }
+          }
+        },
+        "value": "T",
+        "outcome": "refuse",
+        "code": "DECIDE_REFUSED",
+        "via": null,
+        "error": null,
+        "requests": 3
+      }
+    },
+    {
+      "name": "orders that disagree by more than the band width leave the choice unknown",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        },
+        "dest": {
+          "type": "choice",
+          "ask": "Where does the data go?",
+          "options": [
+            "local_file",
+            "external_host"
+          ]
+        }
+      },
+      "when": "exports AND dest != none_of_these",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "A) local_file",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "A"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "A",
+                      "logprob": -0.1054,
+                      "top_logprobs": [
+                        {
+                          "token": "A",
+                          "logprob": -0.1054
+                        },
+                        {
+                          "token": "B",
+                          "logprob": -2.9957
+                        },
+                        {
+                          "token": "C",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "A) none_of_these",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "A"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "A",
+                      "logprob": -0.2231,
+                      "top_logprobs": [
+                        {
+                          "token": "A",
+                          "logprob": -0.2231
+                        },
+                        {
+                          "token": "B",
+                          "logprob": -2.3026
+                        },
+                        {
+                          "token": "C",
+                          "logprob": -2.3026
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.9499981484571172,
+            "value": "T"
+          },
+          "dest": {
+            "type": "choice",
+            "perOrder": [
+              {
+                "local_file": 0.8999935416039716,
+                "external_host": 0.05000322919801422,
+                "none_of_these": 0.05000322919801422
+              },
+              {
+                "none_of_these": 0.8000093531671925,
+                "external_host": 0.09999532341640378,
+                "local_file": 0.09999532341640378
+              }
+            ],
+            "choice": null,
+            "values": {
+              "local_file": "U",
+              "external_host": "F",
+              "none_of_these": "U"
+            }
+          }
+        },
+        "value": "U",
+        "outcome": "escalate",
+        "code": "DECIDE_ESCALATED",
+        "via": "ask",
+        "error": null,
+        "requests": 3
+      }
+    },
+    {
+      "name": "a hosted decision API is refused before anything is sent",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m",
+        "url": "https://api.openai.com"
+      },
+      "replay": [],
+      "expect": {
+        "error": "host_refused",
+        "requests": 0
+      }
+    },
+    {
+      "name": "a hosted decision API named in engine.json is refused too",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "engineFile": {
+        "url": "https://api.fireworks.ai/inference",
+        "model": "m"
+      },
+      "env": {},
+      "replay": [],
+      "expect": {
+        "error": "host_refused",
+        "requests": 0
+      }
+    },
+    {
+      "name": "an unlisted host is refused",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "engineFile": {
+        "url": "https://models.example.com",
+        "model": "m"
+      },
+      "env": {},
+      "replay": [],
+      "expect": {
+        "error": "host_refused",
+        "requests": 0
+      }
+    },
+    {
+      "name": "no model anywhere is not configured",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "engineFile": null,
+      "env": {},
+      "replay": [],
+      "expect": {
+        "error": "not_configured",
+        "requests": 0
+      }
+    },
+    {
+      "name": "the environment overrides engine.json",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engineFile": {
+        "url": "$MOCK",
+        "model": "file-model"
+      },
+      "env": {
+        "INTUTIC_DECIDE_MODEL": "env-model",
+        "INTUTIC_DECIDE_ENGINE_URL": "$MOCK"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "no"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "no",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "no",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "yes",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.05000185154288292,
+            "value": "F"
+          }
+        },
+        "value": "F",
+        "outcome": "allow",
+        "code": null,
+        "via": null,
+        "error": null,
+        "model": "env-model",
+        "sentModels": [
+          "env-model"
+        ],
+        "requests": 1
+      }
+    },
+    {
+      "name": "an upstream error is thrown, never read as an answer",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "status": 500,
+          "body": {
+            "error": "overloaded"
+          }
+        }
+      ],
+      "expect": {
+        "error": "upstream",
+        "requests": 1
+      }
+    },
+    {
+      "name": "a state over 16384 bytes is unknown, escalates and sends nothing",
+      "state": {
+        "repeat": "x",
+        "times": 16400
+      },
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": null,
+            "value": "U"
+          }
+        },
+        "value": "U",
+        "outcome": "escalate",
+        "code": "DECIDE_ESCALATED",
+        "via": "ask",
+        "error": "too_large",
+        "model": null,
+        "modelDigest": null,
+        "digestStrength": null,
+        "requests": 0
+      }
+    },
+    {
+      "name": "a question asking about approval is refused before the engine",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Did the user approve this export of customer data?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [],
+      "expect": {
+        "invalid": "decide: exports asks about approval; approval comes from the harness ask or the review queue, never from a question",
+        "requests": 0
+      }
+    },
+    {
+      "name": "a when naming an unknown question is refused",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports AND dest",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [],
+      "expect": {
+        "invalid": "decide: when: unknown question dest",
+        "requests": 0
+      }
+    },
+    {
+      "name": "a question never used in the when is refused",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        },
+        "dest": {
+          "type": "choice",
+          "ask": "Where does the data go?",
+          "options": [
+            "local_file",
+            "external_host"
+          ]
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "replay": [],
+      "expect": {
+        "invalid": "decide: question dest is never used in when",
+        "requests": 0
+      }
+    },
+    {
+      "name": "INTUTIC_DECIDE_BUDGET_MS bounds the whole call",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "when": "exports",
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m"
+      },
+      "env": {
+        "INTUTIC_DECIDE_BUDGET_MS": "200"
+      },
+      "replay": [
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "yes"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "yes",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          },
+          "delayMs": 1500
+        }
+      ],
+      "expect": {
+        "error": "timeout",
+        "requests": 1
+      }
+    },
+    {
+      "name": "an Ollama engine reports a strong digest",
+      "state": "ACTIVE SOP CONSTRAINTS:\nNever copy customer data out of production.\n\nASSISTANT RESPONSE:\nRunning pg_dump -h prod > /tmp/x.sql now.",
+      "questions": {
+        "exports": {
+          "type": "yes_no",
+          "ask": "Does this command copy customer data out of the production database?"
+        }
+      },
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m",
+        "ollama": true
+      },
+      "replay": [
+        {
+          "method": "GET",
+          "path": "/api/tags",
+          "status": 200,
+          "body": {
+            "models": [
+              {
+                "name": "m",
+                "model": "m",
+                "digest": "6e9f3b2c1d0a49587766554433221100ffeeddccbbaa99887766554433221100"
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "Does this command copy customer data out of the production database?",
+          "status": 200,
+          "body": {
+            "id": "chatcmpl-sdk",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "no"
+                },
+                "logprobs": {
+                  "content": [
+                    {
+                      "token": "no",
+                      "logprob": -0.0513,
+                      "top_logprobs": [
+                        {
+                          "token": "no",
+                          "logprob": -0.0513
+                        },
+                        {
+                          "token": "yes",
+                          "logprob": -2.9957
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "finish_reason": "length"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "answers": {
+          "exports": {
+            "type": "yes_no",
+            "p": 0.05000185154288292,
+            "value": "F"
+          }
+        },
+        "value": null,
+        "outcome": null,
+        "code": null,
+        "via": null,
+        "error": null,
+        "model": "m",
+        "modelDigest": "sha256:6e9f3b2c1d0a49587766554433221100ffeeddccbbaa99887766554433221100",
+        "digestStrength": "strong",
+        "requests": 2
+      }
+    }
+  ]
+}

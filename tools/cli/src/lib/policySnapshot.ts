@@ -102,10 +102,12 @@ export function resolveSnapshotRulesPath(): string {
 
 /**
  * Whether the gates this reports on, and this CLI, evaluate the decide rules
- * a snapshot carries. Until they do, every gate enforces a decide rule's
- * fallback line, so it is counted as a rule. Set only once they do.
+ * a snapshot carries. They do: every gate family evaluates them (the shell
+ * and n8n gates through `intutic decide check`), so a fallback line a decoded
+ * record names is skipped by the gates and not counted as a rule here. A
+ * fallback line no decoded record names still refuses, and is counted.
  */
-export const CAN_EVALUATE_DECIDE = false
+export const CAN_EVALUATE_DECIDE = true
 
 /** A decide record's rule: its hash when it is valid. */
 function checkDecideRule(ir: unknown): string | null {

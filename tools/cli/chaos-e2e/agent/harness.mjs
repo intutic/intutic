@@ -27,11 +27,23 @@
 //                   says. That is the settings file and gate the sync daemon
 //                   wrote on the host, carried into the sandbox by the runner.
 //
+// --decide-engine <p|stopped>  runs a scripted decide engine on loopback
+//                   inside the sandbox (decide-engine.mjs), answering the
+//                   rules' questions with p(yes) = p, or points the gate at a
+//                   port nothing listens on, through ~/.intutic/decide/engine.json.
+//                   Once the result is written the agent asks to push it
+//                   (a Bash call, gated like any other), which the snapshot's
+//                   decide rule judges, and says what the gate did. The gate's
+//                   own event log is kept with the run's files.
+//
 // Bash calls are gated but never executed: the commands a fragile agent picks
 // up from an injected payload are exactly the ones nothing should run.
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import readline from 'node:readline'
+import { closedPort, startDecideEngine } from './decide-engine.mjs'
 
 const mode = process.argv[process.argv.indexOf('--mode') + 1]
 if (mode !== 'resilient' && mode !== 'fragile') {
@@ -40,6 +52,12 @@ if (mode !== 'resilient' && mode !== 'fragile') {
 }
 const resilient = mode === 'resilient'
 const fromSettings = process.argv.includes('--gate-from-settings')
+const decideAt = process.argv.indexOf('--decide-engine')
+const decideEngine = decideAt === -1 ? null : process.argv[decideAt + 1]
+if (decideEngine !== null && decideEngine !== 'stopped' && !(Number(decideEngine) >= 0 && Number(decideEngine) <= 1)) {
+  console.error('--decide-engine takes a probability or stopped')
+  process.exit(64)
+}
 
 const MCP_PROXY = process.env.INTUTIC_E2E_MCP_PROXY || '/opt/intutic/mcp-proxy/dist/index.js'
 const GATE = process.env.INTUTIC_E2E_GATE || 'gate/claude-code-check.js'
@@ -80,6 +98,18 @@ async function gate(tool, input) {
   return { allowed: true, reason: '' }
 }
 
+/** The decision a hook's stdout carries (Claude Code's hookSpecificOutput), or null. */
+function stdoutDecision(stdout) {
+  const line = stdout.trim().split('\n').pop()
+  try {
+    const out = JSON.parse(line)
+    const d = out?.hookSpecificOutput?.permissionDecision
+    return typeof d === 'string' ? { decision: d, reason: String(out.hookSpecificOutput.permissionDecisionReason ?? ''), line } : null
+  } catch {
+    return null
+  }
+}
+
 function runGate(argv, env, tool, input) {
   return new Promise((resolve) => {
     const child = spawn(argv[0], argv.slice(1), {
@@ -87,12 +117,18 @@ function runGate(argv, env, tool, input) {
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     let stderr = ''
+    let stdout = ''
     child.stderr.on('data', (d) => (stderr += d))
-    child.stdout.resume()
+    child.stdout.on('data', (d) => (stdout += d))
     child.on('error', (err) => resolve({ allowed: true, reason: `gate did not run: ${err.message}` }))
     child.on('close', (code) => {
-      // Claude Code's contract: 2 refuses, anything else lets the call proceed.
-      resolve(code === 2 ? { allowed: false, reason: stderr.trim() } : { allowed: true, reason: stderr.trim() })
+      // Claude Code's contract: 2 refuses with stderr as the reason. On exit 0
+      // a JSON stdout may decide instead: "deny" refuses, and "ask" puts the
+      // call to the user, of whom this harness has none, so it does not run.
+      const d = code === 0 ? stdoutDecision(stdout) : null
+      if (d?.decision === 'ask') resolve({ allowed: false, asked: d.line, reason: `the user was asked: ${d.reason}` })
+      else if (d?.decision === 'deny') resolve({ allowed: false, reason: d.reason })
+      else resolve(code === 2 ? { allowed: false, reason: stderr.trim() } : { allowed: true, reason: stderr.trim() })
     })
     child.stdin.end(JSON.stringify({ session_id: 'chaos-e2e', hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input, cwd: process.cwd() }))
   })
@@ -145,7 +181,7 @@ async function callTool(name, args) {
 /** A built-in tool call: gate first; Write then really writes. */
 async function builtin(tool, input) {
   const g = await gate(tool, input)
-  if (!g.allowed) return { error: g.reason }
+  if (!g.allowed) return { error: g.reason, asked: g.asked }
   if (tool === 'Write') fs.writeFileSync(input.file_path, input.content)
   return {}
 }
@@ -227,7 +263,41 @@ async function writeResult(content) {
   throw new Error(`could not write ${RESULT} after 3 attempts`)
 }
 
+// ── The decide engine, and the push its rule judges ──────────────────────────
+
+let engine = null
+
+/** Starts the scripted engine (or picks a closed port) and points the gate at it. */
+async function startEngine() {
+  const url =
+    decideEngine === 'stopped'
+      ? `http://127.0.0.1:${await closedPort()}`
+      : (engine = await startDecideEngine({ pYes: Number(decideEngine), logFile: `${OUT_DIR}/decide-engine.jsonl` })).url
+  const dir = path.join(os.homedir(), '.intutic', 'decide')
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // The engine reports the model name as its (weak) digest, `id:chaos-decide`,
+  // which is what the suite's pin names.
+  fs.writeFileSync(path.join(dir, 'engine.json'), JSON.stringify({ url, adapter: 'logprobs', model: 'chaos-decide', timeoutMs: 2000 }) + '\n')
+  say(`decide engine: ${decideEngine === 'stopped' ? `stopped (nothing answers at ${url})` : `${url}, p(yes) ${decideEngine}`}`)
+}
+
+/** Asks to push, as both personalities do once the result is written, and says what the gate did. */
+async function push() {
+  const command = ['git', 'push', 'origin', 'main'].join(' ')
+  const r = await builtin('Bash', { command })
+  if (r.asked) say(`the gate asked the user before \`${command}\`; its stdout: ${r.asked}`)
+  else if (r.error) say(`\`${command}\` was refused: ${r.error}`)
+  else say(`\`${command}\` was allowed`)
+}
+
+/** The gate's own event log, kept with the run's files: the worktree is removed after the run. */
+function keepGateEvents() {
+  const events = '.intutic/events/hook-events.jsonl'
+  if (fs.existsSync(events)) fs.copyFileSync(events, `${OUT_DIR}/hook-events.jsonl`)
+}
+
 async function main() {
+  if (decideEngine !== null) await startEngine()
   await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'chaos-e2e-harness', version: '1.0.0' } })
   mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
   await listTools()
@@ -235,6 +305,7 @@ async function main() {
   const color = await lookup('color')
   const size = await lookup('size')
   await writeResult(`color=${color}\nsize=${size}\n`)
+  if (decideEngine !== null) await push()
 }
 
 let code = 0
@@ -247,6 +318,8 @@ try {
 } finally {
   mcp.stdin.end()
   mcp.kill()
+  if (decideEngine !== null) keepGateEvents()
+  await engine?.close()
 }
 // A fragile agent claims success whatever happened.
 process.exit(resilient ? code : 0)

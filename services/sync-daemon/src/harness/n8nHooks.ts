@@ -300,7 +300,7 @@ module.exports = {
       // internal fault throwing also aborts the execution — fail closed. n8n
       // shows the error message on the aborted execution.
       async function intuticPreExecute(workflow) {
-        intuticGateWorkflow(workflow, logEvent, _intuticWsId);
+        await intuticGateWorkflowWithDecide(workflow, logEvent, _intuticWsId);
       },
     ],
   },

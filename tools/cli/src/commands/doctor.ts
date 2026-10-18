@@ -556,13 +556,16 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth, opts: { local
   // With no control plane, `intutic gates install` is what writes it.
   const rewrite = opts.local ? 'intutic gates install' : 'intutic policy snapshot'
   const dropped = snap.droppedRules > 0 ? `, ${snap.droppedRules} rule(s) dropped as uncompilable` : ''
+  // The gates evaluate decide rules themselves and skip their fallback lines,
+  // which the rule count leaves out, so they are counted on their own.
+  const decide = snap.decideRules > 0 ? ` and ${snap.decideRules} decide rule(s)` : ''
 
   switch (snap.state) {
     case 'ok':
       return {
         name,
         passed: true,
-        detail: `${snap.ruleCount} rule(s), digest ${snap.digest}, ${snap.ageDays}d old${dropped}`,
+        detail: `${snap.ruleCount} rule(s)${decide}, digest ${snap.digest}, ${snap.ageDays}d old${dropped}`,
       }
 
     case 'stale':
@@ -570,7 +573,7 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth, opts: { local
         name,
         passed: false,
         detail:
-          `${snap.ageDays} days old and still enforced (${snap.ruleCount} rule(s)) — ` +
+          `${snap.ageDays} days old and still enforced (${snap.ruleCount} rule(s)${decide}) — ` +
           `nothing has refreshed it in over ${SNAPSHOT_STALE_AFTER_DAYS} days${dropped}`,
         remediation: opts.local
           ? 'Nothing has refreshed it. Refresh it with `intutic gates install`, or keep `intutic start` running.'
@@ -722,6 +725,10 @@ export async function runDoctor(): Promise<void> {
     results.push(await checkLocalGates())
   }
   results.push(await checkCiscoScanner())
+  // Decide: the engine, its model, the canary, the per-call p95 and the
+  // harness budgets it cannot fit. One passing line when nothing uses it.
+  const { decideDoctorChecks } = await import('./decide.js')
+  results.push(...(await decideDoctorChecks()))
 
   // Print results
   const passed = results.filter(r => r.passed).length

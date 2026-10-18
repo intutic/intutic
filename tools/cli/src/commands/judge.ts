@@ -7,8 +7,15 @@
  * hosted provider (`isHostedModelRef`) is refused.
  *
  * Deliberately local-artifacts-only: it writes a `litellm_config.yaml` and
+ * the decide engine's configuration (`~/.intutic/decide/engine.json`), and
  * prints env / Helm snippets for the operator to apply themselves. It never
- * calls a remote API to flip anything on. `local_judge` is deliberately NOT
+ * calls a remote API to flip anything on.
+ *
+ * The gateway variables it prints are deprecated since 3.0: the gateway maps
+ * the typed band to the decide rule `local-judge` with a warning, and 4.0
+ * removes them. engine.json is where 3.0 keeps the model a decide rule asks
+ * (`--engine-url`, default Ollama on this machine); its key stays in
+ * `INTUTIC_DECIDE_API_KEY` and is never written. `local_judge` is deliberately NOT
  * exposed through `PATCH /api/v1/gateways/:id/config`
  * (`services/control-plane/src/lib/gateway.ts`) — this command respects that
  * boundary by construction, not by omission.
@@ -21,10 +28,15 @@
  * @module
  */
 
-import { writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import pc from 'picocolors'
 import {
+  checkSelfHostedDecisionHost,
+  DECIDE_DEFAULT_ENGINE_URL,
+  DECIDE_ENGINE_FILE_PATH,
+  resolveDecideEngineConfig,
   selfHostedJudgeModelChoices,
   isHostedModelRef,
   SELF_HOSTED_MODEL_PROVIDER_IDS,
@@ -36,6 +48,53 @@ import { createClackIO, type SetupIO } from './setup.js'
 export interface JudgeConfigureOpts {
   /** Where to write the generated litellm_config.yaml. */
   out?: string
+  /** Where this machine reaches the model server, for the decide engine. */
+  engineUrl?: string
+  /** The home directory engine.json goes under (default: the user's). */
+  home?: string
+}
+
+/** The gateway variables the env block prints, all deprecated since 3.0. */
+export const DEPRECATED_JUDGE_ENV = [
+  'INTUTIC_GATEWAY_LOCAL_JUDGE',
+  'LITELLM_LOCAL_URL',
+  'LITELLM_LOCAL_API_KEY',
+  'LITELLM_LOCAL_JUDGE_MODEL',
+  'LITELLM_LOCAL_TYPED_JUDGE_MODEL',
+  'INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO',
+  'INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI',
+] as const
+
+/**
+ * Writes the decide engine's configuration to `file` (mode 0600 in a 0700
+ * directory, replaced whole by a rename): `url`, `adapter`, `model`,
+ * `timeoutMs`, `parallel` and `structured`. Other keys an existing file holds
+ * are kept. Never the key, which is environment only.
+ */
+export function writeDecideEngineFile(file: string, url: string, model: string): Record<string, unknown> {
+  let existing: Record<string, unknown> = {}
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = parsed as Record<string, unknown>
+  } catch {
+    // No file, or one that does not parse: start afresh.
+  }
+  const cfg = resolveDecideEngineConfig({ url, adapter: 'logprobs', model }, {})
+  const doc = {
+    ...existing,
+    url: cfg.url,
+    adapter: cfg.adapter,
+    model: cfg.model,
+    timeoutMs: cfg.timeoutMs,
+    parallel: cfg.parallel,
+    structured: cfg.structured,
+  }
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+  const tmp = `${file}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify(doc, null, 2) + '\n', { mode: 0o600 })
+  chmodSync(tmp, 0o600)
+  renameSync(tmp, file)
+  return doc
 }
 
 /** Printed instead of paths into Intutic's own source tree, which customers do not have. */
@@ -80,7 +139,8 @@ export function buildLiteLLMConfigYaml(modelRef: string): string {
 
 function envBlock(modelAlias: string): string {
   return [
-    "# The gateway's .env (beside docker-compose.gateway.yml in the release bundle) or your own env file:",
+    "# The gateway's .env (beside docker-compose.gateway.yml in the release bundle) or your own env file.",
+    '# Deprecated since 3.0 and removed in 4.0; the gateway maps them to the decide rule local-judge:',
     'INTUTIC_GATEWAY_LOCAL_JUDGE=true',
     'LITELLM_LOCAL_URL=http://litellm:4000',
     'LITELLM_LOCAL_API_KEY=${LITELLM_MASTER_KEY}',
@@ -109,6 +169,22 @@ export async function runJudgeConfigure(opts: JudgeConfigureOpts, io: SetupIO = 
       'not remotely configurable; apply what this generates yourself. Judges run only on ' +
       'self-hosted models: hosted APIs (Anthropic, OpenAI, Gemini, OpenRouter, Ollama Cloud…) are refused.',
   )
+  io.log.warn(
+    `Deprecated since 3.0: ${DEPRECATED_JUDGE_ENV.join(', ')}. The gateway maps them to the decide ` +
+      'rule local-judge with a warning, and 4.0 removes them. This command also writes the decide ' +
+      `engine configuration (~/${DECIDE_ENGINE_FILE_PATH.join('/')}). See ${ON_PREM_JUDGE_DOCS}`,
+  )
+
+  const engineUrl = (opts.engineUrl ?? DECIDE_DEFAULT_ENGINE_URL).trim()
+  const host = checkSelfHostedDecisionHost(engineUrl, process.env.INTUTIC_SELF_HOSTED_DECISION_HOSTS)
+  if (!host.ok) {
+    io.log.error(
+      `The decide engine URL ${engineUrl} is not a self-hosted host (${host.reason}). Use a loopback or ` +
+        'private address, or list the host in INTUTIC_SELF_HOSTED_DECISION_HOSTS.',
+    )
+    io.outro('Nothing written.')
+    return
+  }
 
   // Self-hosted catalog entries, plus a free-text alias for anything else the
   // operator's own LiteLLM serves (vLLM, a renamed Ollama model…).
@@ -157,6 +233,10 @@ export async function runJudgeConfigure(opts: JudgeConfigureOpts, io: SetupIO = 
   io.log.success(`Written to ${outPath}`)
 
   const { id: modelAlias } = normalizeModelRef(modelRef)
+  const engineFile = join(opts.home ?? homedir(), ...DECIDE_ENGINE_FILE_PATH)
+  writeDecideEngineFile(engineFile, engineUrl, modelAlias || modelRef)
+  io.log.success(`Decide engine: ${modelAlias || modelRef} at ${engineUrl}, written to ${engineFile}`)
+
   io.note(envBlock(modelAlias || modelRef), 'Environment')
   io.note(helmSnippet(modelAlias || modelRef, outPath), 'Helm values')
 

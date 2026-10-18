@@ -357,7 +357,7 @@ pub struct Evaluation {
     pub skipped: Vec<String>,
     /// The engine's identity before the questions.
     pub engine: Option<ModelIdentity>,
-    /// `None` when no canary was needed.
+    /// `None` when no canary was needed, or when the engine gave it no answer.
     pub canary: Option<CanaryState>,
 }
 
@@ -559,9 +559,12 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
         }
         _ => None,
     };
+    // `None` on a pass; `canary_failed` only when the canary was answered and
+    // the answer was wrong; the engine's own error code (`upstream`,
+    // `timeout`, …) when it got no answer at all.
     let canary_run = async {
         let Some((c, digest)) = &run else {
-            return true;
+            return None;
         };
         match run_canary(*c, input.deadline).await {
             Ok(r) => {
@@ -575,12 +578,12 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
                     p_clean: r.p_clean,
                     choice_top: r.choice_top,
                 });
-                r.ok
+                (!r.ok).then_some("canary_failed")
             }
-            Err(_) => false,
+            Err(err) => Some(err.code()),
         }
     };
-    let (canary_ok, asked) = tokio::join!(
+    let (canary_error, asked) = tokio::join!(
         canary_run,
         join_all(
             evaluated
@@ -589,11 +592,12 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
         )
     );
     if run.is_some() {
-        canary_state = Some(if canary_ok {
-            CanaryState::Ok
-        } else {
-            CanaryState::Failed
-        });
+        canary_state = match canary_error {
+            None => Some(CanaryState::Ok),
+            Some("canary_failed") => Some(CanaryState::Failed),
+            // The engine gave the canary no answer: it neither passed nor failed.
+            Some(_) => None,
+        };
     }
 
     let reports: Vec<RuleReport> = evaluated
@@ -620,16 +624,17 @@ pub async fn evaluate_call<E: DecideAsk + ?Sized>(
                 model_digest: digest.clone(),
                 answers,
             };
-            if !canary_ok {
-                return report(
-                    Outcome::Unavailable,
-                    None,
-                    None,
-                    Some("canary_failed"),
-                    None,
-                );
-            }
             let error = a.error.as_ref().map(DecideEngineError::code);
+            if let Some(canary) = canary_error {
+                // A canary that got no answer: the rule's own engine error
+                // when it has one (it asked the same engine), else the canary's.
+                let own = canary != "canary_failed"
+                    && a.error
+                        .as_ref()
+                        .is_some_and(|err| err.outcome() == ErrorOutcome::Unavailable);
+                let reason = if own { error } else { Some(canary) };
+                return report(Outcome::Unavailable, None, None, reason, None);
+            }
             if a.error
                 .as_ref()
                 .is_some_and(|err| err.outcome() == ErrorOutcome::Unavailable)

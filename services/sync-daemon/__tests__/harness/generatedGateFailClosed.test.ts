@@ -473,7 +473,7 @@ describe('n8n workflow gate failure posture', () => {
     // call; this pin fails if either the statement or the bare call goes.
     const body = readFileSync(join(roots.get(n8nGate.name)!, n8nGate.artifact), 'utf8')
     expect(body).toContain('No try/catch around the gate')
-    expect(body).toContain('intuticGateWorkflow(workflow, logEvent, _intuticWsId);')
+    expect(body).toContain('await intuticGateWorkflowWithDecide(workflow, logEvent, _intuticWsId);')
     // No process-level exit handlers either: this module runs INSIDE the n8n
     // server, and a prelude that exits the process would kill the server.
     expect(

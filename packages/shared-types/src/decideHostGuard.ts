@@ -172,3 +172,17 @@ export function assertSelfHostedDecisionHost(url: string, listed?: string): stri
   if (!verdict.ok) throw new DecideHostRefusedError(verdict)
   return verdict.host
 }
+
+/**
+ * {@link checkSelfHostedDecisionHost} as JavaScript source, with the
+ * constants and helpers it reads, for the hook gates to embed. A CommonJS
+ * build names an exported constant `exports.X` inside a function; the source
+ * defines each as a plain `X`, so that prefix is dropped.
+ */
+export const DECIDE_HOST_GUARD_JS_SOURCE = [
+  `const DECIDE_HOSTED_DENYLIST = ${JSON.stringify(DECIDE_HOSTED_DENYLIST)};`,
+  `const DECISION_ROUTES = ${JSON.stringify(DECISION_ROUTES)};`,
+  ...[hostMatches, normaliseName, parseIpv4, parseIpv6, listedNames, checkSelfHostedDecisionHost].map((fn) =>
+    fn.toString().replace(/\bexports\./g, ''),
+  ),
+].join('\n')

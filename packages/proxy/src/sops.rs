@@ -230,7 +230,10 @@ pub struct Sop {
     pub hook_rules: Vec<HookRuleDecl>,
     /// `decide: {json}` — one per line: a rule a self-hosted model answers
     /// (`crate::decide`). A line that does not parse is kept as
-    /// [`DecideDecl::Unreadable`], which refuses what it would have judged.
+    /// [`DecideDecl::Unreadable`]. In 3.0 the gateway evaluates none of
+    /// these (the gates evaluate `on: tool_call` rules, and refuse an
+    /// unreadable line's tools); it logs each SOP's `on: response` rules and
+    /// unreadable lines at load.
     pub decide_rules: Vec<DecideDecl>,
 }
 
@@ -738,9 +741,32 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
             tracing::warn!(sop = %source, "Unreadable hook rule — every tool call is refused while it is in force: {error}");
         }
     }
+    // This gateway reads and validates decide rules and evaluates none of
+    // them in 3.0: the gates evaluate `on: tool_call` rules, nothing yet
+    // evaluates `on: response` rules, and the only decide rule the gateway
+    // runs is the one it synthesises for its local judge. Said once per SOP
+    // at load, so a response rule an operator believes is enforcing is not
+    // silent.
+    let response_rules: Vec<&str> = fm
+        .decide_rules
+        .iter()
+        .filter_map(|d| match d {
+            DecideDecl::Rule(r) if matches!(r.on, crate::decide::On::Response) => {
+                Some(r.id.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    if !response_rules.is_empty() {
+        tracing::warn!(
+            sop = %source,
+            rules = %response_rules.join(", "),
+            "Decide rules with on: response are not enforced in 3.0: they are read and validated, and nothing evaluates them"
+        );
+    }
     for decl in &fm.decide_rules {
         if let DecideDecl::Unreadable { error, .. } = decl {
-            tracing::warn!(sop = %source, "Unreadable decide rule — kept, so it refuses what it would have judged rather than nothing: {error}");
+            tracing::warn!(sop = %source, "Unreadable decide rule — the gateway only logs it; the gates refuse the tools it names until it is fixed: {error}");
         }
     }
     Some(Sop {
@@ -3854,6 +3880,45 @@ mod discovery_tests {
             "the load line must say which source won: {logged}"
         );
         assert!(logged.contains("/etc/intutic/sops"), "{logged}");
+    }
+
+    /// The gateway evaluates no `on: response` decide rule in 3.0, so loading
+    /// one says so, once per SOP, naming each such rule and not the
+    /// tool-call rules beside it.
+    #[test]
+    fn a_response_decide_rule_is_reported_as_not_enforced_at_load() {
+        let q = r#""questions":{"a":{"type":"yes_no","ask":"Does the response leak customer data?"}},"when":"a""#;
+        let raw = format!(
+            "---\ndecide: {{\"id\":\"leak\",\"on\":\"response\",{q}}}\ndecide: {{\"id\":\"tone\",\"on\":\"response\",{q}}}\n\
+             decide: {{\"id\":\"export\",\"on\":\"tool_call\",\"tools\":[\"Bash\"],{q}}}\n---\nbody"
+        );
+        let logged = capture_logs(|| {
+            let sop =
+                parse_sop_content("data".into(), &raw, "data.md", SopScope::Workspace).unwrap();
+            assert_eq!(sop.decide_rules.len(), 3);
+        });
+        let lines: Vec<&str> = logged
+            .lines()
+            .filter(|l| l.contains("not enforced in 3.0"))
+            .collect();
+        assert_eq!(lines.len(), 1, "one line per SOP: {logged}");
+        assert!(
+            lines[0].contains("WARN") && lines[0].contains("data.md"),
+            "{logged}"
+        );
+        assert!(lines[0].contains("leak, tone"), "{logged}");
+        assert!(!lines[0].contains("export"), "{logged}");
+
+        // A SOP without one says nothing about it.
+        let quiet = capture_logs(|| {
+            parse_sop_content(
+                "ops".into(),
+                "---\ndeny_tools: rm\n---\nbody",
+                "ops.md",
+                SopScope::Workspace,
+            );
+        });
+        assert!(!quiet.contains("not enforced in 3.0"), "{quiet}");
     }
 
     /// The whole point of the override: on a host whose cwd ancestry carries no

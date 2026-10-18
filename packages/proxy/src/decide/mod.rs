@@ -25,6 +25,8 @@ pub mod engine;
 pub mod evaluate;
 /// The self-hosted guard on the engine's URL.
 pub mod guard;
+/// The self-hosted gateway's local judge, as the decide rule `local-judge`.
+pub mod local_judge;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;

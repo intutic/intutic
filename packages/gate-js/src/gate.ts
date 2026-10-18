@@ -9,14 +9,26 @@
  * PreToolUse hook for them. This package is that enforcement point: the
  * missing adapter, written against Intutic's own published gate contract.
  *
- * Six tiers, in order — identical precedence to the Python SDK:
+ * Seven tiers, in order — identical precedence to the Python SDK:
  *
  *   A0  SSO group policy  from the policy snapshot       unknown groups refused
  *   A1  policy snapshot   port of intuticGate()          fails CLOSED
  *   M   MCP registry      from the policy snapshot       unverified snapshot admits none
  *   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
  *   A2  image integrity   local check                    fails CLOSED
+ *   D   decide rules      the self-hosted decide engine  fails CLOSED when enforcing
  *   B   POST /hook-gate   control-plane check             fail posture set by GateClient
+ *
+ * Tier D runs only on a call every deterministic tier allowed: the snapshot's
+ * decide rules on the tool, asked of the self-hosted engine configured in
+ * `~/.intutic/decide/engine.json` and `INTUTIC_DECIDE_*`, within
+ * `INTUTIC_DECIDE_BUDGET_MS` (default {@link DECIDE_BUDGET_MS}). A rule refuses
+ * with `DECIDE_REFUSED`; one that cannot decide throws
+ * {@link IntuticGateEscalation} (`DECIDE_ESCALATED`), which a caller that can
+ * ask its user turns into a question; an engine that cannot answer refuses an
+ * enforcing rule with `GOVERNANCE_UNAVAILABLE` and lets a shadow rule's call
+ * on (decideEvaluate.ts, a byte-identical copy of `@intutic/shared-types`'
+ * module, holds the protections).
  *
  * Tier M applies the workspace's MCP server registry and `mcpAllowedServers`
  * list to an `mcp__<server>__<tool>` call, from the snapshot's
@@ -81,27 +93,93 @@
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { isDeploy, touchesInfra } from './actions.js'
 import { chaosGateCall, chaosGateDecode, type ChaosGateFaultOutcome, type ChaosGatePlan } from './chaosGate.js'
-import { IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './errors.js'
+import { IntuticGateEscalation, IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './errors.js'
 import { holdKey, holdMessage, requestHold } from './hold.js'
-import { tooLargeReason } from './limits.js'
+import { DECIDE_BUDGET_MS, tooLargeReason } from './limits.js'
 import { GateClient } from './client.js'
 import { evaluateMcpAllowlist, evaluateMcpRegistry, mcpSnapshotUnverifiedRefusal } from './mcpRegistryRecord.js'
 import { OPAQUE_REFUSAL_MESSAGE } from './opaqueRefusal.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
 import { SNAPSHOT_FORMAT } from './decideRecord.js'
+import { createDecideEngine, DecideEngineError, resolveDecideEngineConfig, type DecideEngine, type DecideEngineConfig } from './decideEngine.js'
+import {
+  createDecideCanaryFileStore,
+  decideDecision,
+  decideShadowFindings,
+  decideStoredQ95Ms,
+  decideUnavailableDecision,
+  evaluateDecideCall,
+  type DecideDecision,
+  type DecideEvaluateDeps,
+  type DecideEvaluation,
+  type DecideRuleEntry,
+} from './decideEvaluate.js'
+import { decideLogDeps, decideLogEngine, writeDecideCallLog } from './decideLog.js'
+import { DECIDE_LOG_REDACTION_SOURCES } from './decideLogRedaction.js'
 import * as soprules from './soprules.js'
 import { evaluateSsoGroupClearance } from './ssoGroups.js'
 
 /**
- * Whether this gate evaluates the decide rules a snapshot carries. Until it
- * does, a decide rule's fallback line refuses its tools, as in a gate that
- * reads no `@decide` records, so no decide rule goes unenforced. Set only
- * where the decide tier runs.
+ * Whether this gate evaluates the decide rules a snapshot carries (Tier D).
+ * Only a gate that does skips a decide rule's fallback line, and only when
+ * the rule's record decoded; otherwise the fallback line refuses its tools,
+ * as in a gate that reads no `@decide` records.
  */
-export const CAN_EVALUATE_DECIDE = false
+export const CAN_EVALUATE_DECIDE = true
+
+/** The decide tier's budget for one call: `INTUTIC_DECIDE_BUDGET_MS`, or {@link DECIDE_BUDGET_MS}. */
+function decideBudgetFromEnv(): number {
+  const raw = (process.env.INTUTIC_DECIDE_BUDGET_MS ?? '').trim()
+  const n = /^[0-9]+$/.test(raw) ? Number(raw) : NaN
+  return Number.isSafeInteger(n) && n > 0 ? n : DECIDE_BUDGET_MS
+}
+
+/**
+ * The engine, its URL, the canary cache and the per-call p95 `intutic doctor`
+ * stored, read from `~/.intutic/decide/` and the environment for each call
+ * that needs them. With the p95, a rule whose estimate does not fit the
+ * budget is not asked: an enforcing one escalates. `cfg` is the resolved
+ * configuration, for the decide log, or null when it does not resolve.
+ */
+function decideDeps(): DecideEvaluateDeps & { cfg: DecideEngineConfig | null } {
+  const dir = joinPath(homedir(), '.intutic/decide')
+  let engine: DecideEngine | DecideEngineError
+  let url = ''
+  let q95Ms: number | null = null
+  let parallel = 1
+  let file: unknown = null
+  let resolved: DecideEngineConfig | null = null
+  try {
+    try {
+      file = JSON.parse(readFileSync(joinPath(dir, 'engine.json'), 'utf-8'))
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new DecideEngineError('not_configured', `engine.json does not read: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    q95Ms = decideStoredQ95Ms(file)
+    const cfg = resolveDecideEngineConfig(file, process.env)
+    resolved = cfg
+    url = cfg.url
+    parallel = cfg.parallel
+    engine = createDecideEngine(cfg)
+  } catch (err) {
+    engine = err instanceof DecideEngineError ? err : new DecideEngineError('not_configured', err instanceof Error ? err.message : String(err))
+  }
+  return {
+    engine,
+    engineUrl: url,
+    canary: createDecideCanaryFileStore(joinPath(dir, 'canary.json'), fs),
+    sha256Hex: (t) => createHash('sha256').update(t, 'utf-8').digest('hex'),
+    q95Ms,
+    parallel,
+    cfg: resolved,
+  }
+}
 
 /** Tools that cannot change anything. They still get the local snapshot check
  *  (Tier A1), but skip the remote gate call (Tier B). */
@@ -421,7 +499,8 @@ export class Gate {
       // A refusal a tier decided is a policy hit; a call too large to read, or
       // a failure that is not a refusal, is not.
       const refusal = err instanceof IntuticGateRefusal
-      this.chaosReport(chaos.plan, chaos.events, toolName, err instanceof IntuticGateHold ? 'hold' : 'deny', note,
+      const held = err instanceof IntuticGateHold || err instanceof IntuticGateEscalation
+      this.chaosReport(chaos.plan, chaos.events, toolName, held ? 'hold' : 'deny', note,
         refusal && err.code !== 'COMMAND_TOO_LARGE', '')
       throw err
     }
@@ -564,6 +643,12 @@ export class Gate {
       }
     }
 
+    // ---- Tier D: decide rules -----------------------------------------
+    //
+    // Only here, after every deterministic tier allowed the call: a refusal
+    // above never reaches the engine.
+    await this.guardDecide(toolName, toolInput, note)
+
     // ---- Tier B: control plane gate -----------------------------------
     //
     // Skipped for read-only tools — a network round trip whose checks are
@@ -590,6 +675,87 @@ export class Gate {
 
     if (!READ_ONLY_TOOLS.has(toolName)) {
       await this.emit('tool_allowed', toolName, '', toolInput, undefined, undefined, decisionId)
+    }
+  }
+
+  /**
+   * Tier D. Throws when a decide rule on this tool refuses the call
+   * ({@link IntuticGateRefusal}, `DECIDE_REFUSED` or `GOVERNANCE_UNAVAILABLE`)
+   * or could not decide it ({@link IntuticGateEscalation}). Each shadow rule's
+   * finding is recorded; the call goes on.
+   */
+  private async guardDecide(toolName: string, toolInput: ToolInput, note: ChaosNote | null): Promise<void> {
+    if (!CAN_EVALUATE_DECIDE) return
+    const rules = this.getSnapshot().decideRules.filter((r) => r.ir.on === 'tool_call' && (r.ir.tools ?? []).includes(toolName))
+    if (rules.length === 0) return
+    const budget = decideBudgetFromEnv()
+    let decision: DecideDecision
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const started = Date.now()
+    try {
+      const deps = decideDeps()
+      const cwd = process.cwd()
+      const ev = await Promise.race([
+        evaluateDecideCall({ deterministic: 'allow', tool: toolName, toolInput, cwd, rules, deadlineMs: started + budget }, deps),
+        new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), budget + 250) }),
+      ])
+      if (ev !== null) this.logDecide(ev, rules, { tool: toolName, toolInput, cwd, budgetMs: budget, startedMs: started, cfg: deps.cfg })
+      if (ev === null) {
+        decision = decideUnavailableDecision(rules, toolName, `the decide rules on ${toolName} were not evaluated within ${budget} ms`)
+      } else {
+        for (const f of decideShadowFindings(ev, rules)) await this.emit('tool_would_block', toolName, `${f.reason} [${f.ruleId}]`, toolInput)
+        decision = decideDecision(ev, rules)
+      }
+    } catch (err) {
+      decision = decideUnavailableDecision(rules, toolName, `the decide rules on ${toolName} could not be evaluated (${err instanceof Error ? err.message : String(err)})`)
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+    if (decision.outcome === 'allow') return
+    if (note && decision.ruleId) note.ruleId = decision.ruleId
+    const reason = decision.ruleId ? `${decision.reason} [${decision.ruleId}]` : decision.reason
+    if (decision.outcome === 'escalate') {
+      await this.emit('tool_flagged', toolName, `DECIDE_ESCALATED — asked a person: ${reason}`, toolInput)
+      throw new IntuticGateEscalation(this.shown(reason), this.opaque() ? undefined : (decision.ruleId ?? undefined))
+    }
+    await this.emit('tool_blocked', toolName, reason, toolInput)
+    throw new IntuticGateRefusal(this.shown(reason), decision.code ?? 'GOVERNANCE_UNAVAILABLE')
+  }
+
+  /**
+   * Appends the call's decide record to `~/.intutic/logs/decide-<date>.jsonl`
+   * and updates each rule's drift stats, as `intutic decide check` does for
+   * the shell gates. Never throws: a log that cannot be written never
+   * changes the decision.
+   */
+  private logDecide(
+    ev: DecideEvaluation,
+    rules: readonly DecideRuleEntry[],
+    call: { tool: string; toolInput: ToolInput; cwd: string; budgetMs: number; startedMs: number; cfg: DecideEngineConfig | null },
+  ): void {
+    try {
+      const sha256Hex = (t: string) => createHash('sha256').update(t, 'utf-8').digest('hex')
+      const now = Date.now()
+      writeDecideCallLog(
+        ev,
+        rules,
+        {
+          atMs: now,
+          harness: this.client?.harness ?? 'sdk',
+          workspaceId: this.cfg.workspaceId,
+          sessionId: this.client?.sessionId ?? '',
+          tool: call.tool,
+          toolInput: call.toolInput,
+          cwd: call.cwd,
+          budgetMs: call.budgetMs,
+          latencyMs: now - call.startedMs,
+          engine: decideLogEngine(call.cfg, ev),
+          redact: DECIDE_LOG_REDACTION_SOURCES,
+        },
+        decideLogDeps(fs, homedir(), sha256Hex),
+      )
+    } catch {
+      // A log that cannot be written never changes the decision.
     }
   }
 

@@ -92,7 +92,7 @@ import { randomUUID } from 'node:crypto'
 import { Gate, install } from './gate.js'
 import type { GateConfig, ToolInput } from './gate.js'
 import { GateClient } from './client.js'
-import { IntuticGateRefusal } from './errors.js'
+import { IntuticGateEscalation, IntuticGateRefusal } from './errors.js'
 
 /** The Cordis Plugin id this module registers as. Shown in dsh's own plugin
  *  diagnostics/`--dump-config` output. */
@@ -207,6 +207,11 @@ export function createPreExecuteListener(
     try {
       await gate.guard(exec.name, renderDshToolInput(exec.arguments))
     } catch (err) {
+      // A decide rule that could not decide asks the user through dsh's
+      // approval, which denies when no approval service is mounted.
+      if (err instanceof IntuticGateEscalation) {
+        return { kind: 'ask', reason: err.reason }
+      }
       if (err instanceof IntuticGateRefusal) {
         return { kind: 'deny', reason: err.message }
       }

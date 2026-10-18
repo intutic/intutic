@@ -1,8 +1,9 @@
 /**
  * A 2.9.0 gate reading a 3.0 snapshot refuses what a decide rule covers,
- * through the rule's fallback line, and so does a 3.0 gate that does not
- * evaluate decide rules yet: it decodes the records but keeps every fallback
- * line in force, and refuses exactly as the 2.9.0 gate does.
+ * through the rule's fallback line. A current gate evaluates the rule
+ * instead: it decodes the record, skips the fallback line the record names,
+ * and decides the call itself, which, with no engine to ask, is a refusal
+ * (GOVERNANCE_UNAVAILABLE), never an allow.
  *
  * Three 2.9.0 gates read a snapshot this writer compiles: the `@intutic/gate`
  * snapshot reader, the `intutic_clawde` one, and the Claude Code hook gate the
@@ -17,7 +18,7 @@
  * through Bash to prove the fallback line is reached first.
  */
 import { beforeAll, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -154,51 +155,53 @@ describe('a 2.9.0 gate on a 3.0 snapshot', () => {
   })
 })
 
-describe('a 3.0 gate that evaluates no decide rule yet, on the same snapshot', () => {
+describe('a current gate, which evaluates decide rules, on the same snapshot', () => {
   const refusal = { severity: 'block', reason: `${REASON} [${FALLBACK}]`, ruleId: FALLBACK }
 
-  it('evaluates none: every reader keeps the fallback lines', () => {
-    expect(SDK_EVALUATES_DECIDE).toBe(false)
-    expect(GATE_EVALUATES_DECIDE).toEqual({ js: false, bash: false, n8n: false })
+  it('evaluates them: every current reader stands in for the fallback lines', () => {
+    expect(SDK_EVALUATES_DECIDE).toBe(true)
+    expect(GATE_EVALUATES_DECIDE).toEqual({ js: true, bash: true, n8n: true })
   })
 
-  it('@intutic/gate decodes the records and still refuses Bash through the fallback line, as 2.9.0 does', () => {
-    const snap = loadSnapshotNow('', snapshot)
+  it('@intutic/gate decodes the records and skips the fallback line only for a caller that evaluates them', () => {
+    const snap = loadSnapshotNow('', snapshot, { evaluatesDecide: true })
     expect(snap.state).toBe('ok')
     expect(snap.decideRules.map((r) => r.ref)).toEqual(['local:data.md#prod-data-export', 'local:data.md#read-check'])
+    expect(snap.rules.map((r) => r.id)).not.toContain(FALLBACK)
+    expect(evaluateNow('Bash', '', 'ls -la', snap).severity).toBeNull()
+    // A reader that does not evaluate them refuses as 2.9.0 does.
+    const keeps = loadSnapshotNow('', snapshot)
     const old = loadSnapshot('', snapshot)
     for (const command of ['ls -la', DESTRUCTIVE]) {
-      // This reader's decision carries more fields than 2.9.0's; the ones they share agree.
-      expect(evaluateNow('Bash', '', command, snap), command).toMatchObject(refusal)
-      expect(evaluateNow('Bash', '', command, snap), command).toMatchObject(evaluate('Bash', '', command, old))
+      expect(evaluateNow('Bash', '', command, keeps), command).toMatchObject(refusal)
+      expect(evaluateNow('Bash', '', command, keeps), command).toMatchObject(evaluate('Bash', '', command, old))
     }
-    expect(evaluateNow('Read', '/tmp/notes.txt', '', snap).severity).toBeNull()
   })
 
-  it('intutic_clawde decodes the records and still refuses Bash through the fallback line, as 2.9.0 does', async () => {
+  it('intutic_clawde decodes the records and skips the fallback line only for a caller that evaluates them', async () => {
     const script = [
       'import json, sys, types',
       // The package's own __init__ imports the HTTP client; the reader needs none of it.
       'for name, sub in (("intutic_clawde", ""), ("intutic_clawde.gate", "/gate")):',
       '    m = types.ModuleType(name); m.__path__ = [sys.argv[1] + "/intutic_clawde" + sub]; sys.modules[name] = m',
       'from intutic_clawde.gate import snapshot',
-      's = snapshot.load_snapshot("", sys.argv[2])',
-      'calls = {"ls": ("Bash", "", "ls -la"), "destructive": ("Bash", "", sys.argv[3]), "read": ("Read", "/tmp/notes.txt", "")}',
-      'out = {"state": s.state, "records": len(s.decide_rules)}',
-      'for name, (tool, target, command) in calls.items():',
-      '    d = snapshot.evaluate(tool, target, command, s)',
-      '    out[name] = {"severity": d.severity, "reason": d.reason, "rule_id": d.rule_id}',
+      'out = {}',
+      'for flag in (True, False):',
+      '    s = snapshot.load_snapshot("", sys.argv[2], evaluates_decide=flag)',
+      '    d = snapshot.evaluate("Bash", "", "ls -la", s)',
+      '    out[str(flag)] = {"state": s.state, "records": len(s.decide_rules), "severity": d.severity, "rule_id": d.rule_id}',
       'print(json.dumps(out))',
     ].join('\n')
-    const r = await run('python3', ['-I', '-B', '-c', script, CLAWDE, snapshot, DESTRUCTIVE], '', process.env)
+    const r = await run('python3', ['-I', '-B', '-c', script, CLAWDE, snapshot], '', process.env)
     expect(r.status, r.stderr).toBe(0)
-    const out = JSON.parse(r.stdout) as Record<string, unknown>
-    const py = { severity: 'block', reason: `${REASON} [${FALLBACK}]`, rule_id: FALLBACK }
-    expect(out).toMatchObject({ state: 'ok', records: 2, ls: py, destructive: py, read: { severity: null } })
+    expect(JSON.parse(r.stdout)).toEqual({
+      True: { state: 'ok', records: 2, severity: null, rule_id: '' },
+      False: { state: 'ok', records: 2, severity: 'block', rule_id: FALLBACK },
+    })
   })
 
   for (const name of ['claudeCode', 'openhands'] as const) {
-    it(`the ${name} gate this daemon renders refuses Bash through the fallback line, as 2.9.0 does`, async () => {
+    it(`the ${name} gate this daemon renders decides Bash itself, and with no engine refuses GOVERNANCE_UNAVAILABLE rather than allow`, async () => {
       const g = GATES.find((x) => x.name === name)!
       const root = mkdtempSync(join(work, `now-${name}-`))
       mkdirSync(join(root, '.intutic', 'events'), { recursive: true })
@@ -214,15 +217,20 @@ describe('a 3.0 gate that evaluates no decide rule yet, on the same snapshot', (
         if (home.USERPROFILE === undefined) delete process.env.USERPROFILE
         else process.env.USERPROFILE = home.USERPROFILE
       }
-      const env = { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot }
+      // No engine configured (JS) and no decide CLI on PATH (bash): the rule
+      // cannot be evaluated, so its call is refused, never allowed.
+      const path = (process.env.PATH ?? '').split(':').filter((d) => d && !existsSync(join(d, 'intutic'))).join(':')
+      const env = { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot, PATH: path, INTUTIC_DECIDE_MODEL: '' }
       const call = (tool_name: string, tool_input: Record<string, string>) =>
-        run(g.runner, [join(root, g.artifact)], JSON.stringify({ tool_name, tool_input, session_id: 'sess_now_gate' }), env)
-      for (const command of ['ls -la', DESTRUCTIVE]) {
-        const r = await call('Bash', { command })
-        expect(r.status, `${command}: ${r.stderr}`).toBe(2)
-        expect(r.stderr).toContain(REASON)
-        expect(r.stderr).toContain(FALLBACK)
-      }
+        run(g.runner === 'node' ? process.execPath : g.runner, [join(root, g.artifact)], JSON.stringify({ tool_name, tool_input, session_id: 'sess_now_gate' }), env)
+      const r = await call('Bash', { command: 'ls -la' })
+      expect(r.status, r.stderr).toBe(2)
+      expect(r.stderr).toContain('GOVERNANCE_UNAVAILABLE')
+      expect(r.stderr).not.toContain(FALLBACK)
+      // The deterministic tiers still run first: a destructive command is
+      // flagged by its warn rule and then refused the same way.
+      const d = await call('Bash', { command: DESTRUCTIVE })
+      expect(d.status, d.stderr).toBe(2)
       const read = await call('Read', { file_path: '/tmp/notes.txt' })
       expect(read.status, read.stderr).toBe(0)
     })

@@ -56,6 +56,7 @@
  */
 
 import * as fs from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
@@ -595,7 +596,8 @@ function decideFallbackPattern(id: string, tools: readonly string[], severity: '
 
 /**
  * Why a readable rule is stamped as it is: its own
- * rollout, then the server's kill switch, then SILENT_LOG, then pins. Only a
+ * rollout, then `intutic decide disable` on this machine, then the server's
+ * kill switch, then SILENT_LOG, then pins. Only a
  * rule that clears all of them is stamped `enforce`.
  */
 function stampDecideRule(
@@ -603,8 +605,10 @@ function stampDecideRule(
   served: ServedDecideRule['rollout'],
   silentLog: boolean,
   pins: readonly DecidePin[],
+  localDisable: boolean,
 ): { rollout: 'shadow' | 'enforce'; stampedBy: DecideStamp } {
   if (rollout !== 'enforce') return { rollout: 'shadow', stampedBy: 'rule' }
+  if (localDisable) return { rollout: 'shadow', stampedBy: 'local-disable' }
   if (served === 'shadow') return { rollout: 'shadow', stampedBy: 'server-shadow' }
   if (silentLog) return { rollout: 'shadow', stampedBy: 'silent-log' }
   if (pins.length === 0) return { rollout: 'shadow', stampedBy: 'no-pins' }
@@ -623,6 +627,7 @@ function stampDecideRule(
 function compileDecideRules(policy: ResolvedPolicy): CompiledDecideRules {
   const served = policy.decideRules ?? []
   const silentLog = isSilentLogMode(policy)
+  const localDisable = served.length > 0 && decideLocallyDisabled()
   // Each SOP's lines parsed together, so an id used twice is caught as the
   // proxy catches it.
   const bySop = new Map<string, number[]>()
@@ -662,7 +667,7 @@ function compileDecideRules(policy: ResolvedPolicy): CompiledDecideRules {
     if (rule.on !== 'tool_call') return
     const ruleHash = decideRuleHash(rule, sha256Hex)
     const pins = r.ruleHash !== undefined && r.ruleHash !== ruleHash ? [] : r.pins
-    const stamp = stampDecideRule(rule.rollout, r.rollout, silentLog, pins)
+    const stamp = stampDecideRule(rule.rollout, r.rollout, silentLog, pins, localDisable)
     const fallbackId = stamp.rollout === 'enforce' ? decideFallbackId(rule.id, r.sopId, sha256Hex) : null
     out.records.push({
       v: 1,
@@ -679,6 +684,19 @@ function compileDecideRules(policy: ResolvedPolicy): CompiledDecideRules {
     if (fallbackId) out.fallbacks.push(decideFallbackPattern(fallbackId, rule.tools ?? [], 'block', decideFallbackReason(rule.id, sopTitle)))
   })
   return out
+}
+
+/**
+ * The marker `intutic decide disable` leaves in `~/.intutic/decide/`: while
+ * it exists, every decide rule this machine writes into a snapshot is
+ * stamped `local-disable`, so it runs as shadow and gets no fallback line.
+ * A line that does not read still refuses: that refusal is not the engine's.
+ */
+export const DECIDE_DISABLED_FILE = 'disabled'
+
+/** Whether `intutic decide disable` is in force on this machine. Read at each write, from the home directory then. */
+export function decideLocallyDisabled(): boolean {
+  return existsSync(path.join(os.homedir(), '.intutic', 'decide', DECIDE_DISABLED_FILE))
 }
 
 /** Where an `intutic decide eval` pass leaves the pins it earned: `evals/<ruleHash>/<digest>.json`, each a pin. */

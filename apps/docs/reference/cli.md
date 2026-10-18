@@ -218,6 +218,199 @@ intutic daemon install --proxy
 intutic gates install --route
 ```
 
+When the SOPs carry `decide:` rules, it also prints how many were compiled and how many are stamped
+`enforce`, names any `decide:` line that does not read by file and line number, and warns when more
+than 4 rules name one tool.
+
+---
+
+## `intutic decide test <rule>`
+
+Ask a decide rule's questions about one call, with the engine `intutic decide configure` set up, and
+print each answer's probability against its band, the `when` value and the outcome the rule would
+reach if it enforced. [Decide rules](/guide/decide) walks through writing, evaluating and enforcing a
+rule with these commands.
+
+```bash
+intutic decide test <rule> --state <file> [options]
+```
+
+`<rule>` is the rule's ref (`local:data.md#prod-data-export`), its id when only one local rule has it,
+or `<file>#<id>`.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--state <file>` | A JSON file with the call: `{"tool", "toolInput", "cwd"?}`. A `lastUserTurn` in it is not sent: `context: ["last_user_turn"]` is reserved in 3.0, and no gate supplies the user's last turn |
+| `--json` | Print the result as JSON |
+| `--log-state` | Also write the exact state sent to `~/.intutic/logs/decide-state-<date>.jsonl` |
+| `--workspace <dir>` | The workspace whose `.intutic/sops` to read. Default: the recorded one, else the current directory |
+
+---
+
+## `intutic decide eval <rule>`
+
+Measure a decide rule on labelled calls. A rule enforces only on a model a passing pre-registered eval
+pinned, so this is how a rule leaves shadow.
+
+```bash
+intutic decide eval <rule> --labels <file.jsonl> [--preregister <file>] [--adversarial]
+```
+
+Each labels line is one call: `{"id", "label": "refuse" | "allow", "tool", "toolInput", "cwd"?}`
+(`violation` and `clean` read as `refuse` and `allow`). Recall counts a `refuse` case as caught when it
+is refused or escalated; false alarms count `allow` cases refused. A case the engine could not answer
+counts as an escalation, never as an allow.
+
+- **Without `--preregister`**, it fits one band on the dev split (the cases whose id hashes to a
+  multiple of 3), choosing the band with no automatic error and the fewest escalations, then reports
+  recall, false alarms, escalation and each question's AUC on the rest. It writes a run report and
+  no pin.
+- **`--preregister <file>` naming a file that does not exist** writes the pre-registration there: the
+  rule hash, the model digest, the bands and the pass marks, before any label is read. Nothing else
+  happens.
+- **`--preregister <file>` naming that file** evaluates every labelled case at the rule's own bands,
+  with the adversarial families added. It passes when the pre-registration matches the rule and the
+  model, the labels file was not used by an earlier pre-registered run of this rule, there are at least
+  20 cases with 5 to refuse, recall is at least 95%, false alarms at most 10%, escalation at most 40%,
+  and planted approvals are caught at least 90% of the time. A pass writes the pin
+  (`~/.intutic/decide/evals/<ruleHash>/<digest>.json`) and rewrites the local policy snapshot. A failed
+  run exits with status `1`. On a logged-in machine the pin is still written, but the policy snapshot
+  there takes its decide rules and pins only from the control plane, so the pin applies to local use on
+  a machine with no login, and the command says so.
+
+`--adversarial` adds three fixed families to the refuse cases: five planted approvals appended to the
+arguments, five instructions aimed at the model, and paraphrases of the command (an environment
+variable for the program, quoting, a line split, reordered flags, long and short options). No model
+writes a case. Each family is reported apart.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--labels <file>` | The labelled calls, JSONL |
+| `--preregister <file>` | Write the pre-registration when the file is absent (reading no label); evaluate against it when present |
+| `--adversarial` | Add the adversarial families (always on under a pre-registration) |
+| `--json` | Print the run report as JSON |
+| `--log-state` | Also write each exact state sent to `~/.intutic/logs/decide-state-<date>.jsonl` |
+| `--workspace <dir>` | The workspace whose `.intutic/sops` to read |
+
+**Examples:**
+
+```bash
+intutic decide eval prod-data-export --labels dev.jsonl
+intutic decide eval prod-data-export --preregister prereg.json
+intutic decide eval prod-data-export --labels fresh.jsonl --preregister prereg.json
+```
+
+---
+
+## `intutic decide calibrate <rule>`
+
+Fit a logistic combiner over the rule's questions (L2, λ = 1) and a band on its output to labelled
+calls, and save them as a candidate in `~/.intutic/decide/evals/<ruleHash>/candidates/`. The next
+`intutic decide eval --preregister` for that model carries the candidate; once that eval passes, the
+combiner replaces `when` for the model it was fitted on.
+
+| Option | Description |
+|--------|-------------|
+| `--labels <file>` | The labelled calls, as for `intutic decide eval` |
+| `--json` | Print the candidate as JSON |
+| `--workspace <dir>` | The workspace whose `.intutic/sops` to read |
+
+---
+
+## `intutic decide models`
+
+The models the pre-registered bake-off measured, and which passed. No laptop-sized model passed, so
+none is validated for a laptop and the engine has no default model: bring a self-hosted model and
+validate it on your own labels with `intutic decide eval`. Nothing is downloaded.
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Print as JSON |
+
+---
+
+## `intutic decide check`
+
+The entry the shell gates (Gemini CLI, Goose, Hermes, OpenHands) and the n8n gate call for a tool call
+that a decide rule names. It reads one JSON request from stdin and writes one JSON line, with exit
+status `0`:
+
+```bash
+echo '{"v":1,"harness":"goose","tool":"Bash","toolInput":{"command":"pg_dump -h prod"},"cwd":"/repo","sessionId":"s1","budgetMs":3400,"lastUserTurn":null}' \
+  | intutic decide check --stdin
+# {"v":1,"outcome":"refuse","code":"DECIDE_REFUSED","ruleId":"decide.local:data.md#prod-data-export","reason":"…"}
+```
+
+`outcome` is `allow`, `refuse` or `escalate`; `code` is null, `DECIDE_REFUSED`, `DECIDE_ESCALATED` or
+`GOVERNANCE_UNAVAILABLE`. A shadow rule never refuses. An enforcing rule refuses with
+`GOVERNANCE_UNAVAILABLE` when the engine is unavailable (an error, a timeout, a failed canary), as does
+input that does not read and a decide record that does not decode. An enforcing rule the engine cannot
+answer inside `budgetMs` escalates without being asked. Every evaluated call is written to the decide
+log, `~/.intutic/logs/decide-<date>.jsonl`.
+
+| Option | Description |
+|--------|-------------|
+| `--stdin` | Read the request from stdin |
+
+---
+
+## `intutic decide configure`
+
+Write `~/.intutic/decide/engine.json` (mode `0600`): the engine's URL, adapter and model. The engine
+must run on this machine or a private address, or on a host listed in
+`INTUTIC_SELF_HOSTED_DECISION_HOSTS`; hosted decision APIs are refused. The key, if the engine needs
+one, is read from `INTUTIC_DECIDE_API_KEY` only and is never written. The `INTUTIC_DECIDE_*`
+variables override the file (see [Configuration](/reference/configuration)).
+
+| Option | Description |
+|--------|-------------|
+| `--url <url>` | The engine's base URL. Default `http://127.0.0.1:11434` (Ollama) |
+| `--adapter <adapter>` | `logprobs` (Ollama, vLLM, llama.cpp, LM Studio), `systemone` or `decisions` |
+| `--model <model>` | The model the engine serves. Without one the engine is not configured |
+| `--timeout-ms <ms>` | Per-call timeout. Default 5000 |
+| `--parallel <n>` | Most requests in flight. Default 1 for Ollama, 8 otherwise |
+| `--structured` | Send `structured_outputs` with logprobs requests |
+| `--no-structured` | Do not send it (the default) |
+| `--json` | Print the written configuration as JSON |
+
+`intutic doctor` then checks the engine and its model, runs the known-answer canary, measures the
+per-call p95 and names every harness whose time budget a rule cannot fit.
+
+---
+
+## `intutic decide disable`
+
+Run every decide rule on this machine as shadow (each call is logged, none is refused) until
+`intutic decide enable`. It rewrites the local policy snapshot; on a connected machine the sync daemon
+applies it on its next poll. A `decide:` line that does not read still refuses its tools.
+
+---
+
+## `intutic decide enable`
+
+Undo `intutic decide disable`.
+
+---
+
+## `intutic decide lint`
+
+Read every `decide:` line in `.intutic/sops/`: each rule with its file, line, rule hash and whether a
+pin exists for it, each line that does not read with its error (a bare `decide:` line gets the hint
+"write one rule per line as `decide: {json}`"), and each tool more than 4 rules name. It warns about
+each `on: response` rule, which is not enforced in 3.0, and each rule declaring
+`context: ["last_user_turn"]`, which is reserved and not supplied in 3.0; `intutic gates install` and
+`intutic doctor` report both too. Exits with status `1` when a line does not read; the warnings do not
+change the status.
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Print as JSON |
+| `--workspace <dir>` | The workspace whose `.intutic/sops` to read |
+
 ---
 
 ## `intutic setup`
@@ -269,8 +462,8 @@ intutic setup --dev
 <!-- ENTERPRISE_ONLY_START -->
 ## `intutic judge configure`
 
-Generate the local artifacts an on-prem LLM-as-judge needs: a `litellm_config.yaml`, an env
-block, and a Helm values snippet. Writes files only — it never calls a remote API, since
+Generate the local artifacts an on-prem LLM-as-judge needs: a `litellm_config.yaml`, the decide
+engine's configuration, an env block, and a Helm values snippet. Writes files only — it never calls a remote API, since
 `local_judge` is deliberately not remotely configurable (see [the self-hosted gateway's local
 judge](/external/self-hosted-gateway#4-what-does-not-run-locally-read-this-before-you-deploy)).
 See [On-Prem Judge Setup](/external/on-prem-judge) for the full walkthrough.
@@ -284,6 +477,7 @@ intutic judge configure [options]
 | Option | Description |
 |--------|-------------|
 | `--out <path>` | Where to write `litellm_config.yaml` (default: `./litellm_config.yaml`) |
+| `--engine-url <url>` | Where this machine reaches the model server, for the decide engine (default: `http://127.0.0.1:11434`). Must be loopback, private, or listed in `INTUTIC_SELF_HOSTED_DECISION_HOSTS` |
 
 **What it does:**
 1. Prompts for a judge model — a self-hosted model from the
@@ -292,17 +486,21 @@ intutic judge configure [options]
    self-hosted models: a custom reference that names a hosted provider (Anthropic, OpenAI,
    OpenRouter, Ollama Cloud…) is refused and nothing is written
 2. Writes a LiteLLM `litellm_config.yaml` to `--out`, with one `model_list` entry for that model
-3. Prints the env block (`INTUTIC_GATEWAY_LOCAL_JUDGE`, `LITELLM_LOCAL_URL`,
-   `LITELLM_LOCAL_API_KEY`, `LITELLM_LOCAL_JUDGE_MODEL`) for Docker/bare-metal deployments
-4. Prints the Helm values (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`, and
+3. Writes `~/.intutic/decide/engine.json` (mode `0600`) for the decide engine: `--engine-url`, the
+   `logprobs` adapter and that model, keeping other keys the file holds. Never a key
+4. Prints the env block (`INTUTIC_GATEWAY_LOCAL_JUDGE`, `LITELLM_LOCAL_URL`,
+   `LITELLM_LOCAL_API_KEY`, `LITELLM_LOCAL_JUDGE_MODEL`) for Docker/bare-metal deployments, with a
+   warning: these variables are deprecated since 3.0 (the gateway maps them to the decide rule
+   `local-judge`) and removed in 4.0
+5. Prints the Helm values (`proxy.localJudge`, `litellm.enabled`, `litellm.judgeModel`, and
    `litellm.secretName: litellm-env` for the Secret holding `LITELLM_MASTER_KEY`) for the
    `intutic-gateway` chart, which is published at `oci://ghcr.io/intutic/charts/intutic-gateway`.
    The chart renders LiteLLM's config from the file this command wrote, passed with `--set-file`
 
-The optional typed stage's variables (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`,
+The typed band's variables (`INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_LO`,
 `INTUTIC_GATEWAY_LOCAL_JUDGE_TYPED_HI`, `LITELLM_LOCAL_TYPED_JUDGE_MODEL`) are not printed: the
 band must be measured for your model. See
-[On-Prem Judge Setup](/external/on-prem-judge#typed-stage-optional).
+[On-Prem Judge Setup](/external/on-prem-judge#typed-stage-the-local-judge-decide-rule).
 
 **Example:**
 
@@ -434,6 +632,7 @@ No options. Runs these checks in order, each printing ✓ or ✗ plus a one-line
 8. Policy snapshot present, valid, non-empty and fresh (`~/.intutic/hooks/policy-snapshot.rules`)
 9. Local gates, on a machine with no login: a gate file for each recorded harness that has one
 10. Cisco skill scanner on `PATH` (optional; never fails)
+11. Decide, when the snapshot carries decide rules or an engine is configured: the engine and its model (with the digest, and a note when the server cannot report a weights digest), the known-answer canary (cached in `~/.intutic/decide/canary.json`), the per-call p95 of 20 warm calls (stored in `~/.intutic/decide/engine.json`), and every harness and rule pair whose time budget the rule cannot fit, for example "prod-data-export cannot be evaluated within windsurf's 2,300 ms (estimated 3,100 ms)". Such a rule escalates there instead of being asked
 
 Checks 2–5 need a control plane. On a machine with no login they are skipped with one note, the
 proxy and CA-trust remediations point at `intutic start`, and checks 8 and 9 look at what

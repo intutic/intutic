@@ -241,7 +241,7 @@ function logEvent(verdict, toolName, reason) {
 
 let raw = '';
 process.stdin.on('data', (c) => { raw += c; });
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   try {
     const ctx = JSON.parse(raw);
     _intuticSessionId = ctx.trajectory_id || ctx.trajectoryId || ctx.session_id || ctx.sessionId ||
@@ -293,7 +293,7 @@ process.stdin.on('end', () => {
     // "governance rule". hookEvents.resolveSeverity keys CRITICAL off the
     // "governance-protected" substring, and this was the one harness of twelve
     // that omitted it — so a Windsurf agent caught tampering was filed MEDIUM.
-    intuticGate(toolName, targetPath, command, logEvent, _intuticWsId, input);
+    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
     logEvent('tool_allowed', toolName, '');
     process.exit(0);

@@ -182,7 +182,8 @@ describe('intutic gates install', () => {
 
     const r = await gates()
     expect(r.code).toBe(0)
-    expect(r.out).toContain('.intutic/sops/data.md: decide line 2 does not read, so its tools are refused: decide: on is required')
+    expect(r.out).toContain('.intutic/sops/data.md:3: decide line 2 does not read, so its tools are refused: decide: on is required')
+    expect(r.out).toContain('Decide rules: 1 compiled, 1 stamped enforce')
     const lines = (await fs.readFile(snapshotRules, 'utf-8')).split('\n')
     expect(lines).toContain('@format\t2')
     const record = lines.find((l) => l.startsWith('@decide\t'))!
@@ -191,6 +192,21 @@ describe('intutic gates install', () => {
       'decide-fallback:prod-data-export@6bcd6b021e7d',
       'decide-fallback:unreadable.2@6bcd6b021e7d',
     ])
+  })
+
+  it('warns that an on: response rule is not enforced in 3.0, and that last_user_turn is reserved', async () => {
+    await saveConfig(['claude-code'])
+    const questions = { leaks: { type: 'yes_no', ask: 'Does the response include customer data?' } }
+    const response = { id: 'no-leaks', on: 'response', questions, when: 'leaks' }
+    const turn = { id: 'with-turn', on: 'tool_call', tools: ['Bash'], questions, when: 'leaks', context: ['last_user_turn'] }
+    await put(join(ws, '.intutic', 'sops', 'data.md'), `---\ndecide: ${JSON.stringify(response)}\ndecide: ${JSON.stringify(turn)}\n---\n# Data\n\nStay in production.\n`)
+    const r = await gates()
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('.intutic/sops/data.md:2: decide rule no-leaks is on: response, which is not enforced in 3.0')
+    expect(r.out).toContain('.intutic/sops/data.md:3: decide rule with-turn declares context: ["last_user_turn"], which is reserved and not supplied in 3.0')
+    // The response rule is in no record; the tool-call rule is compiled as before.
+    const records = (await fs.readFile(snapshotRules, 'utf-8')).split('\n').filter((l) => l.startsWith('@decide\t'))
+    expect(records).toHaveLength(1)
   })
 
   it('rotates a hook events log past the limit, keeping one previous copy', async () => {

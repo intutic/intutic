@@ -290,19 +290,26 @@ describe('decide records (snapshot format 2)', () => {
     expect(evaluate('Bash', '', 'ls -la', s).severity).toBeNull()
   })
 
-  it('a Gate, which does not evaluate decide rules yet, refuses through the fallback line', async () => {
-    expect(CAN_EVALUATE_DECIDE).toBe(false)
-    const saved = process.env.INTUTIC_SNAPSHOT_RULES
+  it('a Gate evaluates decide rules: it skips the fallback line, and with no engine configured refuses GOVERNANCE_UNAVAILABLE', async () => {
+    expect(CAN_EVALUATE_DECIDE).toBe(true)
+    const saved = { rules: process.env.INTUTIC_SNAPSHOT_RULES, home: process.env.HOME, model: process.env.INTUTIC_DECIDE_MODEL }
     process.env.INTUTIC_SNAPSHOT_RULES = rulesFile(['@format\t2', record, fallback, other])
+    // No engine.json under this HOME and no model: the engine is not configured.
+    process.env.HOME = dir
+    delete process.env.INTUTIC_DECIDE_MODEL
     try {
       const gate = new Gate({ repoRoot: dir, workspaceId: WS, useHookGate: false, useSopRules: false }, null)
       const err = await gate.guard('Bash', { command: 'ls -la' }).then(() => null, (e: unknown) => e)
       expect(err).toBeInstanceOf(IntuticGateRefusal)
-      expect((err as IntuticGateRefusal).reason).toContain(`[${FB}]`)
+      expect((err as IntuticGateRefusal).code).toBe('GOVERNANCE_UNAVAILABLE')
+      expect((err as IntuticGateRefusal).reason).not.toContain(`[${FB}]`)
       expect(gate.getSnapshot().decideRules).toHaveLength(1)
+      expect(gate.getSnapshot().rules.map((r) => r.id)).toEqual(['d.rm'])
     } finally {
-      if (saved === undefined) delete process.env.INTUTIC_SNAPSHOT_RULES
-      else process.env.INTUTIC_SNAPSHOT_RULES = saved
+      for (const [k, v] of [['INTUTIC_SNAPSHOT_RULES', saved.rules], ['HOME', saved.home], ['INTUTIC_DECIDE_MODEL', saved.model]] as const) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
     }
   })
 
