@@ -83,7 +83,7 @@ def holding_gate(monkeypatch, cp, sop_rules=(), fail_closed=True):
         id=RULE_ID, severity="hold", subject="tool", reason="Held for human review: deploy",
         pattern=re.compile(r"(deploy)", re.IGNORECASE),
     )])
-    monkeypatch.setattr(gate_mod.snapshot, "load_snapshot", lambda _ws: snap)
+    monkeypatch.setattr(gate_mod.snapshot, "load_snapshot", lambda _ws, **_kw: snap)
     g = Gate(GateConfig(workspace_id="ws_1", use_hook_gate=False), client=client)
     g._sop_rules = soprules.parse_rules({"rules": list(sop_rules)})
     return g
@@ -234,7 +234,7 @@ def action_gate(monkeypatch, cp):
         )
         for a in HOLD_ACTIONS
     ])
-    monkeypatch.setattr(gate_mod.snapshot, "load_snapshot", lambda _ws: snap)
+    monkeypatch.setattr(gate_mod.snapshot, "load_snapshot", lambda _ws, **_kw: snap)
     return Gate(GateConfig(workspace_id="ws_1", use_hook_gate=False), client=client)
 
 

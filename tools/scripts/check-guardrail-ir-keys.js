@@ -21,6 +21,10 @@
  * the type does not have would be written into the settings JSON and read by
  * nothing.
  *
+ * `decide` renders to its own front-matter line, `decide: {json}`, one rule
+ * per line like `hook_rule:`, so the check is that `sops.rs` reads that key
+ * and `guardrailRender.ts` writes it.
+ *
  * The docs page is held to the same set: the "Four targets" table in
  * `apps/docs/guide/policy-guardrails.md` must name every IR kind a guardrail
  * can carry (all but `none`) and every guardrail target, and nothing else in
@@ -109,9 +113,15 @@ for (const k of settingKinds) {
 }
 if (Object.keys(settingKeys).sort().join() !== [...settingKinds].sort().join()) fail('SETTING_KIND_KEYS and SETTING_KINDS name different kinds.')
 
+// The decide kind is its own front-matter line: the proxy reads it and the renderer writes it.
+if (kinds.includes('decide')) {
+  if (!proxyKeys.has('decide')) fail('IR_KINDS has "decide", but sops.rs never parses a `decide:` line — a decide rule would load and never be read.')
+  if (!renderSrc.includes("'decide:'")) fail('IR_KINDS has "decide", but guardrailRender.ts never writes a `decide:` line.')
+}
+
 // The kinds outside front matter are exactly the ones the design names.
 const other = kinds.filter((k) => !frontMatterKinds.includes(k)).sort()
-const expectedOther = ['allowed_models', 'egress_allow', 'hook_rule', 'none', 'wasm_predicate']
+const expectedOther = ['allowed_models', 'decide', 'egress_allow', 'hook_rule', 'none', 'wasm_predicate']
 if (JSON.stringify(other) !== JSON.stringify(expectedOther)) {
   fail(`IR kinds outside front matter are ${JSON.stringify(other)}; this gate knows only ${JSON.stringify(expectedOther)}. A new kind needs its own enforcer and its own line here.`)
 }
@@ -129,7 +139,10 @@ if (!section) fail('could not find the "## Four targets, four enforcers" section
 const tableRows = section[1].split('\n').filter((l) => l.trim().startsWith('|') && !/^\|\s*:?-/.test(l.trim()))
 if (tableRows.length < 5) fail(`the targets table has ${tableRows.length} row(s) including its header; expected at least 5 — the extraction is broken.`)
 const documented = new Set()
-for (const row of tableRows) for (const m of row.matchAll(/`([a-z]+(?:_[a-z]+)+)`/g)) documented.add(m[1])
+// Snake-case names, and the IR kinds that are one word (`decide`).
+for (const row of tableRows) {
+  for (const m of row.matchAll(/`([a-z]+(?:_[a-z]+)*)`/g)) if (m[1].includes('_') || kinds.includes(m[1])) documented.add(m[1])
+}
 const carried = kinds.filter((k) => k !== 'none')
 const expectedOnPage = new Set([...carried, ...targets])
 const undocumented = [...expectedOnPage].filter((k) => !documented.has(k))

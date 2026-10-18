@@ -9,9 +9,9 @@ looks and what `INTUTIC_SOPS_DIR` is for.
 
 ## The keys
 
-Eleven keys can block, steer or hold a run. Everything else in a SOP is prose,
-injected into the agent's context and advisory by construction — the model may
-ignore it.
+Eleven keys can block, steer or hold a run, and a twelfth, `decide:`, is
+reserved for Decide (3.0). Everything else in a SOP is prose, injected into the
+agent's context and advisory by construction — the model may ignore it.
 
 | Key | Shape | What it does |
 | :--- | :--- | :--- |
@@ -26,6 +26,7 @@ ignore it.
 | `forbid_with:` | `taint(), token` | Refuses the two together in one request. |
 | `sql_guard:` | `refuse` or `warn`, with `sql_allow_dsns:` | Refuses (or logs) destructive SQL in a shell call aimed at a database not on the allowlist. See [Destructive SQL](#destructive-sql). |
 | `hook_rule:` | one JSON object per line | Refuses a tool call by tool name and argument literals. See [Hook rules](#hook-rules). |
+| `decide:` | one JSON object per line | Reserved for Decide (3.0): narrow questions a self-hosted model answers about a tool call or a response. Read and validated today; evaluates nothing yet. |
 
 ::: warning Two shapes that look right and match nothing
 

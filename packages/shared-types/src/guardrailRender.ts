@@ -40,6 +40,7 @@ import {
   settingValues,
   SETTING_KIND_KEYS,
 } from './guardrailIr.js'
+import { parseDecideLines, type DecideDecl, type DecideRule } from './decide.js'
 
 // ─── Workspace settings ───────────────────────────────────────────────
 
@@ -271,6 +272,39 @@ export function renderHookRuleFrontMatterLine(rule: ProxyHookRule): string {
   return `${HOOK_RULE_FRONT_MATTER_KEY} ${JSON.stringify(ordered)}`
 }
 
+// ─── Decide rules ──────────────────────────────────────────────────────
+
+/** The front-matter key a decide rule is written under, one rule per line. */
+export const DECIDE_FRONT_MATTER_KEY = 'decide:'
+
+/**
+ * One `decide: {json}` front-matter line for a validated decide IR (with or
+ * without `kind`). Keys go in the grammar's order, questions by name, and no
+ * value can hold a newline (`ask` and `title` refuse one), so the line is
+ * byte-stable and stays one line.
+ */
+export function renderDecideFrontMatterLine(ir: DecideRule): string {
+  const band = (b: { yes_at: number; no_below: number }) => ({ yes_at: b.yes_at, no_below: b.no_below })
+  const questions: Record<string, unknown> = {}
+  for (const name of Object.keys(ir.questions).sort()) {
+    const q = ir.questions[name]!
+    questions[name] = { type: q.type, ask: q.ask, ...(q.options ? { options: q.options } : {}), ...(q.band ? { band: band(q.band) } : {}) }
+  }
+  const ordered = {
+    id: ir.id,
+    ...(ir.title !== undefined ? { title: ir.title } : {}),
+    on: ir.on,
+    ...(ir.tools ? { tools: ir.tools } : {}),
+    questions,
+    when: ir.when,
+    ...(ir.band ? { band: band(ir.band) } : {}),
+    ...(ir.escalate ? { escalate: ir.escalate } : {}),
+    ...(ir.rollout ? { rollout: ir.rollout } : {}),
+    ...(ir.context ? { context: ir.context } : {}),
+  }
+  return `${DECIDE_FRONT_MATTER_KEY} ${JSON.stringify(ordered)}`
+}
+
 // ─── Front matter: render ──────────────────────────────────────────────
 
 const FRONT_MATTER_KEY_ORDER = ['roles', 'deny_tools', 'review_before', 'requires_before', 'forbid_after', 'max_calls', 'forbid_with'] as const
@@ -363,6 +397,8 @@ export interface ParsedFrontMatter {
   maxCalls: Array<[string, number]>
   forbidWith: Array<[string, string]>
   mode: 'shadow' | 'enforce'
+  /** One per `decide:` line, in order; a line that does not read is kept as `unreadable`, which refuses. */
+  decide: DecideDecl[]
   /** Rules that failed to parse, in the Rust parser's own wording. */
   errors: string[]
 }
@@ -541,8 +577,9 @@ function parseMode(front: string): 'shadow' | 'enforce' {
  * `roles:`), list keys split on commas and strip quotes/brackets,
  * `requires_before`/`forbid_after` parse `A -> B`,
  * `max_calls` parses `A <= N` (comma-split), `forbid_with` parses
- * `taint(), token` (never comma-split), unknown keys are ignored, and an
- * unparseable rule is reported rather than dropped.
+ * `taint(), token` (never comma-split), `decide:` is one JSON rule per
+ * line (never comma-split), unknown keys are ignored, and an unparseable rule
+ * is reported rather than dropped.
  */
 export function parseFrontMatterEnforcing(front: string): ParsedFrontMatter {
   const requires = parseRules(front, 'requires_before:')
@@ -561,6 +598,7 @@ export function parseFrontMatterEnforcing(front: string): ParsedFrontMatter {
     maxCalls: counts.ok,
     forbidWith: cooccur.ok,
     mode: parseMode(front),
+    decide: parseDecideLines(keyValues(front, DECIDE_FRONT_MATTER_KEY)),
     errors: [...requires.errors, ...forbids.errors, ...counts.errors, ...cooccur.errors],
   }
 }
@@ -576,7 +614,8 @@ export function isEnforceableFrontMatter(fm: ParsedFrontMatter): boolean {
     fm.requiresBefore.length > 0 ||
     fm.forbidAfter.length > 0 ||
     fm.maxCalls.length > 0 ||
-    fm.forbidWith.length > 0
+    fm.forbidWith.length > 0 ||
+    fm.decide.length > 0
   )
 }
 

@@ -1,0 +1,67 @@
+{
+  "$comment": "Intutic 2.9.0 gate readers, for the old-gate test. Copied files are byte-identical to the v2.9.0 tag: blob is the git blob id `git rev-parse v2.9.0:<source>` prints. claude-code-check.js is the Claude Code gate the 2.9.0 sync daemon renders: its sources and shared-types at v2.9.0, built with tsc as a release is, then updatePreToolUseHooks(root, [], {}, undefined, \"ws_test\") (gate body v21), with the workspace root written as __INTUTIC_TEST_ROOT__. The two __init__.py files are empty, in place of the package ones, which import the HTTP client.",
+  "tag": "v2.9.0",
+  "files": {
+    "gate-js/snapshot.ts": {
+      "source": "packages/gate-js/src/snapshot.ts",
+      "blob": "609e1393c820ed4e17c27957c0b122c2cd1d68ce"
+    },
+    "gate-js/mcpRegistryRecord.ts": {
+      "source": "packages/gate-js/src/mcpRegistryRecord.ts",
+      "blob": "9edc46cb6fb6df821ee5a8d381df8593b029356d"
+    },
+    "gate-js/ssoGroups.ts": {
+      "source": "packages/gate-js/src/ssoGroups.ts",
+      "blob": "e0374a2301581d4c72c3d24e16a349570f1b3d85"
+    },
+    "gate-js/opaqueRefusal.ts": {
+      "source": "packages/gate-js/src/opaqueRefusal.ts",
+      "blob": "f3d6fd457348f8de673b6e4a9f6cc4181e4329c9"
+    },
+    "gate-js/phrases.ts": {
+      "source": "packages/gate-js/src/phrases.ts",
+      "blob": "a8880927333056eeea8c242b9b0335cae51490ff"
+    },
+    "gate-js/actions.ts": {
+      "source": "packages/gate-js/src/actions.ts",
+      "blob": "f3392c47f60975d8e308cb2ed94302ed1be685b8"
+    },
+    "gate-js/sequence.ts": {
+      "source": "packages/gate-js/src/sequence.ts",
+      "blob": "dadc1aaae1134b8493aa124f7696c4c94d8868b3"
+    },
+    "intutic_clawde/gate/snapshot.py": {
+      "source": "packages/intutic-clawde/intutic_clawde/gate/snapshot.py",
+      "blob": "ed84ae5d4ae2710272c80ab0af3f3f8d28b1eb3c"
+    },
+    "intutic_clawde/gate/sso_groups.py": {
+      "source": "packages/intutic-clawde/intutic_clawde/gate/sso_groups.py",
+      "blob": "c4f9e7eaa72ef009c52b8c7eead73ef20ccccce4"
+    },
+    "intutic_clawde/gate/actions.py": {
+      "source": "packages/intutic-clawde/intutic_clawde/gate/actions.py",
+      "blob": "562b4e267b5a7af2984bd03167edf3dad99ea3f4"
+    },
+    "intutic_clawde/gate/mcp_registry.py": {
+      "source": "packages/intutic-clawde/intutic_clawde/gate/mcp_registry.py",
+      "blob": "6ac2634d222784571121fad243bc0b6354d95f93"
+    },
+    "intutic_clawde/gate/opaque.py": {
+      "source": "packages/intutic-clawde/intutic_clawde/gate/opaque.py",
+      "blob": "f492d535988e2252dca62c32d6c7038f7adc0a46"
+    },
+    "intutic_clawde/gate/phrases.py": {
+      "source": "packages/intutic-clawde/intutic_clawde/gate/phrases.py",
+      "blob": "4ab8b28ec391d6c6bac786261c06a4ae616cf341"
+    },
+    "intutic_clawde/gate/sequence.py": {
+      "source": "packages/intutic-clawde/intutic_clawde/gate/sequence.py",
+      "blob": "ac184d5107ec090901d4898ddc8d89492f3648f7"
+    }
+  },
+  "rendered": {
+    "claude-code-check.js": {
+      "blob": "2a679330b0a68fb3acc5190056a94831e62c8e22"
+    }
+  }
+}

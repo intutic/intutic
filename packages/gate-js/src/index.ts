@@ -49,11 +49,14 @@ export {
   SEV_SHADOW,
   SEV_WARN,
 } from './snapshot.js'
-export type { Decision, Rule, RuleSubject, Severity, SnapshotState } from './snapshot.js'
+export type { Decision, LoadSnapshotOptions, Rule, RuleSubject, Severity, SnapshotState } from './snapshot.js'
 
 export type { SsoGroupClearance, SsoGroupPolicy, SsoGroupRecord } from './ssoGroups.js'
 
 export type { McpAllowlistRecord, McpRegistryRecord } from './mcpRegistryRecord.js'
+
+export type { DecidePin, DecideRecord, DecideStamp } from './decideRecord.js'
+export type { DecideBand, DecideQuestion, DecideRule } from './decide.js'
 
 export {
   firstMatch,

@@ -33,6 +33,15 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import {
+  DECIDE_FALLBACK_PREFIX,
+  DECIDE_RECORD_TAG,
+  SNAPSHOT_FORMAT_RECORD_TAG,
+  decideRuleHash,
+  decodeDecideRecord,
+  decodeSnapshotFormatRecord,
+  validateDecideRule,
+} from '@intutic/shared-types'
 
 /**
  * Staleness window, in days.
@@ -65,6 +74,14 @@ export interface PolicySnapshotHealth {
   ruleCount: number
   /** Rules dropped because their regex would not compile. */
   droppedRules: number
+  /** The format its `@format` record names; 1 without one. */
+  formatVersion: number
+  /**
+   * Decide rules whose `@decide` records decode, as the gates read them. Each
+   * one's fallback line is left out of {@link ruleCount} only when the gates
+   * evaluate decide rules ({@link CAN_EVALUATE_DECIDE}). 0 on `invalid`.
+   */
+  decideRules: number
   /** Where the snapshot was looked for. */
   path: string
 }
@@ -81,6 +98,19 @@ export function resolveSnapshotRulesPath(): string {
   const override = process.env.INTUTIC_SNAPSHOT_RULES
   if (override && override.length > 0) return override
   return join(homedir(), '.intutic', 'hooks', SNAPSHOT_RULES_FILE)
+}
+
+/**
+ * Whether the gates this reports on, and this CLI, evaluate the decide rules
+ * a snapshot carries. Until they do, every gate enforces a decide rule's
+ * fallback line, so it is counted as a rule. Set only once they do.
+ */
+export const CAN_EVALUATE_DECIDE = false
+
+/** A decide record's rule: its hash when it is valid. */
+function checkDecideRule(ir: unknown): string | null {
+  const v = validateDecideRule(ir)
+  return v.ok ? decideRuleHash(v.rule, (t) => createHash('sha256').update(t, 'utf8').digest('hex')) : null
 }
 
 /**
@@ -102,12 +132,19 @@ export function parsePolicySnapshot(
     ageDays: 0,
     ruleCount: 0,
     droppedRules: 0,
+    formatVersion: 1,
+    decideRules: 0,
     path: opts.path ?? resolveSnapshotRulesPath(),
   }
 
   // The SSO-group refusals the gates keep when they drop the rest of an
   // invalid snapshot's dynamic tier.
   let ssoGroupRefusals = 0
+  // The rules a gate loads, by id, and the fallback lines decoded records
+  // name: a gate that evaluates decide rules skips those, so they are
+  // subtracted below.
+  const ruleIds: string[] = []
+  const fallbacks = new Set<string>()
   const lines = text.split('\n')
   for (const line of lines) {
     if (line.startsWith('#digest ')) {
@@ -123,6 +160,18 @@ export function parsePolicySnapshot(
       continue
     }
     if (!line || line.startsWith('#')) continue
+    if (line.startsWith(`${SNAPSHOT_FORMAT_RECORD_TAG}\t`)) {
+      out.formatVersion = decodeSnapshotFormatRecord(line) ?? out.formatVersion
+      continue
+    }
+    if (line.startsWith(`${DECIDE_RECORD_TAG}\t`)) {
+      const record = decodeDecideRecord(line, checkDecideRule)
+      if (record) {
+        out.decideRules += 1
+        if (record.fallbackId) fallbacks.add(record.fallbackId)
+      }
+      continue
+    }
 
     // Column order is `RULES_COLUMNS`: id, severity, flags, subject, reason,
     // source. A short record or a record with no pattern is skipped silently by
@@ -139,9 +188,10 @@ export function parsePolicySnapshot(
       out.droppedRules += 1
       continue
     }
-    out.ruleCount += 1
+    ruleIds.push(f[0]!)
     if (f[0]!.startsWith('sso_group.') && f[1] === 'block') ssoGroupRefusals += 1
   }
+  out.ruleCount = ruleIds.filter((id) => !CAN_EVALUATE_DECIDE || !id.startsWith(DECIDE_FALLBACK_PREFIX) || !fallbacks.has(id)).length
 
   // Integrity, cheapest failure first. A digest nobody recomputes is a comment;
   // a workspace id nobody compares means workspace A's rules get enforced on B's
@@ -167,7 +217,10 @@ export function parsePolicySnapshot(
   // behaviour rather than opening a hole — except the SSO-group refusals,
   // which the gates keep because they only ever refuse. Reported as what the
   // gates will have.
-  if (out.state === 'invalid') out.ruleCount = ssoGroupRefusals
+  if (out.state === 'invalid') {
+    out.ruleCount = ssoGroupRefusals
+    out.decideRules = 0
+  }
 
   if (out.state === 'ok' && out.generatedAt) {
     const t = Date.parse(out.generatedAt)
@@ -206,6 +259,8 @@ export function readPolicySnapshot(
       ageDays: 0,
       ruleCount: 0,
       droppedRules: 0,
+      formatVersion: 1,
+      decideRules: 0,
       path,
     }
   }

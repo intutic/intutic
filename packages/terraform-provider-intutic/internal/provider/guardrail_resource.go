@@ -54,6 +54,14 @@ type guardrailModel struct {
 	Hosts             types.List           `tfsdk:"hosts"`
 	Rationale         types.String         `tfsdk:"rationale"`
 	Predicate         jsontypes.Normalized `tfsdk:"predicate"`
+	RuleID            types.String         `tfsdk:"rule_id"`
+	On                types.String         `tfsdk:"on"`
+	Questions         jsontypes.Normalized `tfsdk:"questions"`
+	When              types.String         `tfsdk:"when"`
+	Band              jsontypes.Normalized `tfsdk:"band"`
+	Escalate          types.String         `tfsdk:"escalate"`
+	Rollout           types.String         `tfsdk:"rollout"`
+	Context           types.List           `tfsdk:"context"`
 	Target            types.String         `tfsdk:"target"`
 	Status            types.String         `tfsdk:"status"`
 	Version           types.Int64          `tfsdk:"version"`
@@ -110,6 +118,25 @@ func stringAttr(key, name string, field func(*guardrailModel) *types.String) irA
 		}}
 }
 
+// jsonAttr is an attribute holding a JSON value, read back with its keys
+// sorted (see sortedJSON).
+func jsonAttr(key, name string, field func(*guardrailModel) *jsontypes.Normalized) irAttr {
+	return irAttr{key, name,
+		func(m *guardrailModel) attr.Value { return *field(m) },
+		func(m *guardrailModel, raw json.RawMessage) error {
+			if raw == nil {
+				*field(m) = jsontypes.NewNormalizedNull()
+				return nil
+			}
+			canonical, err := sortedJSON(raw)
+			if err != nil {
+				return err
+			}
+			*field(m) = jsontypes.NewNormalizedValue(canonical)
+			return nil
+		}}
+}
+
 var irAttrs = []irAttr{
 	stringAttr("title", "title", func(m *guardrailModel) *types.String { return &m.Title }),
 	listAttr("tools", "tools", func(m *guardrailModel) *types.List { return &m.Tools }),
@@ -138,20 +165,16 @@ var irAttrs = []irAttr{
 	listAttr("models", "models", func(m *guardrailModel) *types.List { return &m.Models }),
 	listAttr("hosts", "hosts", func(m *guardrailModel) *types.List { return &m.Hosts }),
 	stringAttr("rationale", "rationale", func(m *guardrailModel) *types.String { return &m.Rationale }),
-	{"predicate", "predicate",
-		func(m *guardrailModel) attr.Value { return m.Predicate },
-		func(m *guardrailModel, raw json.RawMessage) error {
-			if raw == nil {
-				m.Predicate = jsontypes.NewNormalizedNull()
-				return nil
-			}
-			canonical, err := sortedJSON(raw)
-			if err != nil {
-				return err
-			}
-			m.Predicate = jsontypes.NewNormalizedValue(canonical)
-			return nil
-		}},
+	jsonAttr("predicate", "predicate", func(m *guardrailModel) *jsontypes.Normalized { return &m.Predicate }),
+	// decide: the IR's `id` is `rule_id` here, because `id` is the guardrail's.
+	stringAttr("id", "rule_id", func(m *guardrailModel) *types.String { return &m.RuleID }),
+	stringAttr("on", "on", func(m *guardrailModel) *types.String { return &m.On }),
+	jsonAttr("questions", "questions", func(m *guardrailModel) *jsontypes.Normalized { return &m.Questions }),
+	stringAttr("when", "when", func(m *guardrailModel) *types.String { return &m.When }),
+	jsonAttr("band", "band", func(m *guardrailModel) *jsontypes.Normalized { return &m.Band }),
+	stringAttr("escalate", "escalate", func(m *guardrailModel) *types.String { return &m.Escalate }),
+	stringAttr("rollout", "rollout", func(m *guardrailModel) *types.String { return &m.Rollout }),
+	listAttr("context", "context", func(m *guardrailModel) *types.List { return &m.Context }),
 }
 
 // sortedJSON re-encodes raw with object keys sorted, as jsonencode writes
@@ -236,8 +259,8 @@ func (r *guardrailResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Description: "The IR kind: " + strings.Join(backquote(guardrailKinds()), ", ") + ". The attributes below say which kinds take them.",
 				Validators:  []validator.String{stringvalidator.OneOf(guardrailKinds()...)},
 			},
-			"title":            irString("`hook_rule`, `wasm_predicate` (required): the title, 1 to 80 characters, that starts the block message."),
-			"tools":            irList("`hook_rule` (required, 1 to 8), `deny_tools` (required, 1 to 16): tool names (`Bash`, `mcp__github__create_issue`) or action tokens. A known harness tool is written in its canonical case (`WebFetch`, not `webfetch`)."),
+			"title":            irString("`hook_rule`, `wasm_predicate` (required): the title, 1 to 80 characters, that starts the block message. `decide` (optional): the rule's title, 1 to 80 characters with no tab or newline."),
+			"tools":            irList("`hook_rule` (required, 1 to 8), `deny_tools` (required, 1 to 16): tool names (`Bash`, `mcp__github__create_issue`) or action tokens. A known harness tool is written in its canonical case (`WebFetch`, not `webfetch`). `decide` (1 to 8, required when `on` is `tool_call` and not allowed for `response`): the tool names the rule asks about, matched exactly and case-sensitively."),
 			"tokens":           irList("`review_before` (required, 1 to 16): tool names or action tokens."),
 			"arg_contains":     irList("`hook_rule`: fire only when the serialised tool input contains every one of these literals (at most 4, each 1 to 64 characters, no tab, newline, double quote or backslash)."),
 			"arg_not_contains": irList("`hook_rule`: fire only when the tool input contains none of these literals (same limits as `arg_contains`)."),
@@ -249,7 +272,7 @@ func (r *guardrailResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Description: "`max_calls` (required): the most calls allowed, 1 to 1000.",
 			},
 			"taint":     irString("`forbid_with` (required): `secrets()` or `pii()`."),
-			"roles":     irList("Every kind but `allowed_models` and `egress_allow`: the lower-case roles the rule applies to (at most 8). Unset, it applies to everyone. On a `hook_rule` these must be workspace roles (`owner`, `admin`, `em`, `developer`, `viewer`; any other name is refused at plan time), enforced at every gate by the role of the member behind the caller's key; a caller whose role is not known is held to the rule. On the front-matter kinds they are the agent role a request names."),
+			"roles":     irList("Every kind but `allowed_models`, `egress_allow` and `decide`: the lower-case roles the rule applies to (at most 8). Unset, it applies to everyone. On a `hook_rule` these must be workspace roles (`owner`, `admin`, `em`, `developer`, `viewer`; any other name is refused at plan time), enforced at every gate by the role of the member behind the caller's key; a caller whose role is not known is held to the rule. On the front-matter kinds they are the agent role a request names."),
 			"models":    irList("`allowed_models` (required, 1 to 32): model ids, compared exactly as the proxy compares them."),
 			"hosts":     irList("`egress_allow` (required, 1 to 32): hosts (`api.example.com`), suffixes (`.example.com`) or IPv4 addresses and CIDRs no wider than /8."),
 			"rationale": irString("`wasm_predicate` (required): why the rule re-asks, at most 480 characters."),
@@ -258,9 +281,29 @@ func (r *guardrailResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Optional:    true,
 				Description: "`wasm_predicate` (required): the predicate in the closed rule DSL, as JSON (`jsonencode({ all = [...] })`). Its verdict is always re-ask.",
 			},
+			"rule_id": irString("`decide` (required): the rule's id, unique within its SOP: a lower-case letter, then up to 47 of `a-z`, `0-9`, `_` or `-`. The IR calls it `id`."),
+			"on":      irString("`decide` (required): what the rule judges, `tool_call` or `response`."),
+			"questions": schema.StringAttribute{
+				CustomType: jsontypes.NormalizedType{},
+				Optional:   true,
+				Description: "`decide` (required): the questions a self-hosted model answers, as JSON (`jsonencode({ exports = { type = \"yes_no\", ask = \"...\" } })`): 1 to 8, " +
+					"each named by a lower-case letter, then up to 31 of `a-z`, `0-9` or `_`, and not `and`, `or`, `not` or `in`. Each has `type` (`yes_no` or `choice`), " +
+					"`ask` (8 to 300 characters, no tab or newline, never about approval), for a `choice` question `options` (2 to 8 distinct names; `none_of_these` " +
+					"is always asked last), and an optional `band`.",
+			},
+			"when": irString("`decide` (required): how the answers combine, at most 256 characters: question names (a `yes_no` question means yes), `q == option`, `q != option`, " +
+				"`q IN (option, ...)`, `NOT`, `AND`, `OR` and parentheses. Every question is used at least once. True refuses, false allows, and an unknown answer escalates."),
+			"band": schema.StringAttribute{
+				CustomType:  jsontypes.NormalizedType{},
+				Optional:    true,
+				Description: "`decide`: the probabilities an answer is read with, as JSON (`jsonencode({ yes_at = 0.85, no_below = 0.15 })`, the default): yes at or above `yes_at` (above 0.5 and below 1), no below `no_below` (above 0 and below `yes_at`), unknown between. A question's own `band` overrides it.",
+			},
+			"escalate": irString("`decide`: what an unknown answer does: `ask` (the default; the harness asks the developer), `review` (the review queue) or `refuse`."),
+			"rollout":  irString("`decide`: `shadow` (the default; the rule only logs) or `enforce`. The author's ceiling: a rule enforces only once it is also pinned to an evaluated model, and runs as shadow until then."),
+			"context":  irList("`decide`, `on = \"tool_call\"` only: extra context the model reads, at most `[\"last_user_turn\"]`."),
 			"target": schema.StringAttribute{
 				Computed:    true,
-				Description: "The enforcer the rule is projected into: `hook_rule`, `sop_front_matter`, `wasm_rule` or `workspace_setting`.",
+				Description: "The enforcer the rule is projected into: `hook_rule`, `sop_front_matter` (a `decide` rule too, as a `decide:` line), `wasm_rule` or `workspace_setting`.",
 			},
 			"status": schema.StringAttribute{
 				Computed:    true,
@@ -348,11 +391,19 @@ func (r *guardrailResource) ValidateConfig(ctx context.Context, req resource.Val
 			}
 			continue
 		}
-		if v.IsUnknown() {
+		// A decide rule is checked whole, below, as every port of it checks it.
+		if v.IsUnknown() || kind == "decide" {
 			continue
 		}
 		for _, msg := range checkIRValue(ctx, f, v) {
 			resp.Diagnostics.AddAttributeError(path.Root(a.attr), "Invalid "+a.attr, msg)
+		}
+	}
+	if kind == "decide" && !resp.Diagnostics.HasError() {
+		if ir, known := m.buildIR(); known {
+			if reason := validateDecideIR(ir); reason != "" {
+				resp.Diagnostics.AddError("Invalid decide rule", reason)
+			}
 		}
 	}
 	if kind == "hook_rule" && !m.Roles.IsNull() && !m.Roles.IsUnknown() {

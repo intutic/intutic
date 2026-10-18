@@ -91,8 +91,17 @@ import { evaluateMcpAllowlist, evaluateMcpRegistry, mcpSnapshotUnverifiedRefusal
 import { OPAQUE_REFUSAL_MESSAGE } from './opaqueRefusal.js'
 import * as imagecheck from './imagecheck.js'
 import * as snapshot from './snapshot.js'
+import { SNAPSHOT_FORMAT } from './decideRecord.js'
 import * as soprules from './soprules.js'
 import { evaluateSsoGroupClearance } from './ssoGroups.js'
+
+/**
+ * Whether this gate evaluates the decide rules a snapshot carries. Until it
+ * does, a decide rule's fallback line refuses its tools, as in a gate that
+ * reads no `@decide` records, so no decide rule goes unenforced. Set only
+ * where the decide tier runs.
+ */
+export const CAN_EVALUATE_DECIDE = false
 
 /** Tools that cannot change anything. They still get the local snapshot check
  *  (Tier A1), but skip the remote gate call (Tier B). */
@@ -213,7 +222,7 @@ export class Gate {
 
   getSnapshot(): snapshot.Snapshot {
     if (this._snapshot === null) {
-      this._snapshot = snapshot.loadSnapshot(this.cfg.workspaceId)
+      this._snapshot = snapshot.loadSnapshot(this.cfg.workspaceId, undefined, { evaluatesDecide: CAN_EVALUATE_DECIDE })
     }
     return this._snapshot
   }
@@ -337,6 +346,13 @@ export class Gate {
     const snap = this.getSnapshot()
     if (snap.state !== 'ok') {
       await this.emit(`snapshot_${snap.state}`, tool, snap.healthMessage)
+    }
+    if (snap.formatVersion > SNAPSHOT_FORMAT) {
+      await this.emit(
+        'snapshot_format_newer',
+        tool,
+        `Policy snapshot format ${snap.formatVersion} is newer than this gate reads (${SNAPSHOT_FORMAT}) — records it does not know are skipped and their fallback lines enforced`,
+      )
     }
   }
 

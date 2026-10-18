@@ -57,8 +57,8 @@ import {
   staticFloorPatterns,
   type GuardPattern,
 } from '../../src/harness/protectedPaths.js'
-import { toRulesLine, REVIEW_REQUESTS_LOG, GATE_PY_LIB } from '../../src/harness/gateBody.js'
-import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
+import { toRulesLine, REVIEW_REQUESTS_LOG, GATE_PY_LIB, GATE_EVALUATES_DECIDE } from '../../src/harness/gateBody.js'
+import { buildSnapshotRules, writeLocalPolicySnapshot, type ServedDecideRule } from '../../src/lib/policySnapshot.js'
 import { createHash } from 'node:crypto'
 
 /**
@@ -93,6 +93,51 @@ function writeRulesFixture(
 
 const home = mkdtempSync(join(tmpdir(), 'intutic-gate-'))
 const roots = new Map<string, string>()
+
+/** A decide rule stamped enforce: a pinned `rollout: enforce` rule on `tools`. */
+function enforcedDecideRule(tools: string[], sopId = 'local:data.md'): ServedDecideRule {
+  return {
+    sopId,
+    sopTitle: 'Production data handling',
+    ruleText: 'Customer data never leaves production except through the approved export job.',
+    ir: JSON.stringify({
+      id: 'prod-data-export',
+      on: 'tool_call',
+      tools,
+      questions: { exports: { type: 'yes_no', ask: 'Does this command copy customer data out of the production database?' } },
+      when: 'exports',
+      rollout: 'enforce',
+    }),
+    pins: [{ modelDigest: 'sha256:5f1c0e2a9b7d', evalRunId: 'eval_local_01', source: 'local' }],
+  }
+}
+
+/**
+ * A snapshot the writer compiles from `rules` (gate body v22: `@format`,
+ * `@decide` records and fallback lines), with `edit` applied to its data
+ * lines and the digest recomputed, so the edit is one a gate verifies.
+ */
+async function decideSnapshotFixture(
+  name: string,
+  rules: ServedDecideRule[],
+  edit: (lines: string[]) => string[] = (l) => l,
+): Promise<string> {
+  const dir = mkdtempSync(join(home, `decide-${name}-`))
+  await writeLocalPolicySnapshot({ snapshotDir: dir, decideRules: rules })
+  const lines = readFileSync(join(dir, 'policy-snapshot.rules'), 'utf8').split('\n').filter((l) => l && !l.startsWith('#'))
+  return writeRulesFixture(join(home, `decide-${name}.rules`), [], '', edit(lines))
+}
+
+/** An `@decide` line with its payload re-encoded after `change`: its rule no longer matches its hash. */
+function tamperDecidePayload(lines: string[], change: (record: Record<string, unknown>) => void): string[] {
+  return lines.map((l) => {
+    if (!l.startsWith('@decide\t')) return l
+    const cols = l.split('\t')
+    const record = JSON.parse(Buffer.from(cols[4]!, 'base64').toString('utf8')) as Record<string, unknown>
+    change(record)
+    return [...cols.slice(0, 4), Buffer.from(JSON.stringify(record), 'utf8').toString('base64')].join('\t')
+  })
+}
 
 /**
  * A snapshot whose observe-only allowlist of github was widened by hand, so
@@ -975,6 +1020,49 @@ for (const g of GATES) {
       ).toBe(false)
     })
 
+    it('refuses through a decide rule\'s fallback line, its record decoded or not, while it evaluates no decide rule (gate body v22)', async () => {
+      // No v22 gate evaluates a decide rule yet, so each keeps every fallback
+      // line in force and refuses the rule's tools exactly as a v21 gate does:
+      // a decoded @decide record alone must never open the call.
+      expect(GATE_EVALUATES_DECIDE[g.runner === 'node' ? 'js' : 'bash']).toBe(false)
+      const reason = 'Decide rule prod-data-export (Production data handling): upgrade to Intutic 3.0 to evaluate this rule'
+      const decoded = await decideSnapshotFixture(`ok-${g.name}`, [enforcedDecideRule(['Bash'])])
+      const r = await runGate(g, { command: 'ls -la' }, { snapshot: decoded })
+      assertCleanExit(g, r, 'Bash under a decoded decide record')
+      expect(wasBlocked(g, r), `${g.name} skipped a fallback line while it evaluates no decide rule:\n${r.stderr}`).toBe(true)
+      expect(r.stderr + r.stdout).toContain(reason)
+      expect(r.stderr + r.stdout).toContain('decide-fallback:prod-data-export@')
+      // A tool no decide rule names still runs.
+      const read = await runGate(g, { file_path: '/tmp/notes.txt' }, { snapshot: decoded, tool: 'Read' })
+      assertCleanExit(g, read, 'Read under a decide record on Bash')
+      expect(wasBlocked(g, read), `${g.name} refused a tool no decide rule names:\n${read.stderr}`).toBe(false)
+
+      // Four columns: no record decodes, in any gate.
+      const short = await decideSnapshotFixture(`short-${g.name}`, [enforcedDecideRule(['Bash'])], (lines) =>
+        lines.map((l) => (l.startsWith('@decide\t') ? l.split('\t').slice(0, 4).join('\t') : l)),
+      )
+      const s = await runGate(g, { command: 'ls -la' }, { snapshot: short })
+      assertCleanExit(g, s, 'Bash under a decide record without its payload')
+      expect(wasBlocked(g, s), `${g.name} skipped a fallback line whose record has no payload`).toBe(true)
+
+      // A line that does not read has a fallback line and no record.
+      const unreadable = await decideSnapshotFixture(`unreadable-${g.name}`, [
+        { ...enforcedDecideRule(['Bash']), ir: '{"id":"half-written","on":"tool_call","tools":["Bash"]}' },
+      ])
+      const u = await runGate(g, { command: 'ls -la' }, { snapshot: unreadable })
+      assertCleanExit(g, u, 'Bash under an unreadable decide line')
+      expect(wasBlocked(g, u), `${g.name} allowed a call an unreadable decide line covers`).toBe(true)
+
+      if (g.runner === 'node') {
+        const edited = await decideSnapshotFixture(`edited-${g.name}`, [enforcedDecideRule(['Bash'])], (lines) =>
+          tamperDecidePayload(lines, (rec) => { (rec.ir as { when: string }).when = 'NOT exports' }),
+        )
+        const e = await runGate(g, { command: 'ls -la' }, { snapshot: edited })
+        assertCleanExit(g, e, 'Bash under a decide record whose rule does not match its hash')
+        expect(wasBlocked(g, e), `${g.name} skipped a fallback line whose record does not decode`).toBe(true)
+      }
+    })
+
     it('holds a call under a hold rule: refused, tool_held recorded, a v1 hold record appended for the daemon; an unrelated call still runs', async () => {
       // The hold tier at EVERY gate, one mechanism. An
       // `action`-subject rule is what a local `review_before: action:deploy`
@@ -1543,6 +1631,20 @@ describe('n8n workflow gate', () => {
     expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a valid snapshot with the record lost its rules').toBe(true)
     writeFileSync(snap, readFileSync(snap, 'utf8').replace('\tgithub\n', '\tgithub,pastebin\n'))
     expect((await runWorkflow(wf([commandNode('rm -rf /')]), snap)).refused, 'a widened allowlist left the snapshot valid').toBe(false)
+  })
+
+  it('refuses through a decide rule\'s fallback line, its record decoded or not, while it evaluates no decide rule (gate body v22)', async () => {
+    expect(GATE_EVALUATES_DECIDE.n8n).toBe(false)
+    const decoded = await decideSnapshotFixture('ok-n8n', [enforcedDecideRule(['executeCommand'])])
+    const d = await runWorkflow(wf([commandNode('ls -la')]), decoded)
+    expect(d.refused, 'skipped a fallback line while it evaluates no decide rule').toBe(true)
+    expect(d.stderr).toContain('decide-fallback:prod-data-export@')
+    const edited = await decideSnapshotFixture('edited-n8n', [enforcedDecideRule(['executeCommand'])], (lines) =>
+      tamperDecidePayload(lines, (rec) => { (rec.ir as { when: string }).when = 'NOT exports' }),
+    )
+    const r = await runWorkflow(wf([commandNode('ls -la')]), edited)
+    expect(r.refused, 'skipped a fallback line whose record does not decode').toBe(true)
+    expect(r.stderr).toContain('decide-fallback:prod-data-export@')
   })
 
   it('refuses a workflow with an MCP client node on an unverified snapshot, observe-only too', async () => {

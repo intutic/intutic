@@ -1,0 +1,302 @@
+"""Policy-snapshot reader — a port of the shipped gate contract.
+
+Source of truth:
+  services/sync-daemon/src/harness/gateBody.ts
+    - RULES_COLUMNS / toRulesLine()  :124-140   the `.rules` line layout
+    - intuticLoadSnapshot()                     parsing + integrity
+    - intuticGate()                  :452       evaluation order
+
+The sync-daemon compiles a workspace's SOPs into `~/.intutic/hooks/policy-snapshot.rules`
+and every harness gate reads it. Three readers exist in the shipped harnesses
+(bash, JS, the Open WebUI filter). This is the SDK's reader, for harnesses that
+have no adapter of their own — it consumes the same documented artifact rather
+than inventing a channel.
+
+Deliberate fidelity points, each of which the upstream comments call out as a
+past defect:
+
+  * Subjects are tested SEPARATELY, never concatenated. Joining them lets a
+    pattern match across the seam between two innocuous values.
+  * The block reason is the rule's own text plus `[id]`. hookEvents.resolveSeverity
+    greps that text for "governance-protected" to file the incident CRITICAL; a
+    generic message silently downgrades it to MEDIUM.
+  * INTUTIC_GUARD_DISABLE=1 drops ONLY the `destructive.*` family, never the
+    compiled floor and never a workspace's own rules.
+  * A snapshot rule whose regex will not compile is dropped, not fatal.
+  * Snapshot health is reported as an event. "Snapshot missing on 400 machines"
+    must not look identical to "snapshot present and healthy".
+
+One honest divergence: the `.rules` regexes are authored as JavaScript regular
+expressions and we compile them with Python's `re`. The two agree on everything
+the shipped rules actually use (character classes, alternation, anchors,
+quantifiers); they differ on lookbehind syntax and some Unicode escapes. A rule
+Python cannot compile is dropped exactly as an uncompilable rule is dropped in
+the JS reader, and reported, so the failure is visible rather than silent.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional
+
+from . import sso_groups as sso
+from . import actions
+from . import mcp_registry
+from . import opaque as opaque_mode
+from .phrases import has_phrase, phrase_text
+from .sequence import compile_sequence, sequence_match
+
+SNAPSHOT_STALE_AFTER_DAYS = 7
+
+# Severity tiers, in the order intuticGate() handles them.
+SEV_SHADOW = "shadow"
+SEV_WARN = "warn"
+SEV_BLOCK = "block"
+# A hold rule (a REQUIRE_APPROVAL: SOP, or a local review_before: token):
+# refuses like a block, but asks a person rather than denying — see hold.py.
+SEV_HOLD = "hold"
+
+
+@dataclass
+class Rule:
+    id: str
+    severity: str
+    subject: str          # tool | command | target | phrase | action | any
+    reason: str
+    pattern: re.Pattern
+    # A sequence rule's compiled steps (flags "s", sequence.py), or None. Its
+    # steps are searched for in order, in linear time, instead of `pattern`,
+    # which re runs in time growing with the square of crafted text.
+    steps: Optional[list] = None
+
+
+@dataclass
+class Snapshot:
+    rules: list[Rule] = field(default_factory=list)
+    digest: str = "none"
+    state: str = "absent"   # ok | absent | invalid | empty | stale
+    workspace_id: str = ""
+    generated_at: str = ""
+    age_days: int = 0
+    dropped_rules: int = 0  # regexes that would not compile
+    # The workspace's SSO-group policy and the member the snapshot was issued
+    # to; None when the workspace has no group policy. On a snapshot that fails
+    # its integrity check the member's groups are None (unknown), so an edited
+    # group list in the file clears nothing.
+    sso_groups: Optional[sso.SsoGroupRecord] = None
+    # The workspace's MCP server registry decisions (the @mcp_registry record)
+    # and its mcpAllowedServers list (@mcp_allowlist), as mcp_registry.py
+    # reads them; None when there are none. None on a snapshot that fails its
+    # integrity check, on which the gate admits no MCP server at all
+    # (mcp_registry.unverified_refusal): a deleted record looks like one
+    # never set, so neither can be vouched for.
+    mcp_registry: Optional[dict] = None
+    mcp_allowlist: Optional[dict] = None
+    # An OPAQUE workspace (the @intervention_mode record): a refusal on
+    # workspace policy tells the agent opaque.OPAQUE_REFUSAL_MESSAGE, not the
+    # rule. Kept on a snapshot that fails its integrity check; it only ever
+    # hides text, never allows a call.
+    opaque: bool = False
+
+    @property
+    def health_message(self) -> str:
+        return {
+            "absent": "No policy snapshot — built-in protections only",
+            "invalid": "Policy snapshot failed its digest or workspace check — dynamic rules dropped except SSO-group refusals, and every MCP call refused",
+            "empty": "Policy snapshot contains no rules — the compile produced nothing",
+            "stale": f"Policy snapshot is {self.age_days} days old and still enforced",
+        }.get(self.state, "")
+
+
+@dataclass
+class Decision:
+    severity: str | None    # None == allow
+    # The rule's reason and [id]; for a hold, the reason alone, which the gate
+    # words as a hold.
+    reason: str = ""
+    rule_id: str = ""
+
+
+def snapshot_path() -> str:
+    return os.environ.get(
+        "INTUTIC_SNAPSHOT_RULES",
+        os.path.join(os.path.expanduser("~"), ".intutic", "hooks", "policy-snapshot.rules"),
+    )
+
+
+def _normalise(value) -> str:
+    """The shipped gates' normalisation (NORMALISE_CONTRACT in protectedPaths.ts).
+
+    Whitespace collapses to one space, and the result is padded with a space at
+    each end: the rules use a plain space, or a non-word character, where they
+    mean the start or end of a word, because POSIX ERE has neither a word boundary nor a
+    usable ``^`` in the emitted shell gates. Without the padding a command that
+    starts with the dangerous verb (``DROP TABLE users``) matched nothing.
+
+    Case is left alone: each rule's own ``i`` flag decides it, and two floor
+    rules key on an uppercase letter without one.
+    """
+    return " " + re.sub(r"\s+", " ", str(value if value is not None else "")) + " "
+
+
+def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
+    """Read the policy snapshot the sync daemon compiled: from `path`, else
+    `INTUTIC_SNAPSHOT_RULES`, else `~/.intutic/hooks/policy-snapshot.rules`.
+
+    A missing file gives an empty snapshot whose `state` is "absent". A
+    snapshot whose digest does not match its rules, or that was compiled for a
+    workspace other than a non-empty `workspace_id`, is "invalid": its rules
+    and MCP records are dropped.
+    """
+    p = path or snapshot_path()
+    snap = Snapshot()
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return snap  # state stays 'absent'
+
+    snap.state = "ok"
+    for line in text.split("\n"):
+        if line.startswith("#digest "):
+            snap.digest = line[8:].strip(); continue
+        if line.startswith("#workspace "):
+            snap.workspace_id = line[11:].strip(); continue
+        if line.startswith("#generated "):
+            snap.generated_at = line[11:].strip(); continue
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(sso.SSO_GROUP_RECORD_TAG + "\t"):
+            snap.sso_groups = sso.decode_record(line)
+            continue
+        if line.startswith(mcp_registry.MCP_REGISTRY_RECORD_TAG + "\t"):
+            snap.mcp_registry = mcp_registry.decode_registry_record(line)
+            continue
+        if line.startswith(mcp_registry.MCP_ALLOWLIST_RECORD_TAG + "\t"):
+            snap.mcp_allowlist = mcp_registry.decode_allowlist_record(line)
+            continue
+        if line.startswith(opaque_mode.INTERVENTION_MODE_RECORD_TAG + "\t"):
+            snap.opaque = opaque_mode.is_opaque_record(line)
+            continue
+        f = line.split("\t")
+        # Column order: id, severity, flags, subject, reason, source(regex).
+        # Flags: i = case-insensitive, s = a sequence rule.
+        if len(f) < 6 or not f[5]:
+            continue
+        flags = re.IGNORECASE if "i" in f[2] else 0
+        try:
+            snap.rules.append(Rule(
+                id=f[0], severity=f[1], subject=f[3] or "any", reason=f[4],
+                pattern=re.compile(f[5], flags),
+                steps=compile_sequence(f[5], flags) if "s" in f[2] else None,
+            ))
+        except re.error:
+            snap.dropped_rules += 1
+            continue
+
+    # Integrity. A digest nobody recomputes is a comment; a workspace id nobody
+    # compares means workspace A's rules get enforced on B's machine and B's
+    # events attribute A's policy to B.
+    body = "\n".join(l for l in text.split("\n") if l and not l.startswith("#"))
+    actual = hashlib.sha256(body.encode("utf-8")).hexdigest()[:32]
+    # No digest line is unverified too: the sync daemon always writes one, so
+    # its absence means the file was edited.
+    if actual != snap.digest:
+        snap.state = "invalid"
+
+    if snap.state == "ok" and snap.workspace_id and workspace_id and snap.workspace_id != workspace_id:
+        snap.state = "invalid"
+
+    # Distinct from absent: the writer always ships the destructive tier, so no
+    # rules means the compile produced nothing.
+    if snap.state == "ok" and not snap.rules:
+        snap.state = "empty"
+
+    if snap.state == "invalid":
+        snap.rules = []   # additive tier — dropping it returns to yesterday's behaviour
+        # Except the group policy, which only ever refuses: it still applies,
+        # to a member whose groups this gate can no longer vouch for.
+        if snap.sso_groups is not None:
+            snap.sso_groups = sso.SsoGroupRecord(snap.sso_groups.policy, None, None, snap.sso_groups.issued_at)
+        # Neither MCP record can be vouched for: the gate admits no MCP server.
+        snap.mcp_registry = None
+        snap.mcp_allowlist = None
+
+    if snap.state == "ok" and snap.generated_at:
+        try:
+            t = datetime.fromisoformat(snap.generated_at.replace("Z", "+00:00"))
+            snap.age_days = max(0, (datetime.now(timezone.utc) - t).days)
+            if snap.age_days > SNAPSHOT_STALE_AFTER_DAYS:
+                snap.state = "stale"   # staleness governs alerting, not enforcement
+        except ValueError:
+            pass
+
+    return snap
+
+
+def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
+             guard_disabled: bool = False) -> Decision:
+    """Evaluate one tool call against the snapshot. First match wins."""
+    rules = list(snap.rules)
+    if guard_disabled:
+        # Only the destructive family is skippable. The alternative a blocked
+        # developer reaches for is chflags nouchg on the hook itself, which is
+        # strictly worse; every use is recorded by the caller.
+        rules = [r for r in rules if not r.id.startswith("destructive.")]
+
+    n_tool, n_command, n_target = _normalise(tool_name), _normalise(command), _normalise(target)
+    words = None
+    # The command's action tokens, space-padded as the hook gates write them,
+    # so a review_before hold on action:deploy matches whole tokens. Classified
+    # with the same needles and phrase matcher as the hook gates and actions.rs.
+    action_tokens = None
+
+    for rule in rules:
+        if rule.subject == "phrase":
+            # The source is `|`-separated phrases matched as words against the
+            # raw command (phrases.py), not a regex: a backtracking regex for
+            # "whatever separates the words" is super-linear on crafted input.
+            if words is None:
+                words = phrase_text(command)
+            subjects = [n_command] if any(
+                has_phrase(words, p, True) for p in rule.pattern.pattern.split("|")
+            ) else []
+        elif rule.subject == "action":
+            if action_tokens is None:
+                action_tokens = " " + " ".join(actions.classify(tool_name, {"command": command})) + " "
+            subjects = [action_tokens]
+        elif rule.subject == "tool":
+            subjects = [n_tool]
+        elif rule.subject == "command":
+            subjects = [n_command]
+        elif rule.subject == "target":
+            subjects = [n_target]
+        else:
+            subjects = [n_command, n_target]
+
+        for subject in subjects:
+            if rule.subject != "phrase" and not (
+                sequence_match(rule.steps, subject) if rule.steps is not None else rule.pattern.search(subject)
+            ):
+                continue
+            if rule.severity == SEV_SHADOW:
+                return Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id)
+            if rule.severity == SEV_WARN:
+                verb = n_command.strip().split(" ")[0] if n_command else ""
+                return Decision(SEV_WARN, f"{rule.reason} [{rule.id}] verb={verb}", rule.id)
+            if rule.severity == SEV_HOLD:
+                return Decision(SEV_HOLD, rule.reason, rule.id)
+            # Any other severity blocks, as an unknown one does in the shipped
+            # gates: a severity this reader does not know must not allow. The
+            # rule's own reason, not a generic one — resolveSeverity reads it.
+            return Decision(SEV_BLOCK, f"{rule.reason} [{rule.id}]", rule.id)
+
+    return Decision(None)
+
+
+def guard_disabled_from_env() -> bool:
+    return os.environ.get("INTUTIC_GUARD_DISABLE") == "1"

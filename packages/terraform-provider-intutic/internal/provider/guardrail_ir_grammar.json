@@ -47,6 +47,18 @@
     },
     "egress_allow": {
       "hosts": { "type": "list", "required": true, "item": "host", "minItems": 1, "maxItems": 32 }
+    },
+    "decide": {
+      "id": { "type": "string", "required": true },
+      "title": { "type": "string", "required": false },
+      "on": { "type": "string", "required": true },
+      "tools": { "type": "list", "required": false, "minItems": 1, "maxItems": 8 },
+      "questions": { "type": "json", "required": true },
+      "when": { "type": "string", "required": true },
+      "band": { "type": "json", "required": false },
+      "escalate": { "type": "string", "required": false },
+      "rollout": { "type": "string", "required": false },
+      "context": { "type": "list", "required": false, "maxItems": 1 }
     }
   },
   "actionTokens": [

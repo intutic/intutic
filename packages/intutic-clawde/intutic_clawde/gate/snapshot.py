@@ -46,6 +46,7 @@ from typing import Optional
 from . import sso_groups as sso
 from . import actions
 from . import mcp_registry
+from . import decide_record
 from . import opaque as opaque_mode
 from .phrases import has_phrase, phrase_text
 from .sequence import compile_sequence, sequence_match
@@ -101,6 +102,14 @@ class Snapshot:
     # rule. Kept on a snapshot that fails its integrity check; it only ever
     # hides text, never allows a call.
     opaque: bool = False
+    # The snapshot format its @format record names; 1 without one.
+    format_version: int = 1
+    # The decide rules whose @decide records decoded, rule and hash checked,
+    # in snapshot order (decide_record.py). Each one's fallback line is
+    # skipped only for a caller that evaluates decide rules (load_snapshot's
+    # evaluates_decide); a record that does not decode is not here, and its
+    # fallback line refuses. Empty on a snapshot that fails its integrity check.
+    decide_rules: list = field(default_factory=list)
 
     @property
     def health_message(self) -> str:
@@ -150,7 +159,7 @@ def _normalise(value) -> str:
     return " " + re.sub(r"\s+", " ", str(value if value is not None else "")) + " "
 
 
-def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
+def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_decide: bool = False) -> Snapshot:
     """Read the policy snapshot the sync daemon compiled: from `path`, else
     `INTUTIC_SNAPSHOT_RULES`, else `~/.intutic/hooks/policy-snapshot.rules`.
 
@@ -158,6 +167,11 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
     snapshot whose digest does not match its rules, or that was compiled for a
     workspace other than a non-empty `workspace_id`, is "invalid": its rules
     and MCP records are dropped.
+
+    `evaluates_decide`: the caller evaluates the decide rules the records
+    carry. Only then is a decoded record's fallback line skipped; otherwise the
+    fallback line refuses the rule's tools, exactly as in a gate that reads no
+    records.
     """
     p = path or snapshot_path()
     snap = Snapshot()
@@ -189,6 +203,15 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         if line.startswith(opaque_mode.INTERVENTION_MODE_RECORD_TAG + "\t"):
             snap.opaque = opaque_mode.is_opaque_record(line)
             continue
+        if line.startswith(decide_record.SNAPSHOT_FORMAT_RECORD_TAG + "\t"):
+            fmt = decide_record.decode_snapshot_format_record(line)
+            snap.format_version = fmt if fmt is not None else snap.format_version
+            continue
+        if line.startswith(decide_record.DECIDE_RECORD_TAG + "\t"):
+            record = decide_record.decode_decide_record(line)
+            if record is not None:
+                snap.decide_rules.append(record)
+            continue
         f = line.split("\t")
         # Column order: id, severity, flags, subject, reason, source(regex).
         # Flags: i = case-insensitive, s = a sequence rule.
@@ -204,6 +227,13 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         except re.error:
             snap.dropped_rules += 1
             continue
+
+    # A fallback line stands in for a decide rule a gate cannot evaluate. A
+    # caller that evaluates the rule from its record skips the line, but only
+    # when that record decoded: any other line with the prefix is enforced.
+    if evaluates_decide and snap.decide_rules:
+        skip = {r["fallbackId"] for r in snap.decide_rules}
+        snap.rules = [r for r in snap.rules if not (r.id.startswith(decide_record.DECIDE_FALLBACK_PREFIX) and r.id in skip)]
 
     # Integrity. A digest nobody recomputes is a comment; a workspace id nobody
     # compares means workspace A's rules get enforced on B's machine and B's
@@ -232,6 +262,8 @@ def load_snapshot(workspace_id: str = "", path: str | None = None) -> Snapshot:
         # Neither MCP record can be vouched for: the gate admits no MCP server.
         snap.mcp_registry = None
         snap.mcp_allowlist = None
+        # The decide records go with the rest of the dynamic tier.
+        snap.decide_rules = []
 
     if snap.state == "ok" and snap.generated_at:
         try:

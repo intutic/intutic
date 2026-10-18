@@ -9,6 +9,8 @@ describing defects that were actually shipped.
 from __future__ import annotations
 
 import hashlib
+import json
+from pathlib import Path
 
 import pytest
 
@@ -235,3 +237,64 @@ class TestNormalisation:
 
     def test_case_is_not_folded_for_a_rule_without_the_i_flag(self, s):
         assert snap.evaluate("Bash", "", "claude_code_hooks=0 claude", s).severity is None
+
+
+_DECIDE = json.loads((Path(__file__).resolve().parents[2] / "shared-types" / "fixtures" / "decide-vectors.json").read_text(encoding="utf-8"))["record"]
+
+
+class TestDecideRecords:
+    """Snapshot format 2: the @format and @decide records, and the fallback lines."""
+
+    RECORD = _DECIDE["valid"][0]["line"]
+    DAMAGED = next(c["line"] for c in _DECIDE["damaged"] if c["name"] == "a word of the rule changed under the same hash")
+    FB = "decide-fallback:prod-data-export@6bcd6b021e7d"
+    FALLBACK = line(FB, "block", "-", "tool", "Decide rule prod-data-export (Production data handling): upgrade to Intutic 3.0 to evaluate this rule", " (Bash) ")
+    OTHER = line("d.rm", "block", "-", "command", "Destructive", "rm -rf")
+
+    def test_carries_a_decoded_record_and_keeps_its_fallback_line_for_a_caller_that_does_not_evaluate(self, tmp_path):
+        s = snap.load_snapshot(WS, _rules_file(tmp_path, ["@format\t2", self.RECORD, self.FALLBACK, self.OTHER]))
+        assert s.state == "ok" and s.format_version == 2
+        assert [r["ref"] for r in s.decide_rules] == ["local:data.md#prod-data-export"]
+        assert [r.id for r in s.rules] == [self.FB, "d.rm"]
+        d = snap.evaluate("Bash", "", "ls -la", s)
+        assert d.severity == snap.SEV_BLOCK and d.rule_id == self.FB
+
+    def test_skips_a_decoded_records_fallback_line_only_for_a_caller_that_evaluates(self, tmp_path):
+        s = snap.load_snapshot(WS, _rules_file(tmp_path, ["@format\t2", self.RECORD, self.FALLBACK, self.OTHER]),
+                               evaluates_decide=True)
+        assert [r.id for r in s.rules] == ["d.rm"]
+        assert snap.evaluate("Bash", "", "ls -la", s).severity is None
+
+    def test_a_gate_that_does_not_evaluate_decide_rules_refuses_through_the_fallback_line(self, tmp_path, monkeypatch):
+        from intutic_clawde.gate import gate as gate_mod
+
+        assert gate_mod.CAN_EVALUATE_DECIDE is False
+        monkeypatch.setenv("INTUTIC_SNAPSHOT_RULES", _rules_file(tmp_path, ["@format\t2", self.RECORD, self.FALLBACK, self.OTHER]))
+        g = gate_mod.Gate(gate_mod.GateConfig(repo_root=str(tmp_path), workspace_id=WS, use_hook_gate=False, use_sop_rules=False))
+        assert len(g.snapshot().decide_rules) == 1
+        assert [r.id for r in g.snapshot().rules] == [self.FB, "d.rm"]
+        with pytest.raises(gate_mod.IntuticGateRefusal) as refused:
+            g.guard("Bash", {"command": "ls -la"})
+        assert f"[{self.FB}]" in refused.value.reason
+
+    def test_keeps_the_fallback_line_when_the_record_does_not_decode(self, tmp_path):
+        s = snap.load_snapshot(WS, _rules_file(tmp_path, ["@format\t2", self.DAMAGED, self.FALLBACK, self.OTHER]),
+                               evaluates_decide=True)
+        assert s.decide_rules == []
+        d = snap.evaluate("Bash", "", "ls -la", s)
+        assert d.severity == snap.SEV_BLOCK and d.rule_id == self.FB
+
+    def test_enforces_a_fallback_line_no_record_names(self, tmp_path):
+        orphan = line("decide-fallback:unreadable.1@6bcd6b021e7d", "block", "-", "tool", "Decide rule x does not read", " [^ ]+ ")
+        s = snap.load_snapshot(WS, _rules_file(tmp_path, [self.RECORD, self.FALLBACK, orphan]), evaluates_decide=True)
+        assert [r.id for r in s.rules] == ["decide-fallback:unreadable.1@6bcd6b021e7d"]
+        assert s.format_version == 1
+
+    def test_drops_the_records_on_a_snapshot_that_fails_its_check(self, tmp_path):
+        s = snap.load_snapshot(WS, _rules_file(tmp_path, ["@format\t2", self.RECORD, self.FALLBACK], digest="f" * 32))
+        assert s.state == "invalid" and s.decide_rules == [] and s.rules == []
+
+    def test_reads_a_newer_format_and_enforces_what_it_reads(self, tmp_path):
+        s = snap.load_snapshot(WS, _rules_file(tmp_path, ["@format\t3", "@novel\trecord", self.FALLBACK]))
+        assert s.format_version == 3
+        assert snap.evaluate("Bash", "", "ls", s).rule_id == self.FB

@@ -14,6 +14,93 @@
 
 ## Interfaces
 
+### DecideBand
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-no_below"></a> `no_below` | `number` |
+| <a id="property-yes_at"></a> `yes_at` | `number` |
+
+***
+
+### DecidePin
+
+A calibration a rule may enforce under: the model digest it was evaluated on, and what the evaluation fitted.
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-band"></a> `band?` | `object` |
+| `band.no_below` | `number` |
+| `band.yes_at` | `number` |
+| <a id="property-combiner"></a> `combiner?` | `object` |
+| `combiner.bias` | `number` |
+| `combiner.weights` | `Record`\<`string`, `number`\> |
+| <a id="property-evalrunid"></a> `evalRunId` | `string` |
+| <a id="property-modeldigest"></a> `modelDigest` | `string` |
+| <a id="property-source"></a> `source` | `"local"` \| `"server"` |
+| <a id="property-temperature"></a> `temperature?` | `Record`\<`string`, `number`\> |
+
+***
+
+### DecideQuestion
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-ask"></a> `ask` | `string` | - |
+| <a id="property-band-1"></a> `band?` | [`DecideBand`](#decideband) | - |
+| <a id="property-options"></a> `options?` | `string`[] | `choice` only, as written; decideOptions places `none_of_these`. |
+| <a id="property-type"></a> `type` | `"yes_no"` \| `"choice"` | - |
+
+***
+
+### DecideRecord
+
+One `@decide` record's payload.
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-fallbackid"></a> `fallbackId` | `string` \| `null` | The paired fallback line's id; null when the rule is stamped shadow and has none. |
+| <a id="property-ir"></a> `ir` | [`DecideRule`](#deciderule) | The rule as its `decide:` line carries it. |
+| <a id="property-pins"></a> `pins` | [`DecidePin`](#decidepin)[] | - |
+| <a id="property-ref"></a> `ref` | `string` | `<sopId>#<rule id>`. |
+| <a id="property-rollout"></a> `rollout` | `"shadow"` \| `"enforce"` | - |
+| <a id="property-rulehash"></a> `ruleHash` | `string` | - |
+| <a id="property-ruletext"></a> `ruleText` | `string` | - |
+| <a id="property-soptitle"></a> `sopTitle` | `string` | - |
+| <a id="property-stampedby"></a> `stampedBy` | [`DecideStamp`](#decidestamp) | - |
+| <a id="property-v"></a> `v` | `1` | - |
+
+***
+
+### DecideRule
+
+A rule as its front-matter line carries it: the IR without `kind`.
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-band-2"></a> `band?` | [`DecideBand`](#decideband) |
+| <a id="property-context"></a> `context?` | `"last_user_turn"`[] |
+| <a id="property-escalate"></a> `escalate?` | `"ask"` \| `"review"` \| `"refuse"` |
+| <a id="property-id"></a> `id` | `string` |
+| <a id="property-on"></a> `on` | `"tool_call"` \| `"response"` |
+| <a id="property-questions"></a> `questions` | `Record`\<`string`, [`DecideQuestion`](#decidequestion)\> |
+| <a id="property-rollout-1"></a> `rollout?` | `"shadow"` \| `"enforce"` |
+| <a id="property-title"></a> `title?` | `string` |
+| <a id="property-tools"></a> `tools?` | `string`[] |
+| <a id="property-when"></a> `when` | `string` |
+
+***
+
 ### Decision
 
 #### Properties
@@ -123,7 +210,7 @@ A parsed container image reference.
 | <a id="property-digest"></a> `digest` | `string` \| `null` | `sha256:...` or null |
 | <a id="property-raw"></a> `raw` | `string` | - |
 | <a id="property-repository"></a> `repository` | `string` | registry/namespace/name, no tag, no digest |
-| <a id="property-source"></a> `source` | `string` | which manifest file it came from |
+| <a id="property-source-1"></a> `source` | `string` | which manifest file it came from |
 | <a id="property-tag"></a> `tag` | `string` \| `null` | - |
 
 ***
@@ -143,6 +230,16 @@ Port of `intutic_headers()` from
 
 ***
 
+### LoadSnapshotOptions
+
+#### Properties
+
+| Property | Type | Description |
+| ------ | ------ | ------ |
+| <a id="property-evaluatesdecide"></a> `evaluatesDecide?` | `boolean` | The caller evaluates the decide rules the records carry. Only then is a decoded record's fallback line skipped; otherwise the fallback line refuses the rule's tools, exactly as in a gate that reads no records. |
+
+***
+
 ### McpAllowlistRecord
 
 The workspace's `mcpAllowedServers` list as the gates apply it: only the
@@ -155,7 +252,7 @@ with no list has no record.
 | Property | Type |
 | ------ | ------ |
 | <a id="property-servers"></a> `servers` | `string`[] |
-| <a id="property-severity-1"></a> `severity` | `"block"` \| `"shadow"` |
+| <a id="property-severity-1"></a> `severity` | `"shadow"` \| `"block"` |
 
 ***
 
@@ -181,7 +278,7 @@ What the registry decides, per workspace. The MCP proxy's `McpRegistryPolicy` ha
 
 | Property | Type | Description |
 | ------ | ------ | ------ |
-| <a id="property-id"></a> `id` | `string` | - |
+| <a id="property-id-1"></a> `id` | `string` | - |
 | <a id="property-pattern"></a> `pattern` | `RegExp` | - |
 | <a id="property-reason-2"></a> `reason` | `string` | - |
 | <a id="property-severity-2"></a> `severity` | `string` | - |
@@ -214,7 +311,7 @@ the mode when there is no policy snapshot to read it from.
 | ------ | ------ |
 | <a id="property-action"></a> `action` | `string` |
 | <a id="property-argpattern"></a> `argPattern` | `string` \| `null` |
-| <a id="property-id-1"></a> `id` | `string` |
+| <a id="property-id-2"></a> `id` | `string` |
 | <a id="property-reason-3"></a> `reason` | `string` |
 | <a id="property-toolpattern"></a> `toolPattern` | `string` |
 
@@ -272,6 +369,16 @@ type AnyFn = (...args) => any;
 #### Returns
 
 `any`
+
+***
+
+### DecideStamp
+
+```ts
+type DecideStamp = "rule" | "local-disable" | "server-shadow" | "silent-log" | "no-pins";
+```
+
+Why a rule's stamped rollout is what it is. Only `rule` can stamp `enforce`.
 
 ***
 
@@ -442,7 +549,7 @@ How long the hook script the sandbox bootstrap writes may run, from process star
 ### GATE\_REFUSAL\_CODES
 
 ```ts
-const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "INSUFFICIENT_SCOPE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
+const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "INSUFFICIENT_SCOPE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
 ```
 
 Every `code` an [IntuticGateRefusal](classes/IntuticGateRefusal.md) can carry: the tier that refused,
@@ -963,7 +1070,11 @@ True when this call runs a test suite.
 ### loadSnapshot()
 
 ```ts
-function loadSnapshot(workspaceId?, path?): Snapshot;
+function loadSnapshot(
+   workspaceId?, 
+   path?, 
+   opts?
+): Snapshot;
 ```
 
 Read the policy snapshot the sync daemon compiled: from `path`, else
@@ -978,6 +1089,7 @@ was compiled for a workspace other than a non-empty `workspaceId`, is
 | ------ | ------ | ------ |
 | `workspaceId` | `string` | `''` |
 | `path?` | `string` | `undefined` |
+| `opts?` | [`LoadSnapshotOptions`](#loadsnapshotoptions) | `{}` |
 
 #### Returns
 

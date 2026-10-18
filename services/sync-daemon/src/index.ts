@@ -89,6 +89,8 @@ export {
   writePolicySnapshot,
   writeLocalPolicySnapshot,
   localResolvedPolicy,
+  localDecideRules,
+  DEFAULT_DECIDE_DIR,
   offlineHoldReason,
   snapshotRulesVerify,
   fetchResolvedPolicy,
@@ -100,7 +102,7 @@ export {
   SNAPSHOT_RULES,
   VERIFIED_SNAPSHOT_DIR,
 } from './lib/policySnapshot.js'
-export type { LocalHoldMode } from './lib/policySnapshot.js'
+export type { LocalHoldMode, ServedDecideRule } from './lib/policySnapshot.js'
 export { findGateFile, GATE_ARTIFACTS } from './harness/gateArtifacts.js'
 export { runComplianceProbes } from './lib/complianceProbes.js'
 export { getActiveAgentProcesses } from './lib/processPoller.js'

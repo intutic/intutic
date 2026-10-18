@@ -237,6 +237,53 @@ resource "intutic_guardrail" "g" {
   kind  = "deny_tools"
   tools = ["WebFetch"]
 }`, `leading or trailing whitespace`},
+		{"guardrail: a decide rule's required attribute", `
+resource "intutic_guardrail" "g" {
+  name    = "x"
+  kind    = "decide"
+  rule_id = "leak"
+  on      = "response"
+  when    = "leak"
+}`, `kind "decide" requires questions`},
+		{"guardrail: a decide rule takes no roles", `
+resource "intutic_guardrail" "g" {
+  name      = "x"
+  kind      = "decide"
+  rule_id   = "leak"
+  on        = "response"
+  questions = jsonencode({ leak = { type = "yes_no", ask = "Does the response reveal a credential?" } })
+  when      = "leak"
+  roles     = ["developer"]
+}`, `kind "decide" does not take roles`},
+		{"guardrail: a tool_call decide rule names its tools", `
+resource "intutic_guardrail" "g" {
+  name      = "x"
+  kind      = "decide"
+  rule_id   = "export"
+  on        = "tool_call"
+  questions = jsonencode({ exports = { type = "yes_no", ask = "Does this command copy production data?" } })
+  when      = "exports"
+}`, `decide: tools is required for on: tool_call and not allowed for on: response`},
+		{"guardrail: a decide question never asks about approval", `
+resource "intutic_guardrail" "g" {
+  name      = "x"
+  kind      = "decide"
+  rule_id   = "export"
+  on        = "tool_call"
+  tools     = ["Bash"]
+  questions = jsonencode({ ok = { type = "yes_no", ask = "Has a lead approved this export?" } })
+  when      = "ok"
+}`, `decide: ok asks about approval`},
+		{"guardrail: a decide band is read whole", `
+resource "intutic_guardrail" "g" {
+  name      = "x"
+  kind      = "decide"
+  rule_id   = "leak"
+  on        = "response"
+  questions = jsonencode({ leak = { type = "yes_no", ask = "Does the response reveal a credential?" } })
+  when      = "leak"
+  band      = jsonencode({ yes_at = 0.6, no_below = 0.7 })
+}`, `decide: band: no_below must be below yes_at`},
 		{"rotation triggers on a rule with no signing secret", `
 resource "intutic_notification_rule" "r" {
   event_type               = "incident.created"

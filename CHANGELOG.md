@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Groundwork for decide rules.** SOP front matter now accepts `decide:`
+  lines, one JSON rule per line. A rule asks a self-hosted decision model a
+  few yes/no or multiple-choice questions about a proposed tool call, and
+  combines the answers: true refuses, false allows, unknown escalates.
+  - **Readers:** the TypeScript, Python, Rust and Terraform readers parse,
+    validate and hash these rules identically.
+  - **Engine client:** reaches a self-hosted engine (an OpenAI-compatible
+    server with token log-probabilities, a System One server, or an
+    OpenAI Decisions-format server) and refuses hosted decision APIs.
+  - **Not enforced yet:** no gate evaluates a decide rule yet. Each rule
+    reaches the policy snapshot with a fallback line, which every gate, old
+    and new, enforces as a plain refusal of the tools the rule names.
+
 ### Fixed
 
 - **The SDK gates no longer let a shadow or warn match hide a later block.**

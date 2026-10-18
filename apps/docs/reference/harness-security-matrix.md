@@ -61,6 +61,9 @@ rule id in brackets.
 | `GATE_DEADLINE` | The gate did not finish deciding within its deadline, a second under its harness's hook timeout and at most 9 seconds, and refuses rather than let the hook timeout allow the call |
 | `UNREADABLE_CALL` | The hook received no tool call it could read, and refuses rather than allow a call it cannot evaluate |
 | `GATE_CRASHED` | The gate failed while deciding, and refuses rather than allow an unevaluated call; also a chaos run's `INTUTIC_CHAOS_PLAN` that is set but unreadable |
+| `DECIDE_REFUSED` | The rule asked its questions of the self-hosted decide engine and the answers made its `when` true |
+| `DECIDE_ESCALATED` | The answers to a decide rule's questions fell between its bands or disagreed across option orders, and the harness cannot ask a person, so the call is refused until a person decides |
+| `GOVERNANCE_UNAVAILABLE` | An enforcing decide rule could not be evaluated: its engine is not configured, is not self-hosted, did not answer in time, gave no usable probabilities or failed its known-answer canary, or more than four enforcing decide rules name the tool |
 
 ### Vector D — Response Gate {#vector-d--response-gate}
 

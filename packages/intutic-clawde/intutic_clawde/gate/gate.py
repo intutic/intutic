@@ -73,7 +73,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..errors import ClawdeError
-from . import chaos, imagecheck, mcp_registry, snapshot, soprules, sso_groups
+from . import chaos, decide_record, imagecheck, mcp_registry, snapshot, soprules, sso_groups
 from .actions import is_deploy, touches_infra
 from .client import INSUFFICIENT_SCOPE, GateClient
 from .hold import hold_key, hold_message, request_hold
@@ -84,6 +84,13 @@ from .opaque import OPAQUE_REFUSAL_MESSAGE
 # Tools that cannot change anything. They still get the local snapshot check
 # (Tier A), but skip the remote gate call (Tier B) — see Gate.guard().
 READ_ONLY_TOOLS = frozenset({"read_file", "list_files", "read", "cat", "view"})
+
+
+# Whether this gate evaluates the decide rules a snapshot carries. Until it
+# does, a decide rule's fallback line refuses its tools, as in a gate that
+# reads no @decide records, so no decide rule goes unenforced. Set only where
+# the decide tier runs.
+CAN_EVALUATE_DECIDE = False
 
 
 #: Every `code` an IntuticGateRefusal can carry: the tier that refused, or for
@@ -118,6 +125,11 @@ GATE_REFUSAL_CODES = (
     imagecheck.E_UNKNOWN_IMAGE,
     imagecheck.E_DIGEST_MISMATCH,
     imagecheck.E_MANIFEST_UNPARSEABLE,
+    # A decide rule (the Decide tier, after every deterministic tier allowed
+    # the call): refused, escalated with no way to ask, or its engine unavailable.
+    "DECIDE_REFUSED",
+    "DECIDE_ESCALATED",
+    "GOVERNANCE_UNAVAILABLE",
 )
 
 
@@ -207,7 +219,7 @@ class Gate:
 
     def snapshot(self) -> snapshot.Snapshot:
         if self._snapshot is None:
-            self._snapshot = snapshot.load_snapshot(self.cfg.workspace_id)
+            self._snapshot = snapshot.load_snapshot(self.cfg.workspace_id, evaluates_decide=CAN_EVALUATE_DECIDE)
         return self._snapshot
 
     def policy(self) -> dict:
@@ -288,6 +300,14 @@ class Gate:
         snap = self.snapshot()
         if snap.state != "ok":
             self._emit(f"snapshot_{snap.state}", tool, snap.health_message)
+        if snap.format_version > decide_record.SNAPSHOT_FORMAT:
+            self._emit(
+                "snapshot_format_newer",
+                tool,
+                f"Policy snapshot format {snap.format_version} is newer than this gate reads "
+                f"({decide_record.SNAPSHOT_FORMAT}) — records it does not know are skipped and their "
+                "fallback lines enforced",
+            )
 
     def _chaos_state(self) -> tuple:
         """A chaos run's (plan, events, error), from INTUTIC_CHAOS_PLAN and

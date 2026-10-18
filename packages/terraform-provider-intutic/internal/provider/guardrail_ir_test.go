@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func TestTokensAreHeldToTheValidatorsVocabulary(t *testing.T) {
 
 func TestEveryKindButNoneIsAuthorable(t *testing.T) {
 	kinds := guardrailKinds()
-	if len(kinds) != 10 {
+	if len(kinds) != 11 || !slices.Contains(kinds, "decide") {
 		t.Fatalf("kinds = %v", kinds)
 	}
 	for _, k := range kinds {
@@ -109,7 +110,7 @@ func TestSameIRReadsPredicatesSemantically(t *testing.T) {
 		return guardrailModel{Kind: types.StringValue("wasm_predicate"), Predicate: jsontypes.NewNormalizedValue(pred),
 			Tools: types.ListNull(types.StringType), Tokens: types.ListNull(types.StringType), ArgContains: types.ListNull(types.StringType),
 			ArgNotContains: types.ListNull(types.StringType), Roles: types.ListNull(types.StringType), Models: types.ListNull(types.StringType),
-			Hosts: types.ListNull(types.StringType)}
+			Hosts: types.ListNull(types.StringType), Context: types.ListNull(types.StringType)}
 	}
 	a, b := base(`{"all":[{"field":"depth","op":"atLeast","value":3}]}`), base("{ \"all\": [ { \"value\": 3, \"op\": \"atLeast\", \"field\": \"depth\" } ] }")
 	if !sameIR(&a, &b) {
@@ -137,5 +138,62 @@ func TestHookRuleRolesAreWorkspaceRoles(t *testing.T) {
 		if checkHookRuleRole(role) == "" {
 			t.Errorf("%q accepted as a workspace role", role)
 		}
+	}
+}
+
+// A decide guardrail's attributes build the IR every port of the rule
+// validates, with rule_id as the IR's id; a band respaced or reordered is the
+// same rule, a band moved is not.
+func TestDecideIRBuildsFromItsAttributes(t *testing.T) {
+	base := func(band string) guardrailModel {
+		return guardrailModel{
+			Kind:      types.StringValue("decide"),
+			RuleID:    types.StringValue("prod-data-export"),
+			On:        types.StringValue("tool_call"),
+			Tools:     stringList([]string{"Bash"}),
+			Questions: jsontypes.NewNormalizedValue(`{"exports":{"type":"yes_no","ask":"Does this command copy customer data out of the production database?"},"dest":{"type":"choice","ask":"Where does the data go?","options":["local_file","cloud_bucket","external_host"]}}`),
+			When:      types.StringValue("exports AND dest != none_of_these"),
+			Band:      jsontypes.NewNormalizedValue(band),
+			Rollout:   types.StringValue("shadow"),
+			// A list's zero value has no element type and equals nothing.
+			Tokens: types.ListNull(types.StringType), ArgContains: types.ListNull(types.StringType), ArgNotContains: types.ListNull(types.StringType),
+			Roles: types.ListNull(types.StringType), Models: types.ListNull(types.StringType), Hosts: types.ListNull(types.StringType),
+			Context: types.ListNull(types.StringType),
+		}
+	}
+	m := base(`{"yes_at":0.85,"no_below":0.15}`)
+	ir, ok := m.buildIR()
+	if !ok {
+		t.Fatal("known model must build")
+	}
+	if ir["id"] != "prod-data-export" || ir["kind"] != "decide" {
+		t.Fatalf("ir = %v", ir)
+	}
+	if reason := validateDecideIR(ir); reason != "" {
+		t.Fatal(reason)
+	}
+	// The IR the API is sent hashes as the vectors' worked example does.
+	delete(ir, "kind")
+	text, _ := json.Marshal(ir)
+	d := parseDecideLine(string(text))
+	if hash, _ := decideRuleHash(d.rule); hash != "be5cbda58b93cf90e90d1b994c32331b05459aefba564ab9e2d190396a1b3291" {
+		t.Fatalf("ruleHash = %s", hash)
+	}
+
+	a, b := base(`{"yes_at":0.85,"no_below":0.15}`), base(`{ "no_below": 0.15, "yes_at": 0.85 }`)
+	if !sameIR(&a, &b) {
+		t.Fatal("a respaced, reordered band is the same rule")
+	}
+	c := base(`{"yes_at":0.9,"no_below":0.15}`)
+	if sameIR(&a, &c) {
+		t.Fatal("a moved band is a different rule")
+	}
+
+	w := base(`{"yes_at":0.85,"no_below":0.15}`)
+	w.Questions = jsontypes.NewNormalizedValue(`{"exports":{"type":"yes_no","ask":"Does this command need permission?"}}`)
+	w.When = types.StringValue("exports")
+	ir, _ = w.buildIR()
+	if reason := validateDecideIR(ir); reason != "decide: exports asks about approval; approval comes from the harness ask or the review queue, never from a question" {
+		t.Fatalf("reason = %q", reason)
 	}
 }

@@ -65,6 +65,12 @@ import {
   ARGUMENTS_SIZE_LIMIT,
   CHAOS_GATE_JS_SOURCE,
   COMMAND_SIZE_LIMIT,
+  DECIDE_FALLBACK_PREFIX,
+  DECIDE_JS_SOURCE,
+  DECIDE_RECORD_JS_SOURCE,
+  DECIDE_RECORD_TAG,
+  SNAPSHOT_FORMAT,
+  SNAPSHOT_FORMAT_RECORD_TAG,
   gateDeadlineMs,
   type HookGateHarness,
   MCP_ALLOWLIST_JS_SOURCE,
@@ -276,8 +282,39 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * audit line keeps the full reason. A TRANSPARENT or SILENT_LOG snapshot has no
  * such line and is unchanged. A v20 gate skips the line, as it skips any
  * two-column one, and names the rule.
+ *
+ * v22: decide rules in the snapshot (snapshot format 2). A snapshot carrying
+ * one starts with an `@format` data line (tag and `2`) and holds an
+ * `@decide` record per tool-call rule (five columns: tag, fallback line id or
+ * `-`, stamped rollout, comma-joined tools, base64 of the rule's record;
+ * `decideRecord.ts` in `@intutic/shared-types`), inside the digest. Each rule
+ * stamped `enforce` also has a fallback line, an ordinary `block` rule on its
+ * tools with an id starting `decide-fallback:`, placed right after the
+ * SSO-group rules. The JS gates decode each record, rule and hash checked
+ * (`decide.ts`, emitted as source), and carry the ones that decode as
+ * `decideRules`; the bash gates keep the records whole for the CLI. No v22
+ * gate evaluates a decide rule yet ({@link GATE_EVALUATES_DECIDE} is false
+ * for every family), so every v22 gate enforces every fallback line and
+ * refuses a decide rule's tools exactly as a v21 gate does. A family that
+ * evaluates decide rules skips a fallback line only when a decoded record
+ * names it (the bash gates: an `@decide` record of five columns), so a record
+ * that does not decode leaves its fallback line in force. An unverified
+ * snapshot drops the records with the rest of the dynamic tier. A gate
+ * reading a format above 2 reports `snapshot_format_newer` and enforces what
+ * it reads. A v21 gate skips the records, as it skips any line under six
+ * columns, and refuses each fallback line's tools.
  */
-export const GATE_VERSION = 21
+export const GATE_VERSION = 22
+
+/**
+ * Whether each family of rendered gate evaluates the decide rules a snapshot
+ * carries: the JS gates, the bash gates and the n8n workflow gate. A family
+ * that does not keeps every decide rule's fallback line in force, so it
+ * refuses what the rule covers exactly as a gate that reads no `@decide`
+ * records does; it never skips a fallback line it cannot stand in for. Set a
+ * family only where its decide tier runs.
+ */
+export const GATE_EVALUATES_DECIDE: Readonly<Record<'js' | 'bash' | 'n8n', boolean>> = { js: false, bash: false, n8n: false }
 
 /**
  * The refusal codes a hook gate's JSON decision carries, as `code` beside the
@@ -304,7 +341,10 @@ export const GATE_VERSION = 21
  *   (`gateDeadlineMs` in `@intutic/shared-types`);
  * - `UNREADABLE_CALL`: the payload held no tool call the gate could read;
  * - `GATE_CRASHED`: the gate failed while deciding, or a chaos run's
- *   `INTUTIC_CHAOS_PLAN` is set but unreadable.
+ *   `INTUTIC_CHAOS_PLAN` is set but unreadable;
+ * - `DECIDE_REFUSED`, `DECIDE_ESCALATED`, `GOVERNANCE_UNAVAILABLE`: a decide
+ *   rule refused, could not be decided where the harness cannot ask, or its
+ *   engine was unavailable while it enforces.
  *
  * A fault a chaos run injects into an allowed call is not a refusal by
  * governance: its JSON decision carries `code: null` and `ruleId: null`, or
@@ -325,6 +365,9 @@ export const HOOK_REFUSAL_CODES = [
   'GATE_DEADLINE',
   'UNREADABLE_CALL',
   'GATE_CRASHED',
+  'DECIDE_REFUSED',
+  'DECIDE_ESCALATED',
+  'GOVERNANCE_UNAVAILABLE',
 ] as const
 
 /**
@@ -476,6 +519,14 @@ def intutic_chaos_call(tool, decision, rule_id, destructive, policy_hit, key="")
  * this fires on "the daemon has been dead for a week", not on "it is Sunday".
  */
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
+
+/**
+ * What a gate reports, once per call, on a snapshot in a format newer than it
+ * reads (`snapshot_format_newer`); `{n}` is the snapshot's format. It still
+ * enforces every line it reads, and a fallback line of a rule it cannot read.
+ */
+export const FORMAT_NEWER_MESSAGE =
+  `Policy snapshot format {n} is newer than this gate reads (${SNAPSHOT_FORMAT}) — records it does not know are skipped and their fallback lines enforced`
 
 /**
  * How a gate refuses a call.
@@ -898,6 +949,48 @@ const SCREEN_SUBJECTS: ReadonlyArray<readonly [string, string]> = [
   ['action', 'INTUTIC_ACTIONS'],
 ]
 
+/**
+ * The bash gate's handling of decide fallback lines. A gate that evaluates
+ * decide rules (through the CLI) skips the fallback line an `@decide` record
+ * names; one that does not keeps every fallback line, which refuses.
+ */
+function shellDecideFallbackSkip(evaluatesDecide: boolean): string {
+  if (!evaluatesDecide) {
+    return `  # A fallback line stands in for a decide rule a gate cannot evaluate. This
+  # gate evaluates none, so every fallback line stays in force and refuses
+  # its rule's tools, as in a gate that reads no @decide records.
+
+`
+  }
+  return `  # A fallback line stands in for a decide rule a gate cannot evaluate. This
+  # gate hands a decide rule to the CLI, which decodes its record and refuses
+  # the call when it does not decode, so it skips the fallback line that an
+  # @decide record of five columns names in its second. Any other line with
+  # the prefix is enforced.
+  if [ \${#INTUTIC_DECIDE_RECORDS[@]} -gt 0 ]; then
+    _intutic_skip=$'\\n'
+    for _rec in "\${INTUTIC_DECIDE_RECORDS[@]}"; do
+      _intutic_tabs="\${_rec//[^$'\\t']/}"
+      _intutic_fb="\${_rec#*$'\\t'}"
+      _intutic_fb="\${_intutic_fb%%$'\\t'*}"
+      if [ \${#_intutic_tabs} -eq 4 ] && [ -n "\${_rec##*$'\\t'}" ]; then
+        case "$_intutic_fb" in '${DECIDE_FALLBACK_PREFIX}'*) _intutic_skip+="$_intutic_fb"$'\\n' ;; esac
+      fi
+    done
+    _intutic_kept=()
+    if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        case "$_intutic_skip" in *$'\\n'"\${_rec%%$'\\t'*}"$'\\n'*) continue ;; esac
+        _intutic_kept+=("$_rec")
+      done
+    fi
+    INTUTIC_DYNAMIC=()
+    if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
+  fi
+
+`
+}
+
 export function emitShellGate(opts: ShellGateOptions): string {
   const log = opts.logFn ?? 'log_event'
   const floor = staticFloorPatterns()
@@ -1027,6 +1120,11 @@ INTUTIC_MCP_REGISTRY=""
 # text, never allows a call.
 INTUTIC_OPAQUE=0
 INTUTIC_OPAQUE_MESSAGE=${shq(OPAQUE_REFUSAL_MESSAGE)}
+# The snapshot format (the @format record; 1 without one), and the decide
+# rules' @decide records, kept whole for the decide tier: this gate decodes
+# none of them, the CLI does.
+INTUTIC_SNAPSHOT_FORMAT=1
+INTUTIC_DECIDE_RECORDS=()
 if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   INTUTIC_SNAPSHOT_STATE="ok"
   while IFS= read -r _line || [ -n "$_line" ]; do
@@ -1045,12 +1143,16 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
         ;;
       '${MCP_REGISTRY_RECORD_TAG}'$'\\t'*) INTUTIC_MCP_REGISTRY="\${_line#*$'\\t'}" ;;
       '${INTERVENTION_MODE_RECORD_TAG}'$'\\t''OPAQUE') INTUTIC_OPAQUE=1 ;;
+      '${SNAPSHOT_FORMAT_RECORD_TAG}'$'\\t'*)
+        case "\${_line#*$'\\t'}" in ''|*[!0-9]*) : ;; *) INTUTIC_SNAPSHOT_FORMAT="\${_line#*$'\\t'}" ;; esac
+        ;;
+      '${DECIDE_RECORD_TAG}'$'\\t'*) INTUTIC_DECIDE_RECORDS+=("$_line") ;;
       '#'*|'') : ;;
       *) INTUTIC_DYNAMIC+=("$_line") ;;
     esac
   done < "$INTUTIC_SNAPSHOT_RULES"
 
-  # Integrity, in the order that fails cheapest first.
+${shellDecideFallbackSkip(GATE_EVALUATES_DECIDE.bash)}  # Integrity, in the order that fails cheapest first.
   #
   # All three of these were parsed and then ignored. A digest nobody recomputes
   # is not integrity, it is a comment; and a workspace id nobody compares means a
@@ -1096,6 +1198,8 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
     # never set: the snapshot admits no MCP server (the refusal below).
     INTUTIC_MCP_REGISTRY=""
     INTUTIC_MCP_ALLOWLIST=0
+    # The decide records go with the rest of the dynamic tier.
+    INTUTIC_DECIDE_RECORDS=()
   fi
 fi
 
@@ -1120,6 +1224,9 @@ case "$INTUTIC_SNAPSHOT_STATE" in
   empty)   ${log} "snapshot_empty" "\${TOOL:-}" "Policy snapshot contains no rules — the compile produced nothing" || true ;;
   stale)   ${log} "snapshot_stale" "\${TOOL:-}" "Policy snapshot is \${_intutic_age_days} days old and still enforced" || true ;;
 esac
+if [ "$INTUTIC_SNAPSHOT_FORMAT" -gt ${SNAPSHOT_FORMAT} ]; then
+  ${log} "snapshot_format_newer" "\${TOOL:-}" "${FORMAT_NEWER_MESSAGE.replace('{n}', '$INTUTIC_SNAPSHOT_FORMAT')}" || true
+fi
 
 # Normalise once; every pattern is written against this shape. The extractor
 # hands each field over with its whitespace already collapsed to single spaces
@@ -1582,15 +1689,59 @@ export interface JsGateOptions {
 }
 
 /**
+ * The decide decoders every JS-family gate embeds beside
+ * {@link jsSnapshotLoader}, in one scope so their helpers cannot collide
+ * with the gate's names.
+ */
+const JS_DECIDE_LIB = `// Decide rules in the snapshot, emitted from decide.ts and decideRecord.ts in
+// @intutic/shared-types inside one scope: the @format record, and each
+// @decide record checked against the rule it carries.
+const intuticDecideLib = (function () {
+${DECIDE_JS_SOURCE}
+${DECIDE_RECORD_JS_SOURCE}
+  function sha256(text) { return require('crypto').createHash('sha256').update(text, 'utf8').digest('hex'); }
+  function check(ir) { const v = validateDecideRule(ir); return v.ok ? decideRuleHash(v.rule, sha256) : null; }
+  return {
+    format: decodeSnapshotFormatRecord,
+    record: function (line) { return decodeDecideRecord(line, check); },
+  };
+})();`
+
+/** A JS gate that evaluates decide rules skips each fallback line a decoded record names. */
+const JS_DECIDE_FALLBACK_SKIP = `  // A fallback line stands in for a decide rule a gate cannot evaluate. This
+  // gate reads the rule from its record, so it skips the line, but only when
+  // that record decoded: any other line with the prefix is enforced.
+  if (out.decideRules.length > 0) {
+    const skip = out.decideRules.map(function (r) { return r.fallbackId; });
+    out.rules = out.rules.filter(function (r) {
+      return r.id.indexOf('${DECIDE_FALLBACK_PREFIX}') !== 0 || skip.indexOf(r.id) === -1;
+    });
+  }
+`
+
+/** A JS gate that does not evaluate decide rules keeps every fallback line. */
+const JS_DECIDE_FALLBACK_KEPT = `  // A fallback line stands in for a decide rule a gate cannot evaluate. This
+  // gate evaluates none, so every fallback line stays in force and refuses
+  // its rule's tools, as in a gate that reads no @decide records.
+`
+
+/**
  * The snapshot loader every JS-family gate embeds, defined once.
  *
  * Extracted from {@link emitJsGate}'s template when the n8n workflow gate
  * arrived: two emitters needing the same loader is exactly the situation that
- * produced the four defects this module's header describes, so the loader is a
- * constant both interpolate rather than a block one of them copies. The
- * emitted bytes for the per-tool gates are unchanged.
+ * produced the four defects this module's header describes, so the loader is
+ * one function both interpolate rather than a block one of them copies. It
+ * needs {@link JS_DECIDE_LIB} in scope.
+ *
+ * Its decide state: `format` (1 without an @format record), and
+ * `decideRules`, the records that decoded. Only a gate that evaluates decide
+ * rules (`evaluatesDecide`, {@link GATE_EVALUATES_DECIDE}) drops a fallback
+ * line, and only when a decoded record names it; any other gate keeps every
+ * fallback line in force.
  */
-const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
+function jsSnapshotLoader(evaluatesDecide: boolean): string {
+  return `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   const fs = require('fs'), os = require('os'), path = require('path');
   const p = process.env.INTUTIC_SNAPSHOT_RULES ||
     path.join(os.homedir(), '.intutic', 'hooks', 'policy-snapshot.rules');
@@ -1599,7 +1750,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   // opaque: an OPAQUE workspace (the @intervention_mode record). Kept on a
   // snapshot that fails its digest: it only ever hides text, never allows.
   const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0,
-    mcpAllowlist: null, mcpRegistry: null, opaque: false };
+    mcpAllowlist: null, mcpRegistry: null, opaque: false, format: 1, decideRules: [] };
   let text;
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   out.state = 'ok';
@@ -1608,6 +1759,18 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     if (line.startsWith('#workspace ')) { out.workspaceId = line.slice(11).trim(); continue; }
     if (line.startsWith('#generated ')) { out.generatedAt = line.slice(11).trim(); continue; }
     if (line === '${INTERVENTION_MODE_RECORD_TAG}\\tOPAQUE') { out.opaque = true; continue; }
+    if (line.startsWith('${SNAPSHOT_FORMAT_RECORD_TAG}\\t')) {
+      const v = intuticDecideLib.format(line);
+      if (v !== null) out.format = v;
+      continue;
+    }
+    if (line.startsWith('${DECIDE_RECORD_TAG}\\t')) {
+      // A decide rule's record. One that does not decode is skipped, and the
+      // rule's fallback line below then stays in force and refuses.
+      const rec = intuticDecideLib.record(line);
+      if (rec) out.decideRules.push(rec);
+      continue;
+    }
     if (line.startsWith('${MCP_ALLOWLIST_RECORD_TAG}\\t')) {
       // The MCP server allowlist: tag, severity and comma-joined servers, a
       // data line inside the digest. Any severity but shadow refuses.
@@ -1661,7 +1824,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, seq: seq, reason: f[4],
       argRe: argRe, argDowngraded: argDowngraded });
   }
-
+${evaluatesDecide ? JS_DECIDE_FALLBACK_SKIP : JS_DECIDE_FALLBACK_KEPT}
   // Integrity. A digest nobody recomputes is a comment, and a workspace id
   // nobody compares means a snapshot from workspace A dropped onto workspace B's
   // machine is enforced verbatim, with B's events attributing A's rules to B.
@@ -1691,6 +1854,8 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
     // never set: the gate admits no MCP server on this snapshot at all.
     out.mcpRegistry = null;
     out.mcpAllowlist = null;
+    // The decide records go with the rest of the dynamic tier.
+    out.decideRules = [];
   }
 
   if (out.state === 'ok' && out.generatedAt) {
@@ -1703,6 +1868,7 @@ const JS_SNAPSHOT_LOADER = `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   }
   return out;
 }`
+}
 
 /**
  * A chaos run's side of the JS gates, defined once: the plan, this call's
@@ -1871,7 +2037,9 @@ ${jsGuardTable('INTUTIC_FLOOR', floor)}
 // had already drifted from the in-process one on null handling.
 ${NORMALISE_CONTRACT.jsSource}
 
-${JS_SNAPSHOT_LOADER}
+${JS_DECIDE_LIB}
+
+${jsSnapshotLoader(GATE_EVALUATES_DECIDE.js)}
 
 ${jsHoldHelpers(opts.reviewRequestFile)}
 
@@ -2091,6 +2259,9 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
     try { record('snapshot_' + snap.state, toolName, _msg); } catch (e) {}
+  }
+  if (snap.format > ${SNAPSHOT_FORMAT}) {
+    try { record('snapshot_format_newer', toolName, ${JSON.stringify(FORMAT_NEWER_MESSAGE)}.replace('{n}', String(snap.format))); } catch (e) {}
   }
   // A chaos run's no_destructive_attempt probe reads every destructive.* rule,
   // the ones the escape hatch skips below included.
@@ -2840,7 +3011,9 @@ ${NORMALISE_CONTRACT.jsSource}
 // The phrase matcher (@intutic/shared-types phrases.ts), for phrase rules.
 ${PHRASES_JS_SOURCE}
 
-${JS_SNAPSHOT_LOADER}
+${JS_DECIDE_LIB}
+
+${jsSnapshotLoader(GATE_EVALUATES_DECIDE.n8n)}
 
 ${JS_OPAQUE_HELPERS}
 
@@ -2875,6 +3048,9 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
           ? 'Policy snapshot contains no rules — the compile produced nothing'
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
     try { record('snapshot_' + snap.state, 'n8n:' + wfName, _msg); } catch (e) {}
+  }
+  if (snap.format > ${SNAPSHOT_FORMAT}) {
+    try { record('snapshot_format_newer', 'n8n:' + wfName, ${JSON.stringify(FORMAT_NEWER_MESSAGE)}.replace('{n}', String(snap.format))); } catch (e) {}
   }
   if (disabled) snap.rules = snap.rules.filter(function (r) { return r.id.indexOf('destructive.') !== 0; });
   const rules = INTUTIC_FLOOR.concat(snap.rules);

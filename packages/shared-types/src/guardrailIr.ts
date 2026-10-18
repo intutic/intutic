@@ -28,6 +28,10 @@
  *   (`SETTING_KIND_KEYS`). Neither carries roles — a workspace setting has no
  *   per-role form — and neither is projected into a rule endpoint: a promoted
  *   one is written into the setting the proxy already enforces.
+ * - `decide` — a few narrow questions a self-hosted model answers about a
+ *   tool call or a response, combined by a `when` expression. Its grammar,
+ *   validation and semantics live in `./decide.ts`, which every port of the
+ *   rule shares; it is written as one `decide: {json}` front-matter line.
  * - `none` — "this passage contains no enforceable rule", so the corpus can
  *   measure over-generation.
  *
@@ -48,6 +52,7 @@
 
 import { z } from 'zod'
 import { validatePredicate } from './rulePredicateDsl.js'
+import { decideHashInput, validateDecideRule, DECIDE_APPROVAL_RE, DECIDE_MAX_ASK_CHARS, DECIDE_MAX_OPTIONS, DECIDE_MAX_WHEN_CHARS, DECIDE_MIN_ASK_CHARS } from './decide.js'
 
 /**
  * The eight `action:` tokens the proxy's classifier synthesises from tool
@@ -251,6 +256,47 @@ const EgressAllowSchema = z
 
 const NoneSchema = z.object({ kind: z.literal('none'), reason: Rationale }).strict()
 
+// The decide kind's shape. `validateDecideRule` in `./decide.ts` is what
+// `validateGuardrailIr` answers with, so every port gives the same reason;
+// this schema types the result and holds the same bounds. Lengths are in
+// code points, as the Rust and Python ports count them.
+const codePointsBetween = (min: number, max: number) => (v: string) => {
+  const n = Array.from(v).length
+  return n >= min && n <= max
+}
+const DecideName = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/)
+const DecideAsk = z
+  .string()
+  .refine(codePointsBetween(DECIDE_MIN_ASK_CHARS, DECIDE_MAX_ASK_CHARS))
+  .refine((v) => !/[\t\r\n]/.test(v))
+  .refine((v) => !DECIDE_APPROVAL_RE.test(v))
+const DecideTitle = z
+  .string()
+  .refine(codePointsBetween(1, MAX_TITLE_CHARS))
+  .refine((v) => !/[\t\r\n]/.test(v))
+// `no_below < yes_at` is a cross-field rule, checked by `validateDecideRule`.
+const DecideBand = z.object({ yes_at: z.number().gt(0.5).lt(1), no_below: z.number().gt(0) }).strict()
+const DecideQuestion = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('yes_no'), ask: DecideAsk, band: DecideBand.optional() }).strict(),
+  z.object({ type: z.literal('choice'), ask: DecideAsk, options: z.array(DecideName).min(2).max(DECIDE_MAX_OPTIONS), band: DecideBand.optional() }).strict(),
+])
+
+const DecideSchema = z
+  .object({
+    kind: z.literal('decide'),
+    id: z.string().regex(/^[a-z][a-z0-9_-]{0,47}$/),
+    title: DecideTitle.optional(),
+    on: z.enum(['tool_call', 'response']),
+    tools: z.array(z.string().regex(TOOL_TOKEN_RE)).min(1).max(MAX_HOOK_TOOLS).optional(),
+    questions: z.record(DecideName, DecideQuestion),
+    when: z.string().refine(codePointsBetween(1, DECIDE_MAX_WHEN_CHARS)),
+    band: DecideBand.optional(),
+    escalate: z.enum(['ask', 'review', 'refuse']).optional(),
+    rollout: z.enum(['shadow', 'enforce']).optional(),
+    context: z.array(z.literal('last_user_turn')).max(1).optional(),
+  })
+  .strict()
+
 export const GuardrailIrSchema = z.discriminatedUnion('kind', [
   HookRuleSchema,
   DenyToolsSchema,
@@ -262,12 +308,14 @@ export const GuardrailIrSchema = z.discriminatedUnion('kind', [
   WasmPredicateSchema,
   AllowedModelsSchema,
   EgressAllowSchema,
+  DecideSchema,
   NoneSchema,
 ])
 
 export type GuardrailIr = z.infer<typeof GuardrailIrSchema>
 export type HookRuleIr = z.infer<typeof HookRuleSchema>
 export type WasmPredicateIr = z.infer<typeof WasmPredicateSchema>
+export type DecideIr = z.infer<typeof DecideSchema>
 export type FrontMatterIr = Extract<GuardrailIr, { kind: 'deny_tools' | 'review_before' | 'requires_before' | 'forbid_after' | 'max_calls' | 'forbid_with' }>
 export type SettingIr = Extract<GuardrailIr, { kind: 'allowed_models' | 'egress_allow' }>
 export type IrKind = GuardrailIr['kind']
@@ -284,6 +332,7 @@ export const IR_KINDS = [
   'wasm_predicate',
   'allowed_models',
   'egress_allow',
+  'decide',
   'none',
 ] as const
 
@@ -326,9 +375,15 @@ export type IrValidation = { ok: true; ir: GuardrailIr } | { ok: false; reason: 
  * Parse an untrusted value into the IR, or say why it is not one. Never
  * throws. This — not `GuardrailIrSchema.parse` — is the entry point: the
  * shape parse cannot express "the two ordering tokens differ" or "the wasm
- * predicate is in the closed DSL", so both are checked here.
+ * predicate is in the closed DSL", so both are checked here. A `decide` IR
+ * is answered by `validateDecideRule`, the ordered checks every port of the
+ * rule shares, before the shape parse types it.
  */
 export function validateGuardrailIr(value: unknown): IrValidation {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value) && (value as { kind?: unknown }).kind === 'decide') {
+    const decided = validateDecideRule(Object.fromEntries(Object.entries(value).filter(([k]) => k !== 'kind')))
+    if (!decided.ok) return { ok: false, reason: decided.reason }
+  }
   const parsed = GuardrailIrSchema.safeParse(value)
   if (!parsed.success) {
     const first = parsed.error.issues[0]
@@ -399,6 +454,10 @@ export function canonicalizeIr(ir: GuardrailIr): string {
     case 'egress_allow':
       core = { hosts: settingValues(ir) }
       break
+    case 'decide':
+      // The rule hash's input, so a policy clause and the snapshot name a
+      // decide rule by the same bytes.
+      return decideHashInput(ir)
     case 'none':
       core = {}
       break
@@ -419,6 +478,8 @@ export function irTokens(ir: GuardrailIr): string[] {
     case 'hook_rule':
     case 'deny_tools':
       return [...ir.tools]
+    case 'decide':
+      return [...(ir.tools ?? [])]
     case 'review_before':
       return [...ir.tokens]
     case 'requires_before':
