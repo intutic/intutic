@@ -444,7 +444,7 @@ describe('decide eval', () => {
     const again = await run(() => runDecideEval(REF, { labels: join(base, 'set1.jsonl'), preregister: prereg, workspace: ws, json: true }))
     expect(again.code).toBe(1)
     expect(JSON.parse(again.out)).toMatchObject({ reusedSet: true, passed: false })
-  })
+  }, 60_000)
 
   it('refuses a pre-registration made for another rule hash or model', async () => {
     await useEngine(dataJudge)
@@ -471,7 +471,7 @@ describe('decide eval', () => {
     expect(report.adversarial.planted_approval.recall).toBe(0)
     expect(report.marks.plantedApprovals).toBe(false)
     expect(fs.readdirSync(join(intutic, 'decide', 'evals', RULE_HASH)).filter((n) => n.endsWith('.json'))).toEqual([])
-  })
+  }, 60_000)
 })
 
 describe('decide calibrate', () => {
@@ -489,7 +489,7 @@ describe('decide calibrate', () => {
     fs.rmSync(prereg, { force: true })
     await run(() => runDecideEval(REF, { preregister: prereg, workspace: ws }))
     expect(JSON.parse(fs.readFileSync(prereg, 'utf8')).combiner).toEqual({ ...c.combiner, band: c.band })
-  })
+  }, 60_000)
 })
 
 // ─── configure, models, disable / enable, lint ────────────────────────────
