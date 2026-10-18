@@ -28,6 +28,10 @@ import { fileURLToPath } from 'node:url'
 import { WasmRunner, type WasmVerdict } from '../../wasm/runner.js'
 import type { WasmContextInput } from '../../wasm/context.js'
 
+// Compiling a real rule on a loaded CI runner (the whole workspace's tests at
+// once) has run past the production 3 s; these tests are about what loads.
+const SLOW_RUNNER_COMPILE_MS = 60_000
+
 const here = dirname(fileURLToPath(import.meta.url))
 // packages/mcp-proxy/src/__tests__/integration -> packages/wasm-sdk
 const sdkRoot = join(here, '..', '..', '..', '..', 'wasm-sdk')
@@ -125,7 +129,7 @@ describe('WasmRunner + real wasm-sdk drop-in rules', () => {
       copyFileSync(harnessWasm, join(wasmDir, '10_harness-allowlist.wasm'))
       copyFileSync(callRateWasm, join(wasmDir, '20_call-rate-guard.wasm'))
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         const ids = runner.getLoadedRuleIds()
@@ -185,7 +189,7 @@ describe('WasmRunner + read_referenced_file and the memory ceiling', () => {
       mkdirSync(join(root, 'k8s'))
       writeFileSync(join(root, 'k8s', 'deploy.yaml'), 'image: app:latest\n')
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         const input: WasmContextInput = { ...baseContext, toolArguments: { command: 'kubectl apply -f k8s/deploy.yaml' } }
@@ -228,7 +232,7 @@ describe('WasmRunner + read_referenced_file and the memory ceiling', () => {
         outDir,
       )
       copyFileSync(wasmPath, join(wasmDir, '10_memory-hog.wasm'))
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         expect((await runner.evaluate(baseContext)).code).toBe('block')
@@ -248,7 +252,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
       const wasmPath = await compileScratchRule('infinite-loop', INFINITE_LOOP, outDir)
       copyFileSync(wasmPath, join(wasmDir, '10_infinite-loop.wasm'))
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         expect(runner.getLoadedRuleIds()).toContain('local:10_infinite-loop.wasm')
@@ -277,7 +281,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
       const wasmPath = await compileScratchRule('infinite-loop-3x', INFINITE_LOOP, outDir)
       copyFileSync(wasmPath, join(wasmDir, '10_loop3.wasm'))
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         const verdicts: WasmVerdict[] = []
@@ -320,7 +324,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
       )
       copyFileSync(wasmPath, join(wasmDir, '10_no-verdict.wasm'))
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         const verdict = await runner.evaluate(baseContext)
@@ -351,7 +355,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
 
       copyFileSync(wasmPath, join(wasmDir, '10_math-random.wasm'))
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         expect(runner.getLoadedRuleIds()).not.toContain('local:10_math-random.wasm')
@@ -398,7 +402,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
       )
       copyFileSync(wasmPath, join(wasmDir, '10_always-block.wasm'))
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         const verdict = await runner.evaluate(baseContext)
@@ -425,7 +429,7 @@ describe('WasmRunner + purpose-built fixtures', () => {
       )
       copyFileSync(wasmPath, join(wasmDir, '10_always-reask.wasm'))
 
-      const runner = new WasmRunner(wasmDir)
+      const runner = new WasmRunner(wasmDir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
       try {
         await runner.rescan()
         const verdict = await runner.evaluate(baseContext)

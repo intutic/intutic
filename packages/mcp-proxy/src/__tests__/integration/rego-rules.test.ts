@@ -22,6 +22,10 @@ import { fileURLToPath } from 'node:url'
 import { WasmRunner } from '../../wasm/runner.js'
 import type { WasmContextInput } from '../../wasm/context.js'
 
+// Compiling a real rule on a loaded CI runner (the whole workspace's tests at
+// once) has run past the production 3 s; these tests are about what loads.
+const SLOW_RUNNER_COMPILE_MS = 60_000
+
 const fixture = (name: string): string =>
   fileURLToPath(new URL(`../../../../proxy/tests/fixtures/rego/${name}`, import.meta.url))
 
@@ -55,7 +59,7 @@ afterEach(async () => {
 async function runnerWith(files: Record<string, string>): Promise<WasmRunner> {
   dir = mkdtempSync(join(tmpdir(), 'intutic-mcp-rego-'))
   for (const [name, source] of Object.entries(files)) copyFileSync(source, join(dir, name))
-  runner = new WasmRunner(dir)
+  runner = new WasmRunner(dir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
   await runner.rescan()
   return runner
 }
