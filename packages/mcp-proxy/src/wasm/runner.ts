@@ -81,8 +81,9 @@ export const EVALUATE_TIMEOUT_MS = 1_000
 export const REGO_EVALUATE_TIMEOUT_MS = 10_000
 
 /** Generous — compilation is not guest-controlled per evaluation, but a
- *  pathological file must not hang a rescan forever. */
-const COMPILE_TIMEOUT_MS = 3_000
+ *  pathological file must not hang a rescan forever. A test on a loaded CI
+ *  runner may pass a longer `compileTimeoutMs`; production keeps this. */
+export const COMPILE_TIMEOUT_MS = 3_000
 
 /**
  * Consecutive per-rule runaways (a timeout, or the instruction budget running
@@ -194,13 +195,20 @@ export class WasmRunner implements CloudRuleBridge {
    * @param dirOverride - the local rules directory (see `resolveWasmDir`).
    * @param cloud - the workspace's control-plane rules; absent where there is
    *   no control plane to fetch them from (tests, local-only use).
+   * @param options.compileTimeoutMs - how long one rule may take to compile;
+   *   {@link COMPILE_TIMEOUT_MS} unless a test on a loaded runner says longer.
    */
   constructor(
     dirOverride?: string,
     private readonly cloud?: CloudRuleSet,
+    options: { compileTimeoutMs?: number } = {},
   ) {
     this.loader = new WasmLoader(resolveWasmDir(dirOverride))
+    this.compileTimeoutMs = options.compileTimeoutMs ?? COMPILE_TIMEOUT_MS
   }
+
+  /** The compile deadline this runner applies to each rule. */
+  readonly compileTimeoutMs: number
 
   /** The resolved local rules directory, for logging. */
   getDir(): string {
@@ -305,8 +313,8 @@ export class WasmRunner implements CloudRuleBridge {
       unsupportedImports?: string[]
       reason?: CompileFailureReason
       error?: string
-    }>({ type: 'compile', id, ruleId, bytes: toArrayBuffer(bytes) }, COMPILE_TIMEOUT_MS)
-    if (!reply) return { ok: false, reason: 'load_error', error: `compile timed out after ${COMPILE_TIMEOUT_MS}ms` }
+    }>({ type: 'compile', id, ruleId, bytes: toArrayBuffer(bytes) }, this.compileTimeoutMs)
+    if (!reply) return { ok: false, reason: 'load_error', error: `compile timed out after ${this.compileTimeoutMs}ms` }
     if (!reply.ok) {
       const fallback =
         reply.unsupportedImports && reply.unsupportedImports.length > 0
