@@ -261,6 +261,9 @@ struct ServedRule {
     /// A served copy is stamped shadow: a `mode: shadow` SOP, a shadow
     /// guardrail, or the server's kill switch.
     shadow: bool,
+    /// Each served copy's `(sopId, sopTitle)`, so the rule's ref is the
+    /// server's `<sopId>#<rule id>`, as the gates and the review queue key it.
+    sops: Vec<(String, String)>,
 }
 
 /// The decide rules a workspace's policy resolve serves (`decideRules`),
@@ -309,6 +312,17 @@ impl ServedDecide {
                 }
             }
             entry.shadow |= r.get("rollout").and_then(Value::as_str) == Some("shadow");
+            if let Some(sop_id) = r
+                .get("sopId")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            {
+                let title = r
+                    .get("sopTitle")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                entry.sops.push((sop_id.to_string(), title.to_string()));
+            }
         }
         out
     }
@@ -318,6 +332,16 @@ impl ServedDecide {
         self.by_hash
             .get(hash)
             .map_or((Vec::new(), false), |r| (r.pins.clone(), r.shadow))
+    }
+
+    /// The served SOP id for `hash` in the SOP titled `title`: the copy with
+    /// that title, or the only copy when one is served.
+    fn sop_id(&self, hash: &str, title: &str) -> Option<&str> {
+        let sops = &self.by_hash.get(hash)?.sops;
+        sops.iter()
+            .find(|(_, t)| t == title)
+            .or(if sops.len() == 1 { sops.first() } else { None })
+            .map(|(id, _)| id.as_str())
     }
 }
 
@@ -610,7 +634,15 @@ impl GatewayRules {
                         let (rollout, stamped_by) =
                             stamp(rule, &pins, disabled, server_shadow, mode);
                         out.rules.push(RuleEntry {
-                            rule_ref: format!("{id}#{}", rule.id),
+                            // A served rule's ref is the server's `<sopId>#<id>`;
+                            // the title stands in only where nothing is served.
+                            rule_ref: format!(
+                                "{}#{}",
+                                served
+                                    .and_then(|s| s.sop_id(&hash, &sop.title))
+                                    .unwrap_or(&id),
+                                rule.id
+                            ),
                             rule_hash: hash,
                             rollout,
                             stamped_by: stamped_by.to_string(),
@@ -1173,5 +1205,48 @@ mod tests {
             ServedDecide::from_resolve(&serde_json::json!({})),
             ServedDecide::default()
         );
+    }
+
+    /// The review queue matches an uploaded escalation to its served rule by
+    /// `<sopId>#<rule id>` and the hash. The gateway wrote `<title>#<id>`, so
+    /// no gateway escalation was ever queued (staging, 2026-10-18).
+    #[test]
+    fn a_served_rule_is_referred_to_by_its_sop_id() {
+        let line = r#"{"id":"r","on":"response","questions":{"leak":{"type":"yes_no","ask":"Does the response leak a secret?"}},"when":"leak","escalate":"review"}"#;
+        let other = r#"{"id":"o","on":"response","questions":{"leak":{"type":"yes_no","ask":"Does the response quote a secret?"}},"when":"leak"}"#;
+        let DecideDecl::Rule(rule) = parse_line(line) else {
+            panic!("reads")
+        };
+        let sop = crate::sops::Sop {
+            title: "Data handling".into(),
+            body: "# Data handling\n\nSecrets stay put.".into(),
+            decide_rules: crate::decide::parse_lines([line, other]),
+            ..Default::default()
+        };
+        let served = ServedDecide::from_resolve(&serde_json::json!({ "decideRules": [
+            {"sopId": "sp_other", "sopTitle": "Elsewhere", "ir": line, "ruleHash": rule_hash(&rule)},
+            {"sopId": "sp_data", "sopTitle": "Data handling", "ir": line, "ruleHash": rule_hash(&rule)},
+        ]}));
+        let dir = std::env::temp_dir().join(format!("intutic-ruleref-{}", std::process::id()));
+        let refs = |served: Option<&ServedDecide>| -> Vec<String> {
+            GatewayRules::from_sops_in(
+                std::slice::from_ref(&sop),
+                "",
+                InterventionMode::Transparent,
+                false,
+                &dir,
+                served,
+            )
+            .entries()
+            .iter()
+            .map(|e| e.rule_ref.clone())
+            .collect()
+        };
+        assert_eq!(
+            refs(Some(&served)),
+            ["sp_data#r", "Data handling#o"],
+            "the copy in this SOP names it; a rule nothing serves keeps the title"
+        );
+        assert_eq!(refs(None), ["Data handling#r", "Data handling#o"]);
     }
 }
