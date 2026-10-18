@@ -454,7 +454,10 @@ export function createDecideEngine(cfg: DecideEngineConfig, opts: DecideEngineOp
     throw new DecideEngineError('host_refused', `decide engine host refused (${verdict.reason}): ${verdict.host || '<none>'}`)
   }
 
-  const base = cfg.url.replace(/\/+$/, '')
+  // Trailing slashes trimmed by a scan, not a `/+$` regex, which is quadratic on a run of slashes.
+  let end = cfg.url.length
+  while (end > 0 && cfg.url.charCodeAt(end - 1) === 0x2f) end--
+  const base = cfg.url.slice(0, end)
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (cfg.apiKey) headers.authorization = `Bearer ${cfg.apiKey}`
 

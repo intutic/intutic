@@ -686,7 +686,7 @@ func whenAtoms(e *decideExpr, out []*decideExpr) []*decideExpr {
 // appended when absent and moved last when present.
 func decideOptions(q map[string]any) []any {
 	raw, _ := q["options"].([]any)
-	out := make([]any, 0, len(raw)+1)
+	out := make([]any, 0, len(raw))
 	for _, o := range raw {
 		if o != noneOfThese {
 			out = append(out, o)
