@@ -24,3 +24,30 @@ resource "intutic_guardrail" "approved_models" {
   kind   = "allowed_models"
   models = ["claude-sonnet-4-5", "gpt-4o"]
 }
+
+# A decide rule: a self-hosted model answers each question about a Bash call
+# with a probability, `band` reads it as yes, no or unknown, and `when`
+# combines the answers. True refuses, false allows, unknown asks the
+# developer. `rollout = "shadow"` only logs what the rule would have done.
+resource "intutic_guardrail" "prod_data_export" {
+  name    = "Production data export"
+  kind    = "decide"
+  rule_id = "prod-data-export"
+  on      = "tool_call"
+  tools   = ["Bash"]
+  questions = jsonencode({
+    exports = {
+      type = "yes_no"
+      ask  = "Does this command copy customer data out of the production database?"
+    }
+    dest = {
+      type    = "choice"
+      ask     = "Where does the data go?"
+      options = ["local_file", "cloud_bucket", "external_host"]
+    }
+  })
+  when     = "exports AND dest != none_of_these"
+  band     = jsonencode({ yes_at = 0.85, no_below = 0.15 })
+  escalate = "ask"
+  rollout  = "shadow"
+}

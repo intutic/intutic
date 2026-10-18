@@ -60,8 +60,23 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { createLogger } from '@intutic/logger'
-import type { PolicyResolveResponse, WireFields } from '@intutic/shared-types'
+import type { DecidePin, DecideRecord, DecideStamp, PolicyResolveResponse, SyncSopEntry, WireFields } from '@intutic/shared-types'
 import {
+  DECIDE_FALLBACK_PREFIX,
+  DECIDE_SOP_TITLE_MAX_CHARS,
+  TOOL_TOKEN_RE,
+  decideFallbackId,
+  decideFallbackReason,
+  decideRuleHash,
+  decideRuleRef,
+  decideRuleText,
+  encodeDecideRecord,
+  encodeSnapshotFormatRecord,
+  parseDecideLine,
+  parseDecideLines,
+  parseDecidePin,
+  scrubReason,
+  splitFrontMatter,
   encodeInterventionModeRecord,
   encodeMcpAllowlistRecord,
   isOpaqueInterventionMode,
@@ -264,6 +279,36 @@ export interface ResolvedPolicy {
    * Absent or null: an older control plane, and no record is written.
    */
   mcpRegistry?: McpRegistryRecord | null
+  /**
+   * The workspace's decide rules (`decideRules`), or the local SOPs' when no
+   * control plane is connected ({@link localDecideRules}). Each is written as
+   * an `@decide` record, and one stamped `enforce` also as a fallback line
+   * that every older gate enforces. Absent or empty: no decide line is
+   * written, and the snapshot is byte-identical to a format 1 one.
+   */
+  decideRules?: ServedDecideRule[]
+}
+
+/**
+ * One `decide:` line, as `GET /api/v1/policy/resolve` serves it or as
+ * {@link localDecideRules} reads it from a local SOP. The writer validates it
+ * itself: a line it cannot read still refuses what it names.
+ */
+export interface ServedDecideRule {
+  /** The control plane's SOP id, or `local:<file>` / `local:<folder>:<file>`. */
+  sopId: string
+  /** The SOP's title, as the record and the fallback line's reason name it. */
+  sopTitle: string
+  /** The SOP's body; the record carries its first 4,096 bytes. */
+  ruleText: string
+  /** The line's JSON value, or a local line's text after `decide:`. */
+  ir: unknown
+  /** The server's stamp: `shadow` under its kill switch. Absent on a local rule. */
+  rollout?: 'shadow' | 'enforce'
+  /** The hash the server computed. When it is not this writer's, the pins were earned by another rule and are dropped. */
+  ruleHash?: string
+  /** The calibrations the rule may enforce under. */
+  pins: DecidePin[]
 }
 
 export interface PolicySnapshotOptions {
@@ -488,6 +533,203 @@ function parsePrincipal(value: unknown): ResolvedPolicy['principal'] {
   }
 }
 
+/**
+ * The `decideRules` of a resolve response, or of a snapshot's JSON. Every
+ * object is kept, with its wrongly-typed fields defaulted: a rule dropped
+ * here would be a rule no gate refuses for. Invalid pins are dropped, which
+ * can only stamp a rule shadow.
+ */
+function parseServedDecideRules(value: unknown): ServedDecideRule[] {
+  if (!Array.isArray(value)) return []
+  const text = (v: unknown) => (typeof v === 'string' ? v : '')
+  return value
+    .filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null && !Array.isArray(r))
+    .map((r) => ({
+      sopId: text(r.sopId),
+      sopTitle: text(r.sopTitle),
+      ruleText: text(r.ruleText),
+      ir: r.ir,
+      ...(r.rollout === 'shadow' || r.rollout === 'enforce' ? { rollout: r.rollout } : {}),
+      ...(typeof r.ruleHash === 'string' ? { ruleHash: r.ruleHash } : {}),
+      pins: Array.isArray(r.pins) ? r.pins.filter((p): p is DecidePin => parseDecidePin(p) !== null) : [],
+    }))
+}
+
+/** What the snapshot carries for its decide rules: one record per readable tool-call rule, and the fallback lines. */
+interface CompiledDecideRules {
+  records: DecideRecord[]
+  fallbacks: GuardPattern[]
+}
+
+const sha256Hex = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex')
+
+function jsonOrNull(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return null
+  }
+}
+
+/** A reason, scrubbed for the `.rules` projection and at most `max` characters. */
+function boundedText(text: string, max: number): string {
+  return Array.from(scrubReason(text)).slice(0, max).join('')
+}
+
+/** A fallback line refusing `tools`, or every tool when none could be read. */
+function decideFallbackPattern(id: string, tools: readonly string[], severity: 'block' | 'shadow', reason: string): GuardPattern {
+  const names = [...new Set(tools)].sort().map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const source = names.length > 0 ? ` (${names.join('|')}) ` : ' [^ ]+ '
+  assertPortableEre(source, id)
+  return {
+    id,
+    source,
+    subject: 'tool',
+    severity: severity as GuardPattern['severity'],
+    reason: boundedText(reason, 300),
+    rationale: 'A decide rule a gate that cannot evaluate it refuses: it covers these tools.',
+    matches: [],
+    notMatches: [],
+  }
+}
+
+/**
+ * Why a readable rule is stamped as it is: its own
+ * rollout, then the server's kill switch, then SILENT_LOG, then pins. Only a
+ * rule that clears all of them is stamped `enforce`.
+ */
+function stampDecideRule(
+  rollout: 'shadow' | 'enforce' | undefined,
+  served: ServedDecideRule['rollout'],
+  silentLog: boolean,
+  pins: readonly DecidePin[],
+): { rollout: 'shadow' | 'enforce'; stampedBy: DecideStamp } {
+  if (rollout !== 'enforce') return { rollout: 'shadow', stampedBy: 'rule' }
+  if (served === 'shadow') return { rollout: 'shadow', stampedBy: 'server-shadow' }
+  if (silentLog) return { rollout: 'shadow', stampedBy: 'silent-log' }
+  if (pins.length === 0) return { rollout: 'shadow', stampedBy: 'no-pins' }
+  return { rollout: 'enforce', stampedBy: 'rule' }
+}
+
+/**
+ * Compiles the policy's decide rules, in order. A readable `on: tool_call`
+ * rule becomes a record, and a fallback line when it is stamped `enforce`;
+ * an `on: response` rule is the gateway's and is not written. A line that
+ * does not read (or reuses an earlier line's id in its SOP) gets a fallback
+ * line and no record, so every gate refuses the tools it names, or every
+ * tool when it names none it can read; `unreadable.<n>` (its place among the
+ * SOP's decide lines) keeps that id apart from any rule's.
+ */
+function compileDecideRules(policy: ResolvedPolicy): CompiledDecideRules {
+  const served = policy.decideRules ?? []
+  const silentLog = isSilentLogMode(policy)
+  // Each SOP's lines parsed together, so an id used twice is caught as the
+  // proxy catches it.
+  const bySop = new Map<string, number[]>()
+  served.forEach((r, i) => bySop.set(r.sopId, [...(bySop.get(r.sopId) ?? []), i]))
+  const decls = new Map<number, { decl: ReturnType<typeof parseDecideLine>; line: number }>()
+  for (const indices of bySop.values()) {
+    const parsed = parseDecideLines(indices.map((i) => {
+      const ir = served[i]!.ir
+      return typeof ir === 'string' ? ir : (JSON.stringify(ir) ?? '')
+    }))
+    indices.forEach((i, k) => decls.set(i, { decl: parsed[k]!, line: k + 1 }))
+  }
+
+  const out: CompiledDecideRules = { records: [], fallbacks: [] }
+  served.forEach((r, i) => {
+    const { decl, line } = decls.get(i)!
+    const sopTitle = boundedText(r.sopTitle, DECIDE_SOP_TITLE_MAX_CHARS)
+    if (decl.kind === 'unreadable') {
+      log.warn(
+        { action: 'decide_rule_unreadable', sopId: r.sopId, ruleId: decl.id, error: decl.error },
+        'A decide rule does not read; the snapshot refuses the tools it names until it is fixed',
+      )
+      const raw = typeof r.ir === 'string' ? jsonOrNull(r.ir) : r.ir
+      const named = raw !== null && typeof raw === 'object' && Array.isArray((raw as { tools?: unknown }).tools) ? (raw as { tools: unknown[] }).tools : []
+      const tools = named.filter((t): t is string => typeof t === 'string' && TOOL_TOKEN_RE.test(t))
+      out.fallbacks.push(
+        decideFallbackPattern(
+          `${DECIDE_FALLBACK_PREFIX}unreadable.${line}@${sha256Hex(r.sopId).slice(0, 12)}`,
+          tools,
+          silentLog ? 'shadow' : 'block',
+          `Decide rule ${decl.id ?? `on decide line ${line}`} (${sopTitle}) does not read, so the calls it covers are refused: ${decl.error}`,
+        ),
+      )
+      return
+    }
+    const rule = decl.rule
+    if (rule.on !== 'tool_call') return
+    const ruleHash = decideRuleHash(rule, sha256Hex)
+    const pins = r.ruleHash !== undefined && r.ruleHash !== ruleHash ? [] : r.pins
+    const stamp = stampDecideRule(rule.rollout, r.rollout, silentLog, pins)
+    const fallbackId = stamp.rollout === 'enforce' ? decideFallbackId(rule.id, r.sopId, sha256Hex) : null
+    out.records.push({
+      v: 1,
+      ref: decideRuleRef(r.sopId, rule.id),
+      ruleHash,
+      fallbackId,
+      rollout: stamp.rollout,
+      stampedBy: stamp.stampedBy,
+      ir: rule,
+      sopTitle,
+      ruleText: decideRuleText(r.ruleText),
+      pins,
+    })
+    if (fallbackId) out.fallbacks.push(decideFallbackPattern(fallbackId, rule.tools ?? [], 'block', decideFallbackReason(rule.id, sopTitle)))
+  })
+  return out
+}
+
+/** Where an `intutic decide eval` pass leaves the pins it earned: `evals/<ruleHash>/<digest>.json`, each a pin. */
+export const DEFAULT_DECIDE_DIR = path.join(os.homedir(), '.intutic', 'decide')
+
+/**
+ * The `decide:` lines of the workspace's local SOPs, for a snapshot written
+ * with no control plane. Each line's text is kept as written, so the writer
+ * reads it exactly as the proxy does, unreadable lines included. A readable
+ * rule's pins are the ones `decideDir/evals/<ruleHash>/` holds; a file that is
+ * not a pin is ignored.
+ */
+export async function localDecideRules(
+  entries: readonly SyncSopEntry[],
+  opts: { decideDir?: string } = {},
+): Promise<ServedDecideRule[]> {
+  const dir = opts.decideDir ?? DEFAULT_DECIDE_DIR
+  const out: ServedDecideRule[] = []
+  for (const entry of entries) {
+    const { front, body } = splitFrontMatter(entry.content)
+    const lines = front
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('decide:'))
+      .map((l) => l.slice('decide:'.length))
+    if (lines.length === 0) continue
+    const heading = body.split('\n').find((l) => l.startsWith('# '))
+    const sopTitle = heading ? heading.slice(2) : entry.title
+    for (const line of lines) {
+      const decl = parseDecideLine(line)
+      const pins = decl.kind === 'rule' ? await readLocalPins(path.join(dir, 'evals', decideRuleHash(decl.rule, sha256Hex))) : []
+      out.push({ sopId: entry.sopId, sopTitle, ruleText: body, ir: line, pins })
+    }
+  }
+  return out
+}
+
+async function readLocalPins(dir: string): Promise<DecidePin[]> {
+  const names = await fs.readdir(dir).catch(() => [] as string[])
+  const pins: DecidePin[] = []
+  for (const name of names.filter((n) => n.endsWith('.json')).sort()) {
+    try {
+      const pin = parseDecidePin(JSON.parse(await fs.readFile(path.join(dir, name), 'utf-8')))
+      if (pin) pins.push(pin)
+    } catch {
+      // Not a pin: the rule runs as shadow without it, which refuses nothing new.
+    }
+  }
+  return pins
+}
+
 /** Fetches resolved policy for the workspace. Returns null on any failure —
  *  the caller keeps the previous snapshot rather than replacing it with nothing. */
 export async function fetchResolvedPolicy(
@@ -544,6 +786,7 @@ async function requestResolvedPolicy(
       ssoGroupPolicy: parseSsoGroupPolicy(rec.ssoGroupPolicy),
       principal: parsePrincipal(rec.principal),
       mcpRegistry: parseMcpRegistryRecord(rec.mcpRegistry),
+      decideRules: parseServedDecideRules((body as { decideRules?: unknown }).decideRules),
     }
   } catch (err) {
     log.warn({ action: 'policy_fetch_failed', err }, 'Policy resolve unreachable')
@@ -612,6 +855,15 @@ export function buildSnapshotRules(
   localHoldTokens: readonly string[] = [],
   localHoldMode: LocalHoldMode = 'hold',
 ): GuardPattern[] {
+  return snapshotRules(policy, localHoldTokens, localHoldMode, compileDecideRules(policy).fallbacks)
+}
+
+function snapshotRules(
+  policy: ResolvedPolicy,
+  localHoldTokens: readonly string[],
+  localHoldMode: LocalHoldMode,
+  decideFallbacks: readonly GuardPattern[],
+): GuardPattern[] {
   // `shadow` names the advisory GuardPattern severity these rules are demoted
   // to; the workspace-level trigger is intervention mode SILENT_LOG.
   const shadow = isSilentLogMode(policy)
@@ -677,8 +929,11 @@ export function buildSnapshotRules(
 
   // SSO-group refusals first. Every gate stops at the first rule that refuses,
   // and a `hold` rule earlier in the list could otherwise let an approved
-  // bypass through a call the group policy refuses outright.
-  return [...ssoGroupPatterns(policy), ...sopRules, ...localHolds, ...destructive, ...skillSurface, ...skillContent]
+  // bypass through a call the group policy refuses outright. The decide
+  // fallback lines next, ahead of every shadow and warn rule: a 2.9.0 SDK
+  // gate returns at the first of those that matches, and would never reach a
+  // fallback line after one.
+  return [...ssoGroupPatterns(policy), ...decideFallbacks, ...sopRules, ...localHolds, ...destructive, ...skillSurface, ...skillContent]
 }
 
 /**
@@ -823,7 +1078,11 @@ async function writeSnapshotFiles(
   localHoldTokens: readonly string[],
   opts: { localHolds?: LocalHoldMode; source?: 'local' } = {},
 ): Promise<{ digest: string; ruleCount: number }> {
-  const rules = buildSnapshotRules(policy, localHoldTokens, opts.localHolds)
+  const decide = compileDecideRules(policy)
+  const rules = snapshotRules(policy, localHoldTokens, opts.localHolds ?? 'hold', decide.fallbacks)
+  // Format 2 once any decide line is written: an `@decide` record, or a
+  // fallback line. Without one the snapshot stays byte-identical to format 1.
+  const decideFormat = decide.records.length > 0 || decide.fallbacks.length > 0
   // One timestamp shared by both artifacts. Two `new Date()` calls would put
   // different values in the JSON and the .rules, so a reader comparing them
   // would see drift that is not there.
@@ -858,11 +1117,16 @@ async function writeSnapshotFiles(
   // existed. Unlike SILENT_LOG it changes no rule's severity: what is refused
   // is unchanged, only what the agent is told.
   const opaque = isOpaqueInterventionMode(policy.interventionMode)
+  // Each decide rule's record rides inside the digest too, in SOP order: an
+  // edited record fails the check, and an invalid snapshot drops the records
+  // with the fallback lines, as it drops the rest of the dynamic tier.
   const lines = [
+    ...(decideFormat ? [encodeSnapshotFormatRecord()] : []),
     ...(opaque ? [encodeInterventionModeRecord()] : []),
     ...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []),
     ...(mcpRegistry ? [encodeMcpRegistryRecord(mcpRegistry)] : []),
     ...(mcpServers.length > 0 ? [encodeMcpAllowlistRecord({ severity: mcpSeverity, servers: mcpServers })] : []),
+    ...decide.records.map(encodeDecideRecord),
     ...rules.map(toRulesLine),
   ]
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
@@ -872,7 +1136,7 @@ async function writeSnapshotFiles(
   const json = JSON.stringify(
     {
       _comment: 'Intutic policy snapshot — auto-generated. DO NOT EDIT.',
-      version: 1,
+      version: decideFormat ? 2 : 1,
       /**
        * Which emitted evaluator these rules were compiled for.
        *
@@ -901,9 +1165,13 @@ async function writeSnapshotFiles(
       ...(ssoGroups ? { ssoGroups } : {}),
       // The same record as the `.rules` file's `@mcp_registry` line.
       ...(mcpRegistry ? { mcpRegistry } : {}),
-      // With `sopRules`, `interventionMode`, `mcpAllowedServers` and
-      // `mcpRegistry`, enough to rebuild this snapshot without the control
-      // plane (`forgetSnapshotMember`).
+      // The decide rules as resolve served them (or the local SOPs held
+      // them), which the `@decide` records and fallback lines were compiled
+      // from: readable, and enough to compile them again.
+      ...(policy.decideRules && policy.decideRules.length > 0 ? { decideRules: policy.decideRules } : {}),
+      // With `sopRules`, `interventionMode`, `mcpAllowedServers`,
+      // `mcpRegistry` and `decideRules`, enough to rebuild this snapshot
+      // without the control plane (`forgetSnapshotMember`).
       sqlDropStrictBlock: policy.sqlDropStrictBlock,
       /**
        * The resolve response verbatim, alongside the gate projection below.
@@ -1015,16 +1283,18 @@ export function localResolvedPolicy(): ResolvedPolicy {
 }
 
 /**
- * Writes the snapshot of {@link localResolvedPolicy}, marked `source: local`.
+ * Writes the snapshot of {@link localResolvedPolicy}, marked `source: local`,
+ * with the local SOPs' decide rules ({@link localDecideRules}) when given.
  * The local holds refuse (`block`) rather than hold: with no control plane
  * nothing could approve them. Never fetches.
  */
 export async function writeLocalPolicySnapshot(
-  opts: { localHoldTokens?: readonly string[]; snapshotDir?: string } = {},
+  opts: { localHoldTokens?: readonly string[]; snapshotDir?: string; decideRules?: ServedDecideRule[] } = {},
 ): Promise<{ digest: string; ruleCount: number }> {
   const dir = opts.snapshotDir ?? DEFAULT_SNAPSHOT_DIR
+  const policy = { ...localResolvedPolicy(), ...(opts.decideRules ? { decideRules: opts.decideRules } : {}) }
   return oneAtATime(() =>
-    writeSnapshotFiles(localResolvedPolicy(), dir, opts.localHoldTokens ?? [], { localHolds: 'block', source: 'local' }),
+    writeSnapshotFiles(policy, dir, opts.localHoldTokens ?? [], { localHolds: 'block', source: 'local' }),
   )
 }
 
@@ -1134,6 +1404,7 @@ async function forgetSnapshotMember(dir: string, localHoldTokens: readonly strin
         ssoGroupPolicy,
         principal: null,
         mcpRegistry: parseMcpRegistryRecord(doc.mcpRegistry),
+        decideRules: parseServedDecideRules(doc.decideRules),
       },
       dir,
       localHoldTokens,

@@ -68,6 +68,11 @@ export const GATE_REFUSAL_CODES = [
   'E_UNKNOWN_IMAGE',
   'E_DIGEST_MISMATCH',
   'E_MANIFEST_UNPARSEABLE',
+  // A decide rule (the Decide tier, after every deterministic tier allowed
+  // the call): refused, escalated with no way to ask, or its engine unavailable.
+  'DECIDE_REFUSED',
+  'DECIDE_ESCALATED',
+  'GOVERNANCE_UNAVAILABLE',
   // The Workflow DevKit adapter (workflow.ts), before any tier runs.
   'WORKFLOW_SANDBOX',
   'NO_GATE',

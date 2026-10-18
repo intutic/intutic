@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { evaluate, loadSnapshot, SEV_BLOCK, SEV_SHADOW, SEV_WARN } from '../snapshot.js'
+import { CAN_EVALUATE_DECIDE, Gate } from '../gate.js'
+import { IntuticGateRefusal } from '../errors.js'
 import { expectLinearTime } from './linearTime.js'
 
 // Port of packages/intutic-clawde/tests/test_gate_snapshot.py.
@@ -257,5 +259,76 @@ describe('phrase rules', () => {
     const s = load()
     const commands = { 1: unit.repeat(times / 4), 4: unit.repeat(times) }
     expectLinearTime(JSON.stringify(unit), (scale) => evaluate('shell', '', commands[scale], s))
+  })
+})
+
+describe('decide records (snapshot format 2)', () => {
+  // The shared vectors' LLD example: an enforce record on Bash, and the
+  // fallback line it names.
+  const VECTORS = JSON.parse(readFileSync(join(__dirname, '../../../shared-types/fixtures/decide-vectors.json'), 'utf-8')).record as {
+    valid: Array<{ name: string; line: string }>
+    damaged: Array<{ name: string; line: string }>
+  }
+  const record = VECTORS.valid[0]!.line
+  const damaged = VECTORS.damaged.find((c) => c.name === 'a word of the rule changed under the same hash')!.line
+  const FB = 'decide-fallback:prod-data-export@6bcd6b021e7d'
+  const fallback = line(FB, 'block', '-', 'tool', 'Decide rule prod-data-export (Production data handling): upgrade to Intutic 3.0 to evaluate this rule', ' (Bash) ')
+  const other = line('d.rm', 'block', '-', 'command', 'Destructive', 'rm -rf')
+
+  it('carries a record that decodes, and keeps its fallback line for a caller that does not evaluate decide rules', () => {
+    const s = loadSnapshot(WS, rulesFile(['@format\t2', record, fallback, other]))
+    expect(s.state).toBe('ok')
+    expect(s.formatVersion).toBe(2)
+    expect(s.decideRules.map((r) => r.ref)).toEqual(['local:data.md#prod-data-export'])
+    expect(s.rules.map((r) => r.id)).toEqual([FB, 'd.rm'])
+    expect(evaluate('Bash', '', 'ls -la', s)).toMatchObject({ severity: SEV_BLOCK, ruleId: FB })
+  })
+
+  it('skips the fallback line a decoded record names only for a caller that evaluates decide rules', () => {
+    const s = loadSnapshot(WS, rulesFile(['@format\t2', record, fallback, other]), { evaluatesDecide: true })
+    expect(s.rules.map((r) => r.id)).toEqual(['d.rm'])
+    expect(evaluate('Bash', '', 'ls -la', s).severity).toBeNull()
+  })
+
+  it('a Gate, which does not evaluate decide rules yet, refuses through the fallback line', async () => {
+    expect(CAN_EVALUATE_DECIDE).toBe(false)
+    const saved = process.env.INTUTIC_SNAPSHOT_RULES
+    process.env.INTUTIC_SNAPSHOT_RULES = rulesFile(['@format\t2', record, fallback, other])
+    try {
+      const gate = new Gate({ repoRoot: dir, workspaceId: WS, useHookGate: false, useSopRules: false }, null)
+      const err = await gate.guard('Bash', { command: 'ls -la' }).then(() => null, (e: unknown) => e)
+      expect(err).toBeInstanceOf(IntuticGateRefusal)
+      expect((err as IntuticGateRefusal).reason).toContain(`[${FB}]`)
+      expect(gate.getSnapshot().decideRules).toHaveLength(1)
+    } finally {
+      if (saved === undefined) delete process.env.INTUTIC_SNAPSHOT_RULES
+      else process.env.INTUTIC_SNAPSHOT_RULES = saved
+    }
+  })
+
+  it('keeps the fallback line in force when the record does not decode', () => {
+    const s = loadSnapshot(WS, rulesFile(['@format\t2', damaged, fallback, other]), { evaluatesDecide: true })
+    expect(s.decideRules).toEqual([])
+    expect(evaluate('Bash', '', 'ls -la', s)).toMatchObject({ severity: SEV_BLOCK, ruleId: FB })
+  })
+
+  it('enforces a fallback line no record names', () => {
+    const orphan = line('decide-fallback:unreadable.1@6bcd6b021e7d', 'block', '-', 'tool', 'Decide rule x does not read', ' [^ ]+ ')
+    const s = loadSnapshot(WS, rulesFile([record, fallback, orphan]), { evaluatesDecide: true })
+    expect(s.rules.map((r) => r.id)).toEqual(['decide-fallback:unreadable.1@6bcd6b021e7d'])
+    expect(s.formatVersion).toBe(1)
+  })
+
+  it('drops the records with the rest of the dynamic tier on a snapshot that fails its check', () => {
+    const s = loadSnapshot(WS, rulesFile(['@format\t2', record, fallback], { digest: 'f'.repeat(32) }))
+    expect(s.state).toBe('invalid')
+    expect(s.decideRules).toEqual([])
+    expect(s.rules).toEqual([])
+  })
+
+  it('reads a newer format and still enforces what it reads', () => {
+    const s = loadSnapshot(WS, rulesFile(['@format\t3', '@novel\trecord', fallback]))
+    expect(s.formatVersion).toBe(3)
+    expect(evaluate('Bash', '', 'ls', s)).toMatchObject({ severity: SEV_BLOCK, ruleId: FB })
   })
 })

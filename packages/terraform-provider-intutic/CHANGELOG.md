@@ -1,3 +1,9 @@
+## 0.7.0 (Unreleased)
+
+FEATURES:
+
+* resource/intutic_guardrail: `kind = "decide"`, a rule that asks a self-hosted model a few narrow `yes_no` or `choice` questions about a tool call (`on = "tool_call"`, with `tools`) or a response (`on = "response"`), and combines the answers with `when`: true refuses, false allows, unknown escalates (`escalate`: `ask`, `review` or `refuse`). New attributes `rule_id` (the IR's `id`), `on`, `questions` and `band` (JSON, written with `jsonencode`), `when`, `escalate`, `rollout` (`shadow` or `enforce`) and `context`; `title` and `tools` take a decide rule's values too. The plan checks the rule exactly as every gate, SDK and the gateway do, with the same first failure and reason text: the shape, then `tools` against `on`, `context`, the question count, each band, the `when` grammar, the names and options `when` uses, that every question is used, and that no question asks about approval. The provider runs the shared decide vectors, so its validation and rule hash agree with the TypeScript, Python and Rust ports.
+
 ## 0.6.0 (October 16, 2026)
 
 BREAKING CHANGES:

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { writePolicySnapshot } from '@intutic/sync-daemon'
 import {
+  CAN_EVALUATE_DECIDE,
   parsePolicySnapshot,
   readPolicySnapshot,
   resolveSnapshotRulesPath,
@@ -63,6 +64,27 @@ describe('parsePolicySnapshot', () => {
     expect(snap.ruleCount).toBe(2)
     expect(snap.droppedRules).toBe(0)
     expect(snap.workspaceId).toBe('wk_alpha')
+  })
+
+  it('counts decide rules as the gates read them: while no gate evaluates them, every fallback line is a rule', () => {
+    expect(CAN_EVALUATE_DECIDE).toBe(false)
+    const vectors = JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/shared-types/fixtures/decide-vectors.json'), 'utf-8'),
+    ).record as { valid: Array<{ line: string }>; damaged: Array<{ name: string; line: string }> }
+    const fallback = rule('decide-fallback:prod-data-export@6bcd6b021e7d', ' (Bash) ')
+    const body = ['@format\t2', vectors.valid[0]!.line, fallback, rule('sop.1', ' (Write) ')]
+    const snap = parsePolicySnapshot(snapshotText(body))
+    expect({ state: snap.state, formatVersion: snap.formatVersion, decideRules: snap.decideRules, ruleCount: snap.ruleCount }).toEqual({
+      state: 'ok', formatVersion: 2, decideRules: 1, ruleCount: 2,
+    })
+
+    // A record that does not decode leaves its fallback line a rule.
+    const damaged = vectors.damaged.find((c) => c.name === 'a word of the rule changed under the same hash')!.line
+    const kept = parsePolicySnapshot(snapshotText(['@format\t2', damaged, fallback, rule('sop.1', ' (Write) ')]))
+    expect([kept.decideRules, kept.ruleCount]).toEqual([0, 2])
+
+    const invalid = parsePolicySnapshot(snapshotText(body, { digest: 'f'.repeat(32) }))
+    expect([invalid.state, invalid.decideRules, invalid.ruleCount]).toEqual(['invalid', 0, 0])
   })
 
   it('reports invalid when the body no longer matches the digest', () => {

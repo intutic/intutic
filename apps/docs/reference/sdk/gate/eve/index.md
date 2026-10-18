@@ -172,7 +172,7 @@ Structural copy of eve's `ApprovalCandidateStreamEvent` — the
 | ------ | ------ | ------ |
 | <a id="property-data"></a> `data` | `readonly` | `object` |
 | `data.candidateId` | `readonly` | `string` |
-| `data.outcome` | `readonly` | `"stale"` \| `"pending"` \| `"rejected"` \| `"failed"` \| `"timed-out"` |
+| `data.outcome` | `readonly` | `"failed"` \| `"stale"` \| `"pending"` \| `"rejected"` \| `"timed-out"` |
 | `data.reason?` | `readonly` | `string` |
 | `data.requestId` | `readonly` | `string` |
 | `data.responderPrincipalId` | `readonly` | `string` |

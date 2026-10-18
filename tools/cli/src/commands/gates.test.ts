@@ -168,6 +168,31 @@ describe('intutic gates install', () => {
     expect(text).not.toContain('stale')
   })
 
+  it('compiles the local decide: lines into the snapshot, and names a line that does not read', async () => {
+    await saveConfig(['claude-code'])
+    const rule = {
+      id: 'prod-data-export', on: 'tool_call', tools: ['Bash'],
+      questions: { exports: { type: 'yes_no', ask: 'Does this command copy customer data out of the production database?' } },
+      when: 'exports', rollout: 'enforce',
+    }
+    await put(join(ws, '.intutic', 'sops', 'data.md'), `---\ndecide: ${JSON.stringify(rule)}\ndecide: {"id":"half"}\n---\n# Production data handling\n\nStay in production.\n`)
+    // The pin an eval pass left for this rule's hash.
+    const evals = join(intutic, 'decide', 'evals', '5ea09c50d1d33141b613fff751953cc43e3046334451132712479468a46d2d91')
+    await put(join(evals, 'model.json'), { modelDigest: 'sha256:5f1c0e2a9b7d', evalRunId: 'eval_local_01', source: 'local' })
+
+    const r = await gates()
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('.intutic/sops/data.md: decide line 2 does not read, so its tools are refused: decide: on is required')
+    const lines = (await fs.readFile(snapshotRules, 'utf-8')).split('\n')
+    expect(lines).toContain('@format\t2')
+    const record = lines.find((l) => l.startsWith('@decide\t'))!
+    expect(record.split('\t').slice(0, 4)).toEqual(['@decide', 'decide-fallback:prod-data-export@6bcd6b021e7d', 'enforce', 'Bash'])
+    expect(lines.filter((l) => l.startsWith('decide-fallback:')).map((l) => l.split('\t')[0])).toEqual([
+      'decide-fallback:prod-data-export@6bcd6b021e7d',
+      'decide-fallback:unreadable.2@6bcd6b021e7d',
+    ])
+  })
+
   it('rotates a hook events log past the limit, keeping one previous copy', async () => {
     await saveConfig(['cursor'])
     const log = join(ws, '.intutic', 'events', 'hook-events.jsonl')

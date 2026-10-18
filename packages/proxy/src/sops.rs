@@ -34,6 +34,7 @@
 //! between an agent and a capability. Enforcement is the detectors and the
 //! WASM rules, which do not consult the role. See ADR-009.
 
+use crate::decide::DecideDecl;
 use crate::plugins::hook_rules::HookRuleDecl;
 use crate::plugins::sql_guard::{SqlGuardPolicy, SqlGuardSeverity};
 use crate::store::{LocalStore, PinScope, PinnedSopBlock};
@@ -227,15 +228,21 @@ pub struct Sop {
     /// that does not parse is kept as [`HookRuleDecl::Unreadable`], which
     /// refuses rather than enforcing nothing.
     pub hook_rules: Vec<HookRuleDecl>,
+    /// `decide: {json}` — one per line: a rule a self-hosted model answers
+    /// (`crate::decide`). A line that does not parse is kept as
+    /// [`DecideDecl::Unreadable`], which refuses what it would have judged.
+    pub decide_rules: Vec<DecideDecl>,
 }
 
 impl Sop {
     /// Whether hook rules are the only thing this SOP enforces — evaluated on
     /// the response's tool calls rather than by a request-side detector.
+    /// Decide rules are not read by a request-side detector either.
     pub fn only_hook_rules(&self) -> bool {
         !self.hook_rules.is_empty() && {
             let mut rest = self.clone();
             rest.hook_rules.clear();
+            rest.decide_rules.clear();
             !is_enforceable(&rest)
         }
     }
@@ -284,6 +291,7 @@ struct FrontMatter {
     sql_guard: Option<SqlGuardSeverity>,
     sql_allow_dsns: Vec<String>,
     hook_rules: Vec<HookRuleDecl>,
+    decide_rules: Vec<DecideDecl>,
     /// Rules that failed to parse, kept so they can be reported rather than
     /// dropped. A malformed ordering rule must not read as "no rule declared".
     rule_errors: Vec<String>,
@@ -466,6 +474,12 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
             .filter_map(|l| l.trim().strip_prefix("hook_rule:"))
             .map(crate::plugins::hook_rules::parse_line)
             .collect(),
+        // Also one JSON rule per line, at any indentation: it adds a rule.
+        decide_rules: crate::decide::parse_lines(
+            front
+                .lines()
+                .filter_map(|l| l.trim().strip_prefix("decide:")),
+        ),
         rule_errors: {
             let mut e = requires.1;
             e.extend(forbids.1);
@@ -702,6 +716,7 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         && fm.forbid_with.is_empty()
         && fm.sql_guard.is_none()
         && fm.hook_rules.is_empty()
+        && fm.decide_rules.is_empty()
         && fm.rule_errors.is_empty()
     {
         return None;
@@ -723,6 +738,11 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
             tracing::warn!(sop = %source, "Unreadable hook rule — every tool call is refused while it is in force: {error}");
         }
     }
+    for decl in &fm.decide_rules {
+        if let DecideDecl::Unreadable { error, .. } = decl {
+            tracing::warn!(sop = %source, "Unreadable decide rule — kept, so it refuses what it would have judged rather than nothing: {error}");
+        }
+    }
     Some(Sop {
         title,
         body: fm.body,
@@ -742,6 +762,7 @@ fn parse_sop_content(title: String, raw: &str, source: &str, scope: SopScope) ->
         sql_guard: fm.sql_guard,
         sql_allow_dsns: fm.sql_allow_dsns,
         hook_rules: fm.hook_rules,
+        decide_rules: fm.decide_rules,
     })
 }
 
@@ -1148,7 +1169,7 @@ mod enforceability_tests {
 /// lists that disagree is the same defect class as the tool-name lists in
 /// `actions.rs` — one place, or they drift.
 const ENFORCING_FIELDS: &str = "deny_tools, allow_harnesses, plan_steps, scope_paths, \
-     review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard, sql_allow_dsns or hook_rule";
+     review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard, sql_allow_dsns, hook_rule or decide";
 
 /// Does this SOP declare anything the proxy can act on?
 ///
@@ -1175,6 +1196,7 @@ fn is_enforceable(sop: &Sop) -> bool {
         || !sop.forbid_with.is_empty()
         || sop.sql_guard.is_some()
         || !sop.hook_rules.is_empty()
+        || !sop.decide_rules.is_empty()
 }
 
 /// What to say when policy loaded but none of it can fire.
@@ -2461,6 +2483,7 @@ mod tests {
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
+            decide_rules: Vec::new(),
         }
     }
 
@@ -2769,6 +2792,7 @@ mod tests {
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
+                decide_rules: Vec::new(),
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -2974,6 +2998,7 @@ mod render_determinism_tests {
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
+            decide_rules: Vec::new(),
         }
     }
 
@@ -3329,6 +3354,7 @@ mod discovery_tests {
             sql_guard: fm.sql_guard,
             sql_allow_dsns: fm.sql_allow_dsns,
             hook_rules: fm.hook_rules,
+            decide_rules: fm.decide_rules,
         }
     }
 
@@ -3900,6 +3926,7 @@ mod deny_tests {
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
+            decide_rules: Vec::new(),
         }
     }
 
@@ -3995,6 +4022,7 @@ mod harness_policy_tests {
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
+                decide_rules: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -4015,6 +4043,7 @@ mod harness_policy_tests {
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
+                decide_rules: Vec::new(),
             },
         ];
         assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
@@ -4079,6 +4108,7 @@ mod plan_step_tests {
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
+                decide_rules: Vec::new(),
             },
             Sop {
                 risk_tier: None,
@@ -4099,6 +4129,7 @@ mod plan_step_tests {
                 sql_guard: None,
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
+                decide_rules: Vec::new(),
             },
         ];
         assert_eq!(
@@ -4132,6 +4163,7 @@ mod plan_step_tests {
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
+            decide_rules: Vec::new(),
         }];
         assert!(collect_plan_steps(&sops, "reviewer").is_empty());
         assert!(collect_plan_steps(&sops, "").is_empty());
@@ -4222,6 +4254,7 @@ mod scope_and_review_tests {
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
+            decide_rules: Vec::new(),
         }];
         assert!(collect_scope_paths(&sops, "reviewer").is_empty());
         assert!(collect_review_before(&sops, "reviewer").is_empty());
@@ -4249,6 +4282,7 @@ mod scope_and_review_tests {
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
+            decide_rules: Vec::new(),
         };
         let sops = vec![mk("packages/proxy"), mk("infra"), mk("packages/proxy")];
         assert_eq!(
@@ -4347,6 +4381,7 @@ mod sop_status_snapshot_tests {
             sql_guard: None,
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
+            decide_rules: Vec::new(),
         }
     }
 

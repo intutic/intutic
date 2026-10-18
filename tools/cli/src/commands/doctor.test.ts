@@ -24,6 +24,8 @@ function health(over: Partial<PolicySnapshotHealth> = {}): PolicySnapshotHealth 
     ageDays: 0,
     ruleCount: 9,
     droppedRules: 0,
+    formatVersion: 1,
+    decideRules: 0,
     path: '/home/dev/.intutic/hooks/policy-snapshot.rules',
     ...over,
   }

@@ -67,7 +67,7 @@ def _guard(v, tmp_path, monkeypatch):
         return Resp(json.dumps({"rules": v["served"]["hookRules"]}).encode("utf-8"))
 
     monkeypatch.setattr(soprules.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(gate_mod.snapshot, "load_snapshot", lambda _ws: _EMPTY_SNAPSHOT)
+    monkeypatch.setattr(gate_mod.snapshot, "load_snapshot", lambda _ws, **_kw: _EMPTY_SNAPSHOT)
     client = RecordingClient()
     gate = Gate(GateConfig(repo_root=str(tmp_path), workspace_id="ws_layer", use_hook_gate=False), client)
     call = v["toolCall"]

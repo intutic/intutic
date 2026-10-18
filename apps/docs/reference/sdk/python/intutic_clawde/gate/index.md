@@ -424,6 +424,8 @@ class Snapshot(
     mcp_registry: Optional[dict] = None,
     mcp_allowlist: Optional[dict] = None,
     opaque: bool = False,
+    format_version: int = 1,
+    decide_rules: list = list(),
 )
 ```
 
@@ -432,8 +434,10 @@ class Snapshot(
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `age_days` | `int` | `0` |  |
+| `decide_rules` | `list` | `field(default_factory=list)` |  |
 | `digest` | `str` | `'none'` |  |
 | `dropped_rules` | `int` | `0` |  |
+| `format_version` | `int` | `1` |  |
 | `generated_at` | `str` | `''` |  |
 | `health_message` | `str` | — |  |
 | `mcp_allowlist` | `Optional[dict]` | `None` |  |
@@ -701,7 +705,11 @@ True when this call runs a test suite.
 ### load_snapshot()
 
 ```python
-def load_snapshot(workspace_id: str = '', path: str | None = None) -> Snapshot
+def load_snapshot(
+    workspace_id: str = '',
+    path: str | None = None,
+    evaluates_decide: bool = False,
+) -> Snapshot
 ```
 
 Read the policy snapshot the sync daemon compiled: from `path`, else
@@ -711,6 +719,11 @@ A missing file gives an empty snapshot whose `state` is "absent". A
 snapshot whose digest does not match its rules, or that was compiled for a
 workspace other than a non-empty `workspace_id`, is "invalid": its rules
 and MCP records are dropped.
+
+`evaluates_decide`: the caller evaluates the decide rules the records
+carry. Only then is a decoded record's fallback line skipped; otherwise the
+fallback line refuses the rule's tools, exactly as in a gate that reads no
+records.
 
 
 ### parse_register()

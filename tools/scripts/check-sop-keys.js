@@ -50,7 +50,7 @@ for (const m of src.matchAll(/\blist\("([a-z_]+):"/g)) keys.add(m[1])
 // to and blocks nothing on its own.
 keys.delete('roles')
 
-const MIN_KEYS = 9
+const MIN_KEYS = 11
 if (keys.size < MIN_KEYS) {
   console.error(
     `✖ found only ${keys.size} front-matter key(s) in sops.rs, expected at least ` +

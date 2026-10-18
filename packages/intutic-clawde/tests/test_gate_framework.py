@@ -76,7 +76,7 @@ def make_gate(tmp_path, monkeypatch, *, rules=(), transport=None,
     g = Gate(cfg, client=client)
     g._sop_rules = soprules.parse_rules({"rules": list(rules)})
     monkeypatch.setattr(gate_mod.snapshot, "load_snapshot",
-                        lambda _ws: _EMPTY_SNAPSHOT)
+                        lambda _ws, **_kw: _EMPTY_SNAPSHOT)
     return g
 
 

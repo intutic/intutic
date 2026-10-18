@@ -3,13 +3,13 @@
  * `intutic gates install` writes, and `intutic start` refreshes.
  *
  * The same writers `intutic connect` runs, fed from this machine only: the
- * local `.intutic/sops` for the rules files and the `review_before:` tokens,
- * and a policy snapshot compiled from no workspace policy
- * (`writeLocalPolicySnapshot`), which still carries the destructive-command
- * and skill tiers. Nothing here fetches, drains or reports; no MCP server is
- * wrapped and no file is made immutable. The harnesses' LLM traffic is
- * pointed at the local proxy only with `routing`, since a harness routed at a
- * proxy that is not running stops working.
+ * local `.intutic/sops` for the rules files, the `review_before:` tokens and
+ * the `decide:` rules, and a policy snapshot compiled from no workspace
+ * policy (`writeLocalPolicySnapshot`), which still carries the
+ * destructive-command and skill tiers. Nothing here fetches, drains or
+ * reports; no MCP server is wrapped and no file is made immutable. The
+ * harnesses' LLM traffic is pointed at the local proxy only with `routing`,
+ * since a harness routed at a proxy that is not running stops working.
  *
  * @module
  */
@@ -17,15 +17,17 @@
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import { homedir } from 'node:os'
-import { gateKindForHarness, HarnessType } from '@intutic/shared-types'
+import { gateKindForHarness, HarnessType, parseDecideLines } from '@intutic/shared-types'
 import type { GateKind } from '@intutic/shared-types'
 import {
   buildSnapshotRules,
   findGateFile,
   loadLocalSopEntries,
+  localDecideRules,
   localHoldTokensFor,
   localResolvedPolicy,
   noteProxyUrl,
+  type ServedDecideRule,
   SNAPSHOT_JSON,
   SNAPSHOT_RULES,
   updatePreToolUseHooks,
@@ -122,6 +124,24 @@ async function rotateHookEvents(workspaceRoot: string, dryRun: boolean): Promise
 }
 
 /**
+ * One warning per `decide:` line that does not read, naming its SOP file and
+ * its place among that file's decide lines. The snapshot refuses the tools
+ * such a line names until it is fixed.
+ */
+function unreadableDecideLines(rules: readonly ServedDecideRule[]): string[] {
+  const bySop = new Map<string, string[]>()
+  for (const r of rules) bySop.set(r.sopId, [...(bySop.get(r.sopId) ?? []), String(r.ir)])
+  const out: string[] = []
+  for (const [sopId, lines] of bySop) {
+    const file = `.intutic/sops/${sopId.replace(/^local:/, '').replace(':', '/')}`
+    parseDecideLines(lines).forEach((d, i) => {
+      if (d.kind === 'unreadable') out.push(`${file}: decide line ${i + 1} does not read, so its tools are refused: ${d.error}`)
+    })
+  }
+  return out
+}
+
+/**
  * Writes (or with `dryRun`, reports) the local gates. See the module note for
  * what it does not do.
  */
@@ -141,12 +161,16 @@ export async function installLocalGates(opts: LocalGatesOptions): Promise<LocalG
       warn(`Could not read every local SOP in .intutic/sops; the rules files are written without the ones that failed: ${err instanceof Error ? err.message : String(err)}`),
   })
   const holdTokens = await localHoldTokensFor(root, [], undefined, harnesses as HarnessType[])
+  // Every local SOP's decide: rules, whatever the session selected, as for
+  // the holds: the selection narrows the rules files, never what is enforced.
+  const decideRules = await localDecideRules(await loadLocalSopEntries(root, harnesses as HarnessType[], { ignoreSelection: true }))
+  for (const line of unreadableDecideLines(decideRules)) warn(line)
 
   let snapshot: { digest: string; ruleCount: number }
   if (dryRun) {
-    snapshot = { digest: '', ruleCount: buildSnapshotRules(localResolvedPolicy(), holdTokens, 'block').length }
+    snapshot = { digest: '', ruleCount: buildSnapshotRules({ ...localResolvedPolicy(), decideRules }, holdTokens, 'block').length }
   } else {
-    snapshot = await writeLocalPolicySnapshot({ localHoldTokens: holdTokens, snapshotDir: snapshotDir() })
+    snapshot = await writeLocalPolicySnapshot({ localHoldTokens: holdTokens, snapshotDir: snapshotDir(), decideRules })
   }
   files.push(node_path.join(snapshotDir(), SNAPSHOT_RULES), node_path.join(snapshotDir(), SNAPSHOT_JSON))
 

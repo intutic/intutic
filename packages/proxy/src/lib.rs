@@ -8,6 +8,8 @@ pub mod config;
 pub mod credential;
 /// Envelope encryption for the provider credentials stored in Valkey
 pub mod credential_crypto;
+/// Decide: rules asked of a self-hosted decision model — grammar, semantics and the engine client
+pub mod decide;
 pub mod dlp;
 pub mod graph;
 pub mod injection;

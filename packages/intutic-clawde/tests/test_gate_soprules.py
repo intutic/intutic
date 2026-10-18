@@ -217,7 +217,7 @@ class TestGateIntegration:
         g._sop_rules = soprules.parse_rules({"rules": list(rows)})
         g._snapshot = None
         monkeypatch.setattr(gate_mod.snapshot, "load_snapshot",
-                            lambda _ws: _EMPTY_SNAPSHOT)
+                            lambda _ws, **_kw: _EMPTY_SNAPSHOT)
         return g
 
     def test_a_matching_block_rule_stops_the_call(self, monkeypatch, tmp_path):

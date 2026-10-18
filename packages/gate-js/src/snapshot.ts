@@ -64,6 +64,15 @@ import {
   type McpRegistryRecord,
 } from './mcpRegistryRecord.js'
 import { decodeSsoGroupRecord, SSO_GROUP_RECORD_TAG, type SsoGroupRecord } from './ssoGroups.js'
+import { decideRuleHash, validateDecideRule } from './decide.js'
+import {
+  DECIDE_FALLBACK_PREFIX,
+  DECIDE_RECORD_TAG,
+  decodeDecideRecord,
+  decodeSnapshotFormatRecord,
+  SNAPSHOT_FORMAT_RECORD_TAG,
+  type DecideRecord,
+} from './decideRecord.js'
 import { INTERVENTION_MODE_RECORD_TAG, isOpaqueInterventionModeRecord } from './opaqueRefusal.js'
 import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
 import { classify } from './actions.js'
@@ -144,6 +153,16 @@ export class Snapshot {
    * check, since it only ever hides text and never allows a call.
    */
   opaque = false
+  /** The snapshot format its `@format` record names; 1 without one. */
+  formatVersion = 1
+  /**
+   * The decide rules whose `@decide` records decoded, rule and hash checked,
+   * in snapshot order. Each one's fallback line is skipped only for a caller
+   * that evaluates decide rules ({@link LoadSnapshotOptions}); a record that
+   * does not decode is not here, and its fallback line refuses. Empty on a
+   * snapshot that fails its integrity check.
+   */
+  decideRules: DecideRecord[] = []
 
   get healthMessage(): string {
     switch (this.state) {
@@ -177,6 +196,12 @@ export interface Decision {
   next?: number
 }
 
+/** A decide record's rule: its hash when it is valid. */
+function checkDecideRule(ir: unknown): string | null {
+  const v = validateDecideRule(ir)
+  return v.ok ? decideRuleHash(v.rule, (t) => createHash('sha256').update(t, 'utf-8').digest('hex')) : null
+}
+
 function allow(): Decision {
   return { severity: null, reason: '', ruleId: '' }
 }
@@ -199,6 +224,15 @@ function normalise(value: unknown): string {
   return ' ' + s.replace(/\s+/g, ' ').trim() + ' '
 }
 
+export interface LoadSnapshotOptions {
+  /**
+   * The caller evaluates the decide rules the records carry. Only then is a
+   * decoded record's fallback line skipped; otherwise the fallback line
+   * refuses the rule's tools, exactly as in a gate that reads no records.
+   */
+  evaluatesDecide?: boolean
+}
+
 /**
  * Read the policy snapshot the sync daemon compiled: from `path`, else
  * {@link snapshotPath}. A missing file gives an empty snapshot whose `state`
@@ -206,7 +240,7 @@ function normalise(value: unknown): string {
  * was compiled for a workspace other than a non-empty `workspaceId`, is
  * `'invalid'`: its rules and MCP records are dropped.
  */
-export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
+export function loadSnapshot(workspaceId = '', path?: string, opts: LoadSnapshotOptions = {}): Snapshot {
   const p = path ?? snapshotPath()
   const snap = new Snapshot()
 
@@ -248,6 +282,15 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
       snap.opaque = isOpaqueInterventionModeRecord(line)
       continue
     }
+    if (line.startsWith(`${SNAPSHOT_FORMAT_RECORD_TAG}\t`)) {
+      snap.formatVersion = decodeSnapshotFormatRecord(line) ?? snap.formatVersion
+      continue
+    }
+    if (line.startsWith(`${DECIDE_RECORD_TAG}\t`)) {
+      const record = decodeDecideRecord(line, checkDecideRule)
+      if (record) snap.decideRules.push(record)
+      continue
+    }
 
     const f = line.split('\t')
     // Column order: id, severity, flags, subject, reason, source(regex), [argPatternB64].
@@ -266,6 +309,14 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     } catch {
       snap.droppedRules += 1
     }
+  }
+
+  // A fallback line stands in for a decide rule a gate cannot evaluate. A
+  // caller that evaluates the rule from its record skips the line, but only
+  // when that record decoded: any other line with the prefix is enforced.
+  if (opts.evaluatesDecide === true && snap.decideRules.length > 0) {
+    const skip = new Set(snap.decideRules.map((r) => r.fallbackId))
+    snap.rules = snap.rules.filter((r) => !r.id.startsWith(DECIDE_FALLBACK_PREFIX) || !skip.has(r.id))
   }
 
   // Integrity. A digest nobody recomputes is a comment; a workspace id nobody
@@ -300,6 +351,8 @@ export function loadSnapshot(workspaceId = '', path?: string): Snapshot {
     // Neither MCP record can be vouched for: the gate admits no MCP server.
     snap.mcpRegistry = null
     snap.mcpAllowlist = null
+    // The decide records go with the rest of the dynamic tier.
+    snap.decideRules = []
   }
 
   if (snap.state === 'ok' && snap.generatedAt) {

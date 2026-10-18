@@ -18,6 +18,13 @@
     },
     "eventTypes": {
     },
+    "refusalCodes": {
+      "gate:DECIDE_REFUSED": "reserved for decide rules: defined with the engine client, claimed by the decide feature entry once the gate tier that returns it ships",
+      "gate:DECIDE_ESCALATED": "reserved for decide rules: defined with the engine client, claimed by the decide feature entry once the gate tier that returns it ships",
+      "hook:DECIDE_REFUSED": "reserved for decide rules: defined with the engine client, claimed by the decide feature entry once the hook gates that return it ship",
+      "hook:DECIDE_ESCALATED": "reserved for decide rules: defined with the engine client, claimed by the decide feature entry once the hook gates that return it ship",
+      "hook:GOVERNANCE_UNAVAILABLE": "reserved for decide rules: defined with the engine client, claimed by the decide feature entry once the hook gates that return it ship"
+    },
     "docsPages": {
       "reference/workspace-settings.md": "the reference for every workspace settings key, which many features share; services/control-plane/__tests__/unit/settingsKeyParity.test.ts holds it to the settings schema",
       "compare/noma.md": "a competitor comparison page, which describes another vendor's product rather than shipping an Intutic feature",
