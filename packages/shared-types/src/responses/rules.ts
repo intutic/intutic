@@ -85,10 +85,26 @@ export const SopResponse = z.object({
 })
 export type SopResponse = z.infer<typeof SopResponse>
 
+/**
+ * A SOP uses front-matter keys that some of the org's registered gateways are
+ * too old to read (`sopKeySince.ts`). A proxy ignores a key it does not know,
+ * so on those gateways the rule does nothing; the save itself succeeds.
+ */
+export const SopGatewayWarning = z.object({
+  code: z.literal('sop_key_needs_newer_gateway'),
+  message: z.string(),
+  keys: z.array(z.object({ key: z.string(), since: z.string() })).describe('Each key, and the proxy release that first reads it.'),
+  gateways: z
+    .array(z.object({ gatewayId: z.string(), name: z.string(), proxyVersion: z.string().nullable() }))
+    .describe('The active gateways too old for at least one key; `proxyVersion` null when one has never reported it.'),
+})
+export type SopGatewayWarning = z.infer<typeof SopGatewayWarning>
+
 /** `POST /api/v1/sops`: the created SOP; its tiers are the ones the request named. */
 export const SopCreatedResponse = SopResponse.extend({
   riskTier: z.nativeEnum(RiskLevel),
   complexityTier: z.nativeEnum(ComplexityTier),
+  warnings: z.array(SopGatewayWarning).optional().describe('Present when the SOP uses a key a registered gateway is too old to read.'),
 })
 export type SopCreatedResponse = z.infer<typeof SopCreatedResponse>
 
@@ -111,6 +127,7 @@ export const SopUpdatedResponse = z.object({
       impactSummary: z.string(),
     })
     .optional(),
+  warnings: z.array(SopGatewayWarning).optional().describe('Present when the SOP uses a key a registered gateway is too old to read.'),
 })
 export type SopUpdatedResponse = z.infer<typeof SopUpdatedResponse>
 
