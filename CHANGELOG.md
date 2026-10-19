@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Apple silicon CLI binary runs.** `cli-macos-arm64` shipped unsigned,
+  and macOS kills an unsigned arm64 binary at launch, so the download did
+  nothing (exit 137); `npm install -g @intutic/cli` was unaffected. The release
+  pipeline now ad-hoc signs both macOS binaries and runs the arm64 one before
+  publishing it.
+
 ## [3.0.0] - 2026-10-19
 
 ### Added
