@@ -1,6 +1,6 @@
 {
   "name": "@intutic/docs",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "private": true,
   "type": "module",
   "description": "Intutic Developer Portal \u2014 Control and governance framework for AI Agents",
