@@ -115,7 +115,7 @@ use crate::config::ResponseGateConfig;
 use crate::plugins::anomaly::AnomalyKind;
 use crate::plugins::hook_rules::{CallInput, HookRuleDecision, HookRuleHit, HookRuleSet};
 use crate::plugins::sql_guard::{self, SqlGuardPolicy, SqlViolation};
-use crate::refusal::{tool_rule_id, Code, InterventionMode, Refusal};
+use crate::refusal::{tool_rule_id, Code, InterventionMode, Refusal, RefusalScope};
 use crate::sso_groups::{Clearance, SsoGroupDecision, SsoGroupGate};
 
 /// Why the gate refused a response.
@@ -139,9 +139,41 @@ pub enum DenialReason {
     /// it could not decide (the gateway has no ask), or the engine could not
     /// answer for an enforcing rule.
     Decide(crate::decide::gateway::ToolCallRefusal),
+    /// A call a qualified `requires_before:` rule gates while its
+    /// prerequisite is unmet.
+    Prerequisite(PrerequisiteDenial),
+    /// A file-changing call outside `scope_paths` under
+    /// `scope_paths_mode: enforce`.
+    OutOfScope {
+        tool: String,
+        /// The targets outside the scope, sorted and deduped.
+        paths: Vec<String>,
+        /// `scope_paths.<sop title>`.
+        rule: String,
+    },
+    /// A call this node's kind may not make.
+    NodeKind {
+        tool: String,
+        denial: crate::plugins::anomaly::graph_detectors::NodeKindDenial,
+    },
     /// The body did not parse, so the gate could not show it carried no denied
     /// call. Only ever produced when `fail_closed` is set.
     Unparseable,
+}
+
+/// A qualified prerequisite the response gate found unmet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrerequisiteDenial {
+    /// The tool call withheld.
+    pub tool: String,
+    /// The gated token it was (`action:deploy`), or the tool name itself.
+    pub gated: String,
+    /// The prerequisite as written, qualifier included (`action:run_tests[ok]`).
+    pub prerequisite: String,
+    /// `requires_before.<first>-><then>`.
+    pub rule: String,
+    /// Why it is unmet, in 3.1's words.
+    pub reason: String,
 }
 
 /// A refusal the caller must act on before any of the response reaches the client.
@@ -195,10 +227,48 @@ impl Denial {
             // forbids, and the rule id is the one every other layer names.
             DenialReason::HookRule(hit) => Refusal::new(Code::ToolDenied, hit.rule_id.clone()),
             DenialReason::Decide(d) => Refusal::new(Code::ToolDenied, d.rule_id.clone()),
+            DenialReason::Prerequisite(p) => Refusal::new(Code::PrerequisiteUnmet, p.rule.clone()),
+            DenialReason::OutOfScope { rule, .. } => Refusal::new(Code::OutOfScope, rule.clone()),
+            DenialReason::NodeKind { denial, .. } => {
+                Refusal::new(Code::ToolDenied, denial.rule.clone())
+            }
             DenialReason::Unparseable => {
                 Refusal::new(Code::ResponseUnparseable, "response_gate.fail_closed")
             }
         }
+        .with_scope(self.scope())
+    }
+
+    /// What the refusal was about, for the agent to retry inside it.
+    /// Bounded, and dropped under OPAQUE, by [`Refusal`].
+    pub fn scope(&self) -> Option<RefusalScope> {
+        Some(match &self.reason {
+            DenialReason::Tools(t) => RefusalScope::tools(t.iter().cloned()),
+            DenialReason::SsoGroup { tool, decision } => {
+                let s = RefusalScope::tools([tool.as_str()]);
+                match &decision.rule_id {
+                    Some(r) => s.with_rule(r.clone()),
+                    None => s,
+                }
+            }
+            DenialReason::DestructiveSql(_) => return None,
+            DenialReason::HookRule(hit) => {
+                RefusalScope::tools([hit.tool.as_str()]).with_rule(hit.rule_id.clone())
+            }
+            DenialReason::Decide(d) => {
+                RefusalScope::tools([d.tool.as_str()]).with_rule(d.rule_id.clone())
+            }
+            DenialReason::Prerequisite(p) => RefusalScope::tools([p.gated.as_str()])
+                .with_step(p.prerequisite.clone())
+                .with_rule(p.rule.clone()),
+            DenialReason::OutOfScope { paths, rule, .. } => {
+                RefusalScope::paths(paths.iter().cloned()).with_rule(rule.clone())
+            }
+            DenialReason::NodeKind { tool, denial } => {
+                RefusalScope::tools([tool.as_str()]).with_rule(denial.rule.clone())
+            }
+            DenialReason::Unparseable => return None,
+        })
     }
 
     /// The mode this refusal is shown to the agent under. Every denial but
@@ -265,6 +335,26 @@ impl Denial {
                 d.code,
                 d.reason
             ),
+            DenialReason::Prerequisite(p) => format!(
+                "Response blocked by anomaly policy [{}]: tool call {} withheld — {} [{}]",
+                AnomalyKind::ScopeViolation.as_str(),
+                p.tool,
+                p.reason,
+                p.rule
+            ),
+            DenialReason::OutOfScope { tool, paths, rule } => format!(
+                "Response blocked by anomaly policy [{}]: tool call {} changes files outside the declared scope: {} [{}]",
+                AnomalyKind::ScopeViolation.as_str(),
+                tool,
+                paths.join(", "),
+                rule
+            ),
+            DenialReason::NodeKind { denial, .. } => format!(
+                "Response blocked by anomaly policy [{}]: {} [{}]",
+                AnomalyKind::UnauthorizedTool.as_str(),
+                denial.reason,
+                denial.rule
+            ),
             DenialReason::Unparseable => format!(
                 "Response blocked by anomaly policy [{}]: response body did not parse, and a tool deny list, SSO group policy or SQL guard is in force — cannot show it carries no forbidden call",
                 AnomalyKind::UnauthorizedTool.as_str()
@@ -303,6 +393,27 @@ impl Denial {
                  The call was withheld by the proxy and never reached the client, so it did not run. \
                  Do not retry it — continue without that call, or ask an operator to change the policy.",
                 d.tool, d.reason, d.code, d.rule_id
+            ),
+            DenialReason::Prerequisite(p) => format!(
+                "[Intutic] Blocked tool call: {}. {}. [{}] \
+                 The call was withheld by the proxy and never reached the client, so it did not run. \
+                 Run {} and let it pass first, then retry.",
+                p.tool,
+                p.reason,
+                p.rule,
+                p.prerequisite.trim_end_matches("[ok]")
+            ),
+            DenialReason::OutOfScope { tool, paths, rule } => format!(
+                "[Intutic] Blocked tool call: {tool}. It changes {} outside the file scope this task is limited to. [{rule}] \
+                 The call was withheld by the proxy and never reached the client, so it did not run. \
+                 Keep changes inside the declared scope, or ask an operator to widen it.",
+                paths.join(", ")
+            ),
+            DenialReason::NodeKind { denial, .. } => format!(
+                "[Intutic] Blocked tool call: {}. [{}] \
+                 The call was withheld by the proxy and never reached the client, so it did not run. \
+                 Do not retry it — hand the work to a node allowed to do it.",
+                denial.reason, denial.rule
             ),
             DenialReason::Unparseable => {
                 "[Intutic] The model's response could not be parsed, and a tool deny list, SSO group policy or SQL guard is in force \
@@ -564,6 +675,232 @@ pub async fn gate_response_decide(
         if let Some(refusal) = rules.check_tool_call(&name, &args).await {
             return Some(Denial {
                 reason: DenialReason::Decide(refusal),
+                block_index: 0,
+            });
+        }
+    }
+    None
+}
+
+/// The argument-level checks 3.1 added to the response gate: qualified
+/// prerequisites (§2.4), the enforced path scope (§4.1) and the node kind's
+/// tool limits (§9.2). Each is inert until declared; with none declared the
+/// gate never looks at a response.
+///
+/// Stateful within one response: a file write the response carries before a
+/// gated call makes a passing test result stale for the calls after it (Q1).
+#[derive(Debug, Clone, Default)]
+pub struct ArgGates {
+    /// Qualified `requires_before:` rules: `(prerequisite base, gated,
+    /// adjacent)` (`plugins::anomaly::outcome::qualified_rules`).
+    pub prerequisites: Vec<(String, String, bool)>,
+    /// The session's recorded outcomes; `None` when they could not be read,
+    /// which leaves every qualified rule unmet.
+    pub outcomes: Option<Vec<(String, crate::plugins::anomaly::outcome::OutcomeEntry)>>,
+    /// The enforced scope and the rule id it is refused under.
+    pub scope: Option<ScopeGate>,
+    /// The node kind in force, when it limits anything.
+    pub node_kind: Option<crate::plugins::anomaly::graph_detectors::EffectiveNodeKind>,
+    /// A file write has been seen earlier in this response.
+    wrote: bool,
+    /// Another call has been seen earlier in this response.
+    called: bool,
+}
+
+/// `scope_paths_mode: enforce`'s union of scopes, and its rule id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeGate {
+    pub paths: Vec<String>,
+    /// `scope_paths.<sop title>`, the first enforcing SOP's title.
+    pub rule: String,
+}
+
+impl ArgGates {
+    pub fn new(
+        prerequisites: Vec<(String, String, bool)>,
+        outcomes: Option<Vec<(String, crate::plugins::anomaly::outcome::OutcomeEntry)>>,
+        scope: Option<ScopeGate>,
+        node_kind: Option<crate::plugins::anomaly::graph_detectors::EffectiveNodeKind>,
+    ) -> Self {
+        Self {
+            prerequisites,
+            outcomes,
+            scope,
+            node_kind,
+            wrote: false,
+            called: false,
+        }
+    }
+
+    /// Nothing declared: the gate has nothing to check.
+    pub fn is_empty(&self) -> bool {
+        self.prerequisites.is_empty()
+            && self.scope.is_none()
+            && self.node_kind.as_ref().is_none_or(|k| k.limits.is_none())
+    }
+
+    /// Whether a streamed block of `tool` must be held until its arguments
+    /// are complete, because one of the checks needs them.
+    pub fn holds(&self, tool: &str) -> bool {
+        use crate::plugins::anomaly::actions::{
+            tool_is, EDITOR_TOOLS, FETCH_TOOLS, READ_TOOLS, SHELL_TOOLS,
+        };
+        if !self.prerequisites.is_empty()
+            && (tool_is(tool, SHELL_TOOLS)
+                || tool_is(tool, FETCH_TOOLS)
+                || tool_is(tool, READ_TOOLS)
+                || tool_is(tool, EDITOR_TOOLS)
+                || self
+                    .prerequisites
+                    .iter()
+                    .any(|(_, gated, _)| gated.eq_ignore_ascii_case(tool)))
+        {
+            return true;
+        }
+        if self.scope.is_some() && crate::manifest::may_change_files(tool) {
+            return true;
+        }
+        if let Some(k) = self.node_kind.as_ref().filter(|k| !k.limits.is_none()) {
+            use crate::node_kind::Capability;
+            let refuses = |c| k.limits.refuses(c);
+            return (refuses(Capability::Spawn)
+                && crate::plugins::anomaly::graph_detectors::is_spawn_tool(tool))
+                || (refuses(Capability::Write) && crate::manifest::may_change_files(tool))
+                || (refuses(Capability::Shell) && tool_is(tool, SHELL_TOOLS));
+        }
+        false
+    }
+
+    /// A tool started on a stream without being held: a write tool makes a
+    /// passing result stale for the rest of the response.
+    pub fn note_unheld_start(&mut self, tool: &str) {
+        use crate::manifest::{DELETE_TOOLS, EDIT_TOOLS, MOVE_TOOLS, WRITE_TOOLS};
+        use crate::plugins::anomaly::actions::tool_is;
+        self.called = true;
+        if tool_is(tool, WRITE_TOOLS)
+            || tool_is(tool, EDIT_TOOLS)
+            || tool_is(tool, DELETE_TOOLS)
+            || tool_is(tool, MOVE_TOOLS)
+        {
+            self.wrote = true;
+        }
+    }
+
+    /// Judge one complete call, in response order. `None` releases it, and
+    /// notes whether it wrote a file.
+    pub fn check(&mut self, tool: &str, args: &Value) -> Option<DenialReason> {
+        use crate::manifest::{InvocationSource, ToolInvocation};
+        if let Some(denial) = self
+            .node_kind
+            .as_ref()
+            .and_then(|k| crate::plugins::anomaly::graph_detectors::withheld_tool(k, tool, args))
+        {
+            return Some(DenialReason::NodeKind {
+                tool: tool.to_string(),
+                denial,
+            });
+        }
+        let call = ToolInvocation {
+            name: tool.to_string(),
+            input: args.clone(),
+            source: InvocationSource::Call,
+            call_id: None,
+            is_error: None,
+        };
+        if !self.prerequisites.is_empty() {
+            let mut tokens = crate::plugins::anomaly::actions::classify(tool, args);
+            tokens.push(tool.to_string());
+            use crate::plugins::anomaly::outcome::{
+                prerequisite_unmet, prerequisite_unmet_reason, Case,
+            };
+            let now = chrono::Utc::now().timestamp_millis();
+            for (base, gated, adjacent) in &self.prerequisites {
+                if !tokens.iter().any(|t| t.eq_ignore_ascii_case(gated)) {
+                    continue;
+                }
+                let unmet = match prerequisite_unmet(self.outcomes.as_deref(), base, *adjacent, now)
+                {
+                    // Earlier in this response: a write makes the pass
+                    // describe code that is no longer there (Q1), and any
+                    // call comes between it and a `~>` rule's call.
+                    None if self.wrote => Some((Case::Changed, None)),
+                    None if *adjacent && self.called => Some((Case::NotAdjacent, None)),
+                    other => other,
+                };
+                if let Some((case, why)) = unmet {
+                    let prerequisite = format!("{base}[ok]");
+                    let arrow = if *adjacent { "~>" } else { "->" };
+                    return Some(DenialReason::Prerequisite(PrerequisiteDenial {
+                        tool: tool.to_string(),
+                        gated: gated.clone(),
+                        rule: format!("requires_before.{prerequisite}{arrow}{gated}"),
+                        reason: prerequisite_unmet_reason(base, gated, case, why.as_deref(), ""),
+                        prerequisite,
+                    }));
+                }
+            }
+        }
+        let entries = crate::manifest::manifest_from_invocations(std::slice::from_ref(&call));
+        if let Some(scope) = &self.scope {
+            let mut outside: Vec<String> = entries
+                .iter()
+                .filter(|e| {
+                    e.op.is_mutation()
+                        && e.target_kind == crate::manifest::TargetKind::Path
+                        && !e.target.is_empty()
+                        && !crate::plugins::anomaly::detectors::is_within_scope(
+                            &e.target,
+                            &scope.paths,
+                        )
+                })
+                .map(|e| e.target.clone())
+                .collect();
+            if !outside.is_empty() {
+                outside.sort();
+                outside.dedup();
+                return Some(DenialReason::OutOfScope {
+                    tool: tool.to_string(),
+                    paths: outside,
+                    rule: scope.rule.clone(),
+                });
+            }
+        }
+        if entries.iter().any(|e| e.op.is_mutation())
+            || crate::plugins::anomaly::outcome::is_file_write_call(tool, args)
+        {
+            self.wrote = true;
+        }
+        self.called = true;
+        None
+    }
+}
+
+/// Evaluate a complete, parsed response body against [`ArgGates`], each call
+/// in order. Returns the first refusal.
+///
+/// Inert when the gate is off or nothing is declared. A body that will not
+/// parse is refused under `fail_closed` while any of them is in force, like
+/// the deny list: it cannot be shown to carry no gated call.
+pub fn gate_response_args(
+    cfg: &ResponseGateConfig,
+    body: Option<&Value>,
+    gates: &ArgGates,
+) -> Option<Denial> {
+    if !cfg.enabled || gates.is_empty() {
+        return None;
+    }
+    let Some(body) = body else {
+        return cfg.fail_closed.then_some(Denial {
+            reason: DenialReason::Unparseable,
+            block_index: 0,
+        });
+    };
+    let mut gates = gates.clone();
+    for (name, args, raw) in crate::routing::integrity::response_tool_calls(body) {
+        let args = args.unwrap_or_else(|| raw.map_or(Value::Null, Value::String));
+        if let Some(reason) = gates.check(&name, &args) {
+            return Some(Denial {
+                reason,
                 block_index: 0,
             });
         }
@@ -1808,5 +2145,199 @@ mod tests {
                 assert_payloads_parse(&tail);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod lld75_arg_gate_tests {
+    use super::*;
+    fn entry(state: &str) -> crate::plugins::anomaly::outcome::OutcomeEntry {
+        use crate::plugins::anomaly::outcome::{Outcome, OutcomeEntry};
+        let (o, why, changed) = match state {
+            "ok" => (Outcome::Ok, "exit_zero", false),
+            "failed" => (Outcome::Failed, "summary_failed", false),
+            "unknown" => (Outcome::Unknown, "no_signal", false),
+            _ => (Outcome::Ok, "exit_zero", true),
+        };
+        OutcomeEntry {
+            o,
+            at: chrono::Utc::now().timestamp_millis() - 1_000,
+            why: Some(why.into()),
+            changed,
+            later: false,
+        }
+    }
+    use crate::plugins::sql_guard::StreamHold;
+    use serde_json::json;
+
+    fn cfg() -> ResponseGateConfig {
+        ResponseGateConfig::default()
+    }
+
+    fn prereq_gates(state: Option<&str>) -> ArgGates {
+        ArgGates::new(
+            vec![("action:run_tests".into(), "action:deploy".into(), false)],
+            Some(
+                state
+                    .map(|s| vec![("action:run_tests".to_string(), entry(s))])
+                    .unwrap_or_default(),
+            ),
+            None,
+            None,
+        )
+    }
+
+    fn openai(calls: &[(&str, Value)]) -> Value {
+        json!({"choices": [{"index": 0, "message": {"role": "assistant", "content": null,
+            "tool_calls": calls.iter().enumerate().map(|(i, (n, a))| json!({
+                "id": format!("call_{i}"), "type": "function",
+                "function": {"name": n, "arguments": a.to_string()}})).collect::<Vec<_>>()}}]})
+    }
+
+    #[test]
+    fn an_unmet_prerequisite_withholds_the_gated_call() {
+        let push = openai(&[("Bash", json!({"command": "git push origin main"}))]);
+        let d = gate_response_args(&cfg(), Some(&push), &prereq_gates(Some("failed")))
+            .expect("refused");
+        let r = d.refusal();
+        assert_eq!(r.code, Code::PrerequisiteUnmet);
+        assert_eq!(
+            r.rule,
+            "requires_before.action:run_tests[ok]->action:deploy"
+        );
+        assert_eq!(r.scope.as_ref().unwrap().tools, vec!["action:deploy"]);
+        assert!(
+            d.agent_message()
+                .contains("the last action:run_tests failed (summary_failed)"),
+            "{}",
+            d.agent_message()
+        );
+        // A passing run lets it through; an unrelated call never asks.
+        assert!(gate_response_args(&cfg(), Some(&push), &prereq_gates(Some("ok"))).is_none());
+        let ls = openai(&[("Bash", json!({"command": "ls"}))]);
+        assert!(gate_response_args(&cfg(), Some(&ls), &prereq_gates(None)).is_none());
+        // Inert with nothing declared, and fail-closed on an unreadable body.
+        assert!(gate_response_args(&cfg(), Some(&push), &ArgGates::default()).is_none());
+        assert_eq!(
+            gate_response_args(&cfg(), None, &prereq_gates(Some("ok"))).map(|d| d.reason),
+            Some(DenialReason::Unparseable)
+        );
+    }
+
+    #[test]
+    fn a_write_earlier_in_the_response_makes_a_pass_stale() {
+        let body = openai(&[
+            ("Write", json!({"file_path": "src/a.rs", "content": "x"})),
+            ("Bash", json!({"command": "git push"})),
+        ]);
+        let d = gate_response_args(&cfg(), Some(&body), &prereq_gates(Some("ok"))).expect("stale");
+        assert!(
+            d.log_message().contains("files changed"),
+            "{}",
+            d.log_message()
+        );
+    }
+
+    #[test]
+    fn an_enforced_scope_withholds_writes_outside_it() {
+        let gates = ArgGates::new(
+            Vec::new(),
+            None,
+            Some(ScopeGate {
+                paths: vec!["src".into()],
+                rule: "scope_paths.Backend".into(),
+            }),
+            None,
+        );
+        let out = openai(&[(
+            "Write",
+            json!({"file_path": "infra/main.tf", "content": "x"}),
+        )]);
+        let d = gate_response_args(&cfg(), Some(&out), &gates).expect("refused");
+        assert_eq!(d.refusal().code, Code::OutOfScope);
+        assert_eq!(d.refusal().rule, "scope_paths.Backend");
+        assert_eq!(d.scope().unwrap().paths, vec!["infra/main.tf"]);
+        let inside = openai(&[("Write", json!({"file_path": "src/a.rs", "content": "x"}))]);
+        assert!(gate_response_args(&cfg(), Some(&inside), &gates).is_none());
+        // Shell commands are never judged as paths.
+        let shell = openai(&[("Bash", json!({"command": "echo x > infra/main.tf"}))]);
+        assert!(gate_response_args(&cfg(), Some(&shell), &gates).is_none());
+    }
+
+    #[test]
+    fn a_worker_s_spawn_call_is_withheld_as_tool_denied() {
+        use crate::node_kind::NodeKind;
+        let kind = crate::plugins::anomaly::graph_detectors::effective_node_kind(
+            &[NodeKind::Worker],
+            None,
+            &[],
+        );
+        let gates = ArgGates::new(Vec::new(), None, None, Some(kind));
+        let task = openai(&[("Task", json!({"prompt": "go"}))]);
+        let d = gate_response_args(&cfg(), Some(&task), &gates).expect("withheld");
+        assert_eq!(d.refusal().code, Code::ToolDenied);
+        assert_eq!(d.refusal().rule, "node_kind.worker");
+        assert!(gate_response_args(
+            &cfg(),
+            Some(&openai(&[("Read", json!({"file_path": "a"}))])),
+            &gates
+        )
+        .is_none());
+    }
+
+    fn chunk(delta: Value, finish: Value) -> String {
+        format!(
+            "data: {}",
+            json!({"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+        )
+    }
+
+    #[test]
+    fn the_stream_holds_a_gated_shell_block_and_refuses_it_whole() {
+        let mut hold = StreamHold::new(Vec::new()).with_arg_gates(prereq_gates(Some("unknown")));
+        let lines = [
+            chunk(
+                json!({"tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                "function": {"name": "Bash", "arguments": "{\"command\":\"git "}}]}),
+                Value::Null,
+            ),
+            chunk(
+                json!({"tool_calls": [{"index": 0, "function": {"arguments": "push\"}"}}]}),
+                Value::Null,
+            ),
+            chunk(json!({}), json!("tool_calls")),
+        ];
+        let mut emitted = Vec::new();
+        let mut refused = None;
+        for l in lines {
+            let mut step = hold.push(l);
+            emitted.append(&mut step.emit);
+            if let Some(r) = step.refuse_gate.take() {
+                refused = Some(r);
+            }
+        }
+        assert!(emitted.iter().all(|l| !l.contains("git ")), "{emitted:?}");
+        let (reason, _) = refused.expect("the block is refused");
+        assert!(
+            matches!(reason, DenialReason::Prerequisite(_)),
+            "{reason:?}"
+        );
+
+        // A passing run releases the same block in order.
+        let mut hold = StreamHold::new(Vec::new()).with_arg_gates(prereq_gates(Some("ok")));
+        let mut out = Vec::new();
+        for l in [
+            chunk(
+                json!({"tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                "function": {"name": "Bash", "arguments": "{\"command\":\"git push\"}"}}]}),
+                Value::Null,
+            ),
+            chunk(json!({}), json!("tool_calls")),
+        ] {
+            let step = hold.push(l);
+            assert!(step.refuse_gate.is_none());
+            out.extend(step.emit);
+        }
+        assert!(out.iter().any(|l| l.contains("git push")), "{out:?}");
     }
 }

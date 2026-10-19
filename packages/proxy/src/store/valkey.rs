@@ -222,6 +222,12 @@ fn reask_attempt_key(scope: &str, detector_id: &str) -> String {
     format!("intutic:reask:{}:{}", scope, detector_id)
 }
 
+/// A session's recorded test outcomes, scoped like the tool
+/// sequence it is read beside.
+pub(crate) fn action_outcome_key(scope: &str) -> String {
+    format!("intutic:outcome:{scope}")
+}
+
 /// Lifetime of a reask allowance.
 ///
 /// One hour, matching the loop-state and anomaly-promotion windows, so a
@@ -1064,6 +1070,127 @@ impl LocalStore for ValkeyStore {
         n.clamp(1, u32::MAX as i64) as u32
     }
 
+    async fn reset_reask_attempt(&self, scope: &str, detector_id: &str) {
+        let mut conn = self.conn();
+        let _: Result<i64, redis::RedisError> = redis::cmd("DEL")
+            .arg(reask_attempt_key(scope, detector_id))
+            .query_async(&mut conn)
+            .await;
+    }
+
+    async fn action_outcomes(&self, scope: &str) -> Option<HashMap<String, String>> {
+        let mut conn = self.conn();
+        let fut = conn.hgetall::<_, HashMap<String, String>>(action_outcome_key(scope));
+        match tokio::time::timeout(GATE_TIMEOUT, fut).await {
+            Ok(Ok(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    async fn record_action_outcome(&self, scope: &str, token: &str, value: &str) -> bool {
+        let mut conn = self.conn();
+        let key = action_outcome_key(scope);
+        let mut pipe = redis::pipe();
+        pipe.cmd("HSET")
+            .arg(&key)
+            .arg(token)
+            .arg(value)
+            .ignore()
+            .cmd("EXPIRE")
+            .arg(&key)
+            .arg(TOOL_SEQUENCE_TTL_SECS)
+            .ignore();
+        matches!(
+            tokio::time::timeout(GATE_TIMEOUT, pipe.query_async::<_, ()>(&mut conn)).await,
+            Ok(Ok(()))
+        )
+    }
+
+    async fn context_signatures(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+    ) -> Option<Vec<(String, String)>> {
+        let mut conn = self.conn();
+        let key = graph_key(
+            workspace_id,
+            graph_id,
+            crate::context_sig::CTXSIG_KEY_SUFFIX,
+        );
+        let fut = conn.hgetall::<_, Vec<(String, String)>>(key);
+        match tokio::time::timeout(GATE_TIMEOUT, fut).await {
+            Ok(Ok(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    async fn store_context_signature(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+        value: &str,
+    ) -> bool {
+        let mut conn = self.conn();
+        let key = graph_key(
+            workspace_id,
+            graph_id,
+            crate::context_sig::CTXSIG_KEY_SUFFIX,
+        );
+        let len: i64 = match tokio::time::timeout(GATE_TIMEOUT, conn.hlen::<_, i64>(&key)).await {
+            Ok(Ok(n)) => n,
+            _ => return false,
+        };
+        if len >= crate::context_sig::CTXSIG_MAX_FIELDS as i64 {
+            return false;
+        }
+        let written: bool = conn.hset_nx(&key, node_id, value).await.unwrap_or(false);
+        if written {
+            let _: Result<bool, redis::RedisError> = conn
+                .expire(&key, crate::context_sig::CTXSIG_TTL_SECS as i64)
+                .await;
+        }
+        written
+    }
+
+    async fn recorded_node_kind(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+    ) -> Option<String> {
+        let mut conn = self.conn();
+        let key = graph_key(
+            workspace_id,
+            graph_id,
+            crate::node_kind::NODE_KIND_KEY_SUFFIX,
+        );
+        let fut = conn.hget::<_, _, Option<String>>(key, node_id);
+        match tokio::time::timeout(GATE_TIMEOUT, fut).await {
+            Ok(Ok(v)) => v,
+            _ => None,
+        }
+    }
+
+    async fn record_node_kind(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+        kind: &str,
+    ) {
+        let mut conn = self.conn();
+        let key = graph_key(
+            workspace_id,
+            graph_id,
+            crate::node_kind::NODE_KIND_KEY_SUFFIX,
+        );
+        let _: Result<i64, redis::RedisError> = conn.hset(&key, node_id, kind).await;
+        let _: Result<bool, redis::RedisError> = conn
+            .expire(&key, crate::node_kind::NODE_KIND_TTL_SECS as i64)
+            .await;
+    }
+
     async fn loop_review_reason(&self, loop_run_id: &str) -> Option<String> {
         let mut conn = self.conn();
         conn.get::<_, Option<String>>(loop_review_key(loop_run_id))
@@ -1732,6 +1859,12 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
             .await
             .ok()
             .flatten()
+    }
+
+    async fn revert_rates(&self, workspace_id: &str) -> Option<String> {
+        // Gated: read on the request path while `revertLane` is on, and an
+        // unreachable cache holds nothing rather than stalling the request.
+        self.get_gated(format!("v2:revert:{workspace_id}")).await
     }
 
     async fn wasm_plugins(&self, workspace_id: &str) -> anyhow::Result<Option<String>> {

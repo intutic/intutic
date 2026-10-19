@@ -3,7 +3,7 @@
   "info": {
     "title": "Intutic Control Plane API",
     "version": "v1",
-    "description": "Generated from the control plane's route source. 418 operations; 132 validate their JSON body and 74 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 179 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
+    "description": "Generated from the control plane's route source. 419 operations; 132 validate their JSON body and 74 their query string with a schema, shown here; every operation that reads a body or a query string validates it with the schema shown. 181 declare their response body with a schema, shown here; the other responses list status codes only. `x-intutic-request-schema` and `x-intutic-response-schema` say which operations have one."
   },
   "servers": [
     {
@@ -1323,7 +1323,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KeyContextResponse"
+                  "$ref": "#/components/schemas/KeyContextGatesResponse"
                 }
               }
             }
@@ -9794,7 +9794,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LoopRunEnvelopeResponse"
+                  "$ref": "#/components/schemas/LoopRunDetailResponse"
                 }
               }
             }
@@ -9870,6 +9870,12 @@
           },
           "404": {
             "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "503": {
+            "description": "Service Unavailable"
           }
         },
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own run)",
@@ -10081,7 +10087,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK. No response schema in the route source."
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoopVerifyResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad Request"
@@ -10102,7 +10115,7 @@
         "x-intutic-auth": "OWNER/ADMIN/EM; DEVELOPER (own run)",
         "x-intutic-plan": "Cloud",
         "x-intutic-request-schema": "zod",
-        "x-intutic-response-schema": "none"
+        "x-intutic-response-schema": "zod"
       }
     },
     "/api/v1/loops/reviews": {
@@ -11975,6 +11988,46 @@
         "x-intutic-response-schema": "none"
       }
     },
+    "/api/v1/plans/approved": {
+      "get": {
+        "operationId": "getApiV1PlansApproved",
+        "tags": [
+          "plans.ts"
+        ],
+        "summary": "Approved and executing plans, for the hook gates",
+        "description": "**Auth:** Authenticated\n\n**Plan:** Cloud",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovedPlansResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "x-intutic-auth": "Authenticated",
+        "x-intutic-plan": "Cloud",
+        "x-intutic-request-schema": "none",
+        "x-intutic-response-schema": "zod"
+      }
+    },
     "/api/v1/plans/capture": {
       "post": {
         "operationId": "postApiV1PlansCapture",
@@ -13522,7 +13575,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PolicyResolveResponse"
+                  "$ref": "#/components/schemas/PolicyResolveGatesResponse"
                 }
               }
             }
@@ -21773,6 +21826,53 @@
         "required": [
           "ok",
           "bypasses"
+        ]
+      },
+      "ApprovedPlansResponse": {
+        "type": "object",
+        "properties": {
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "description": "The harness session the plan governs."
+                },
+                "planId": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "APPROVED",
+                    "EXECUTING"
+                  ]
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The tool names of the plan's steps, deduped case-insensitively. Compare case-insensitively."
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionId",
+                "planId",
+                "state",
+                "tools",
+                "updatedAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "plans"
         ]
       },
       "ApprovePlanSchema": {
@@ -34459,7 +34559,7 @@
           "judgeModel"
         ]
       },
-      "KeyContextResponse": {
+      "KeyContextGatesResponse": {
         "type": "object",
         "properties": {
           "workspaceId": {
@@ -34815,6 +34915,64 @@
               "boolean",
               "null"
             ]
+          },
+          "closedLanes": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "irreversible",
+                    "reversible_wide"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace `closedLanes`: every role holds the tokens of these classes. Null when unset or unreadable."
+          },
+          "revertLane": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "shadow",
+                      "enforce"
+                    ]
+                  },
+                  "threshold": {
+                    "type": "number"
+                  },
+                  "minExecutions": {
+                    "type": "integer"
+                  },
+                  "minReversals": {
+                    "type": "integer"
+                  },
+                  "windowDays": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "threshold",
+                  "minExecutions",
+                  "minReversals",
+                  "windowDays"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace `revertLane`, defaults filled in. Null when the settings could not be read."
           }
         },
         "required": [
@@ -34836,7 +34994,9 @@
           "decideLogUploadArgs",
           "budget",
           "interventionMode",
-          "llmJudgeEnabled"
+          "llmJudgeEnabled",
+          "closedLanes",
+          "revertLane"
         ]
       },
       "labelSchema": {
@@ -35380,6 +35540,119 @@
           "outcome"
         ]
       },
+      "LoopRunDetailResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "loop": {
+            "type": "object",
+            "properties": {
+              "loopRunId": {
+                "type": "string"
+              },
+              "workspaceId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE",
+                  "PENDING_REVIEW",
+                  "COMPLETED",
+                  "FAILED",
+                  "KILLED"
+                ]
+              },
+              "startedBy": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Member id of whoever started it."
+              },
+              "reviewReason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why the run was held; null unless it was."
+              },
+              "reviewedBy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reviewedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reviewNote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "totalTokenCostUsd": {
+                "type": "string",
+                "description": "Decimal string."
+              },
+              "budgetLimitUsd": {
+                "type": "string",
+                "description": "Decimal string."
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "loopRunId",
+              "workspaceId",
+              "name",
+              "status",
+              "startedBy",
+              "reviewReason",
+              "reviewedBy",
+              "reviewedAt",
+              "reviewNote",
+              "totalTokenCostUsd",
+              "budgetLimitUsd",
+              "createdAt",
+              "updatedAt"
+            ]
+          },
+          "requiresVerifiedCompletion": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`loop_review.requireVerifiedCompletion`: a SUCCEEDED completion needs a passing, current verify. Null when the setting could not be read."
+          }
+        },
+        "required": [
+          "ok",
+          "loop",
+          "requiresVerifiedCompletion"
+        ]
+      },
       "LoopRunEnvelopeResponse": {
         "type": "object",
         "properties": {
@@ -35634,6 +35907,109 @@
         "required": [
           "ok",
           "status"
+        ]
+      },
+      "LoopVerifyResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "number"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unverified": {
+            "type": "boolean",
+            "const": true,
+            "description": "Present (true) only when no check could run: each is not_applicable or unavailable."
+          },
+          "verificationId": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "deterministic",
+              "judge"
+            ],
+            "description": "`deterministic` when a scope or plan check failed and the judge was not called."
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "scope_paths",
+                    "plan_steps",
+                    "judge"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "not_applicable",
+                    "unavailable"
+                  ]
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scope": {
+                  "type": "object",
+                  "properties": {
+                    "paths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "step": {
+                      "type": "string"
+                    },
+                    "detector": {
+                      "type": "string"
+                    },
+                    "rule": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "status",
+                "findings"
+              ]
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "score",
+          "findings",
+          "verificationId",
+          "stage",
+          "checks"
         ]
       },
       "MagicLinkLoginInputSchema": {
@@ -38250,7 +38626,7 @@
           "result"
         ]
       },
-      "PolicyResolveResponse": {
+      "PolicyResolveGatesResponse": {
         "type": "object",
         "properties": {
           "allowedTools": {
@@ -38716,6 +39092,147 @@
               ]
             },
             "description": "The `decide:` lines of the enforced SOPs and decide guardrails, with their active calibrations as pins. Empty under `INTUTIC_DECIDE=off`; absent from a control plane before 3.0."
+          },
+          "gateRecords": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sopId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "requires_outcome",
+                    "scope_paths",
+                    "plan_approval"
+                  ]
+                },
+                "rollout": {
+                  "type": "string",
+                  "enum": [
+                    "shadow",
+                    "enforce"
+                  ]
+                },
+                "fallbackId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "`<kind>-fallback:<n>@<sha256(sopId)[:12]>`; null for a shadow record, which has no fallback line."
+                },
+                "payload": {
+                  "type": "object",
+                  "properties": {
+                    "v": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "ref": {
+                      "type": "string"
+                    },
+                    "sopTitle": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "v",
+                    "ref",
+                    "sopTitle"
+                  ],
+                  "description": "The record's canonical JSON payload: `{v, ref, sopTitle, …kind fields}`."
+                }
+              },
+              "required": [
+                "sopId",
+                "kind",
+                "rollout",
+                "fallbackId",
+                "payload"
+              ]
+            },
+            "description": "Qualified `requires_before`, enforced `scope_paths` and `plan_approval` of the enforced SOPs with no `roles:`."
+          },
+          "holdRules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "`sop.lane.<class>.<token>` for a closed lane, `revert.<token>` for a revert hold."
+                },
+                "source": {
+                  "type": "string",
+                  "description": "For `phrase`, the token's phrases joined by `|`; for `action`, a pattern over the classified action tokens."
+                },
+                "subject": {
+                  "type": "string",
+                  "enum": [
+                    "phrase",
+                    "action"
+                  ]
+                },
+                "ignoreCase": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "hold",
+                    "shadow"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "source",
+                "subject",
+                "ignoreCase",
+                "severity",
+                "reason",
+                "rationale"
+              ]
+            },
+            "description": "Closed-lane holds (SOP `closed_lanes:` and the workspace `closedLanes`) and revert holds."
+          },
+          "revertHolds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string"
+                },
+                "revertRate": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "rejectionRate": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "subject",
+                "revertRate",
+                "rejectionRate"
+              ]
+            },
+            "description": "Reversible-wide tokens held by `revertLane` (role '' only); empty when the mode is off."
           }
         },
         "required": [
@@ -38732,7 +39249,10 @@
           "workspaceId",
           "sopRules",
           "interventionMode",
-          "sqlDropStrictBlock"
+          "sqlDropStrictBlock",
+          "gateRecords",
+          "holdRules",
+          "revertHolds"
         ]
       },
       "PredictCostSchema": {
@@ -43744,8 +44264,49 @@
                 "properties": {
                   "requireDistinctApprover": {
                     "type": "boolean"
+                  },
+                  "requireVerifiedCompletion": {
+                    "type": "boolean"
                   }
                 }
+              },
+              "closedLanes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "irreversible",
+                    "reversible_wide"
+                  ]
+                }
+              },
+              "revertLane": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "shadow",
+                      "enforce"
+                    ]
+                  },
+                  "threshold": {
+                    "type": "number"
+                  },
+                  "minExecutions": {
+                    "type": "integer"
+                  },
+                  "minReversals": {
+                    "type": "integer"
+                  },
+                  "windowDays": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
               },
               "egressMode": {
                 "type": "string",
@@ -46141,8 +46702,59 @@
             "properties": {
               "requireDistinctApprover": {
                 "type": "boolean"
+              },
+              "requireVerifiedCompletion": {
+                "type": "boolean"
               }
             },
+            "additionalProperties": false
+          },
+          "closedLanes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "irreversible",
+                "reversible_wide"
+              ]
+            },
+            "maxItems": 2
+          },
+          "revertLane": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "shadow",
+                  "enforce"
+                ]
+              },
+              "threshold": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              },
+              "minExecutions": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
+              "minReversals": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "windowDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 180
+              }
+            },
+            "required": [
+              "mode"
+            ],
             "additionalProperties": false
           },
           "egressMode": {
@@ -46624,6 +47236,22 @@
           "taskDescription": {
             "type": "string",
             "minLength": 1
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "maxItems": 2000,
+            "description": "Paths the run changed beyond the diff (repo-relative). Checked against scope_paths with the diff and the run's change manifests."
+          },
+          "base": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "The ref the diff was taken against, as `intutic loop verify --base` names it. Logged with the verify; it changes no check."
           }
         },
         "required": [
@@ -47186,8 +47814,49 @@
                 "properties": {
                   "requireDistinctApprover": {
                     "type": "boolean"
+                  },
+                  "requireVerifiedCompletion": {
+                    "type": "boolean"
                   }
                 }
+              },
+              "closedLanes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "irreversible",
+                    "reversible_wide"
+                  ]
+                }
+              },
+              "revertLane": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "shadow",
+                      "enforce"
+                    ]
+                  },
+                  "threshold": {
+                    "type": "number"
+                  },
+                  "minExecutions": {
+                    "type": "integer"
+                  },
+                  "minReversals": {
+                    "type": "integer"
+                  },
+                  "windowDays": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
               },
               "egressMode": {
                 "type": "string",
@@ -47812,8 +48481,49 @@
                 "properties": {
                   "requireDistinctApprover": {
                     "type": "boolean"
+                  },
+                  "requireVerifiedCompletion": {
+                    "type": "boolean"
                   }
                 }
+              },
+              "closedLanes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "irreversible",
+                    "reversible_wide"
+                  ]
+                }
+              },
+              "revertLane": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "shadow",
+                      "enforce"
+                    ]
+                  },
+                  "threshold": {
+                    "type": "number"
+                  },
+                  "minExecutions": {
+                    "type": "integer"
+                  },
+                  "minReversals": {
+                    "type": "integer"
+                  },
+                  "windowDays": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
               },
               "egressMode": {
                 "type": "string",

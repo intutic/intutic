@@ -29,6 +29,7 @@ import {
   type SkillScanFinding,
   type SkillScanCategory,
   type ScriptLanguage,
+  isWithinScope,
 } from '@intutic/shared-types'
 import {
   ciscoScannerOnPath,
@@ -36,7 +37,7 @@ import {
   combineCiscoSarifRuns,
   type CiscoDirScanResult,
 } from '../lib/ciscoScanner.js'
-import { listSopSets } from '@intutic/sync-daemon'
+import { listSopSets, loadLocalSopEntries } from '@intutic/sync-daemon'
 import pc from 'picocolors'
 
 // ─── Shared response shapes ──────────────────────────────────────────
@@ -1215,7 +1216,7 @@ export async function runLoopStart(opts: {
       // Write loop env file locally
       const loopEnvPath = join(getIntuticDir(), 'env', 'loop.env')
       await fs.mkdir(dirname(loopEnvPath), { recursive: true }).catch(() => {})
-      await fs.writeFile(loopEnvPath, `INTUTIC_LOOP_RUN_ID=${res.loop.loopRunId}\n`)
+      await writeLoopEnv(res.loop.loopRunId, workspaceRoot)
       log.dim(`Wrote run context to ~/.intutic/env/loop.env`)
     } else {
       log.error('The control plane did not start the loop run.')
@@ -1227,11 +1228,167 @@ export async function runLoopStart(opts: {
   }
 }
 
+/** The commit a loop run started from, so `loop verify` can diff against it. Empty outside a git repo. */
+function headCommit(cwd: string): string {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return ''
+  }
+}
+
+/** `~/.intutic/env/loop.env`: the run id, and the commit the run started from. */
+async function writeLoopEnv(loopRunId: string, workspaceRoot: string): Promise<void> {
+  const loopEnvPath = join(getIntuticDir(), 'env', 'loop.env')
+  await fs.mkdir(dirname(loopEnvPath), { recursive: true }).catch(() => {})
+  const base = headCommit(workspaceRoot)
+  await fs.writeFile(loopEnvPath, `INTUTIC_LOOP_RUN_ID=${loopRunId}\n` + (base ? `INTUTIC_LOOP_BASE_COMMIT=${base}\n` : ''))
+}
+
+async function loopEnvValue(key: string): Promise<string> {
+  try {
+    const text = await fs.readFile(join(getIntuticDir(), 'env', 'loop.env'), 'utf8')
+    const line = text.split('\n').find((l) => l.startsWith(`${key}=`))
+    return line ? line.slice(key.length + 1).trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+/** A completion or verify refusal as the control plane sends it (409/503): `{ error, code, findings? }`. */
+interface LoopRefusal {
+  error?: string
+  code?: string
+  findings?: string[]
+}
+
+function printLoopRefusal(status: number, body: LoopRefusal): void {
+  log.error(`The control plane did not complete the run (${status}${body.code ? ` ${body.code}` : ''}): ${body.error ?? 'refused'}`)
+  for (const f of body.findings ?? []) log.info(`  - ${f}`)
+  if (body.code === 'E_LOOP_NOT_VERIFIED' || body.code === 'E_LOOP_VERIFY_STALE') {
+    log.dim('Verify the run first: intutic loop verify <loopRunId>')
+  }
+}
+
+/** One check of a verify, as `POST /api/v1/loops/:id/verify` returns it. */
+interface LoopVerifyResult {
+  ok: boolean
+  score?: number
+  findings?: string[]
+  unverified?: boolean
+  verificationId?: string
+  stage?: 'deterministic' | 'judge'
+  checks?: Array<{ id: string; status: string; findings: string[] }>
+}
+
+/** Strips quotes and brackets from both ends, in linear time. */
+function trimQuoted(v: string): string {
+  const q = (c: string | undefined) => c === '"' || c === "'" || c === '[' || c === ']'
+  let a = 0
+  let b = v.length
+  while (a < b && q(v[a])) a++
+  while (b > a && q(v[b - 1])) b--
+  return v.slice(a, b)
+}
+
+/**
+ * The local half of a verify: every changed path must be
+ * inside the `scope_paths` of the local SOPs the session selected (and that
+ * declare no `roles:`; a loop has no agent role). No tolerance: a verify is a
+ * boundary check. Returns the findings; empty passes.
+ */
+async function localScopeFindings(workspaceRoot: string, changed: readonly string[]): Promise<string[]> {
+  const sops = await loadLocalSopEntries(workspaceRoot, [])
+  const scopes: string[] = []
+  for (const sop of sops) {
+    const front = sop.content.trimStart().startsWith('---') ? sop.content.trimStart().slice(3).split('\n---')[0] ?? '' : ''
+    if (front.split('\n').some((l) => l.startsWith('roles:') && l.slice(6).trim() !== '')) continue
+    for (const line of front.split('\n')) {
+      const t = line.trim()
+      if (!t.startsWith('scope_paths:')) continue
+      for (const piece of t.slice('scope_paths:'.length).split(',')) {
+        const v = trimQuoted(piece.trim())
+        if (v) scopes.push(v)
+      }
+    }
+  }
+  if (scopes.length === 0) return []
+  const out = changed.filter((p) => !isWithinScope(p, scopes))
+  return out.length === 0 ? [] : [`Changed outside scope_paths (${scopes.join(', ')}): ${out.slice(0, 10).join(', ')}${out.length > 10 ? ', …' : ''}`]
+}
+
+/**
+ * Verifies a loop run: the diff from `--base` (or the commit
+ * the run started from) is checked against the local SOPs' `scope_paths`
+ * first; a local failure stops it with nothing sent. Then the control plane
+ * checks scope and plan, and asks the judge only if those pass. True when the
+ * verify passed.
+ */
+export async function verifyLoopRun(
+  loopRunId: string,
+  opts: { base?: string; task?: string; dev?: boolean },
+  client?: Awaited<ReturnType<typeof getClient>>,
+): Promise<boolean> {
+  const config = loadConfig()
+  const workspaceRoot = config?.workspaceRoot ?? process.cwd()
+  const base = opts.base || process.env.INTUTIC_LOOP_BASE_COMMIT || (await loopEnvValue('INTUTIC_LOOP_BASE_COMMIT')) || 'HEAD'
+  let diff: string
+  let files: string[]
+  try {
+    diff = execFileSync('git', ['diff', base], { cwd: workspaceRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    files = execFileSync('git', ['diff', '--name-only', base], { cwd: workspaceRoot, encoding: 'utf8' }).split('\n').filter(Boolean).slice(0, 2000)
+  } catch (err) {
+    log.error(`Could not take the diff against ${base}: ${err instanceof Error ? err.message : String(err)}`)
+    return false
+  }
+  const local = await localScopeFindings(workspaceRoot, files)
+  if (local.length > 0) {
+    log.error('The run fails the local scope check; nothing was sent.')
+    for (const f of local) log.info(`  - ${f}`)
+    return false
+  }
+  if (!diff.trim()) diff = `(no changes against ${base})`
+  const api = client ?? (await getClient(opts.dev))
+  const res = await api.postWithStatus<LoopVerifyResult & LoopRefusal>(`/api/v1/loops/${loopRunId}/verify`, {
+    diff,
+    taskDescription: opts.task || `Loop run ${loopRunId}`,
+    ...(files.length > 0 ? { files } : {}),
+    base,
+  })
+  if (res.status !== 200) {
+    log.error(`Verify failed (${res.status}): ${res.body.error ?? 'refused'}`)
+    return false
+  }
+  const v = res.body
+  for (const c of v.checks ?? []) {
+    log.info(`  ${c.id}: ${c.status}`)
+    for (const f of c.findings) log.dim(`      ${f}`)
+  }
+  if (v.ok && !v.unverified) {
+    log.success(`Verified (${v.stage ?? 'judge'}${v.verificationId ? `, ${v.verificationId}` : ''}).`)
+    return true
+  }
+  log.error(v.unverified ? 'Nothing could verify this run (no scope, plan or judge applied).' : `Verify did not pass (${v.stage ?? 'judge'}).`)
+  for (const f of v.findings ?? []) log.info(`  - ${f}`)
+  return false
+}
+
+export async function runLoopVerify(loopRunId: string, opts: { base?: string; task?: string; dev?: boolean }): Promise<void> {
+  log.header('Intutic — Verify Loop')
+  if (!(await verifyLoopRun(loopRunId, opts))) process.exitCode = 1
+}
+
 export async function runLoopComplete(loopRunId: string, opts: { dev?: boolean }): Promise<void> {
   log.header('Intutic — Complete Loop')
   const client = await getClient(opts.dev)
   try {
-    const res = await client.post<{ ok: boolean }>(`/api/v1/loops/${loopRunId}/complete`)
+    const done = await client.postWithStatus<{ ok?: boolean } & LoopRefusal>(`/api/v1/loops/${loopRunId}/complete`)
+    if (done.status === 409 || done.status === 503) {
+      printLoopRefusal(done.status, done.body)
+      process.exit(1)
+    }
+    if (done.status !== 200) throw new Error(`API POST /api/v1/loops/${loopRunId}/complete failed (${done.status}): ${done.body.error ?? ''}`)
+    const res = done.body
     if (res.ok) {
       log.success(`Loop run ${loopRunId} completed.`)
       // Clean env
@@ -1390,6 +1547,7 @@ export async function runLoopExec(
 
     const loopRunId = res.loop.loopRunId
     log.success(`Loop run registered: ${loopRunId}`)
+    await writeLoopEnv(loopRunId, workspaceRoot)
 
     // Execute process with INTUTIC_LOOP_RUN_ID in environment
     const childEnv = {
@@ -1440,9 +1598,30 @@ export async function runLoopExec(
       }
 
       if (code === 0) {
-        await client
-          .post(`/api/v1/loops/${loopRunId}/complete`, { outcome: 'SUCCEEDED' })
-          .catch(() => {})
+        // The completion gate: when the workspace requires a
+        // verified completion, verify first. A refusal is shown and leaves the
+        // run ACTIVE, and the wrapper exits non-zero.
+        let gated = false
+        try {
+          const detail = await client.get<{ requiresVerifiedCompletion?: boolean | null }>(`/api/v1/loops/${loopRunId}`)
+          gated = detail?.requiresVerifiedCompletion === true
+        } catch {
+          // Unknown: complete as usual; the server refuses an unverified run itself.
+        }
+        if (gated && !(await verifyLoopRun(loopRunId, { task: loopName, dev: opts.dev }, client))) {
+          log.warn(`The run stays ACTIVE. Fix it and run: intutic loop verify ${loopRunId} && intutic loop complete ${loopRunId}`)
+          process.exit(1)
+          return
+        }
+        const done = await client
+          .postWithStatus<LoopRefusal>(`/api/v1/loops/${loopRunId}/complete`, { outcome: 'SUCCEEDED' })
+          .catch((err: unknown) => ({ status: 0, body: { error: err instanceof Error ? err.message : String(err) } as LoopRefusal }))
+        if (done.status !== 200) {
+          printLoopRefusal(done.status, done.body)
+          log.warn('The run stays ACTIVE.')
+          process.exit(1)
+          return
+        }
         log.success('Loop command execution succeeded. Wrapper loop marked COMPLETED.')
       } else {
         await client

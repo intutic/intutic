@@ -241,6 +241,13 @@ pub struct LogContext<'a> {
     pub budget_ms: u64,
     pub latency_ms: u64,
     pub engine: LogEngine,
+    /// The subject's reversibility class (`irreversible`, `reversible_wide`,
+    /// `reversible_contained`), or `None`: calibrations and
+    /// dashboards stratify by consequence with it.
+    pub lane: Option<&'static str>,
+    /// The subject's role-level revert or rejection rate from the workspace's
+    /// revert history, or `None`.
+    pub revert_rate: Option<f64>,
 }
 
 fn iso(at_ms: i64) -> String {
@@ -437,6 +444,8 @@ pub fn decision_record(eval: &Evaluation, rules: &[RuleEntry], ctx: &LogContext<
         "code": eval.call.code,
         "rules": logged,
         "skipped": eval.skipped,
+        "lane": ctx.lane,
+        "revertRate": ctx.revert_rate,
     })
 }
 

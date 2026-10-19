@@ -35,6 +35,7 @@
 //! WASM rules, which do not consult the role. See ADR-009.
 
 use crate::decide::DecideDecl;
+use crate::plugins::anomaly::actions::LaneClass;
 use crate::plugins::hook_rules::HookRuleDecl;
 use crate::plugins::sql_guard::{SqlGuardPolicy, SqlGuardSeverity};
 use crate::store::{LocalStore, PinScope, PinnedSopBlock};
@@ -115,6 +116,74 @@ impl SopScope {
         }
     }
 }
+
+/// `advise` (the default) or `enforce`: how `scope_paths_mode:`,
+/// `plan_steps_mode:` and `context_isolation:` act.
+///
+/// Ordered weakest first, so the strongest declaration across lines and SOPs
+/// is a `max()`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CheckMode {
+    #[default]
+    Advise,
+    Enforce,
+}
+
+impl CheckMode {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "advise" => Some(CheckMode::Advise),
+            "enforce" => Some(CheckMode::Enforce),
+            _ => None,
+        }
+    }
+}
+
+/// `plan_approval: required|strict` — read by the hook gates and SDKs, which
+/// hold a session's calls until its plan is approved. The
+/// gateway does not enforce it; it is parsed here so an SOP declaring only it
+/// is not reported inert, and so the two front-matter parsers stay equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PlanApproval {
+    Required,
+    Strict,
+}
+
+impl PlanApproval {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "required" => Some(PlanApproval::Required),
+            "strict" => Some(PlanApproval::Strict),
+            _ => None,
+        }
+    }
+}
+
+/// `on_reask_exhausted: block|pause` — what a loop run's third failed
+/// correction does. `block` is today's refusal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OnReaskExhausted {
+    #[default]
+    Block,
+    Pause,
+}
+
+impl OnReaskExhausted {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "block" => Some(OnReaskExhausted::Block),
+            "pause" => Some(OnReaskExhausted::Pause),
+            _ => None,
+        }
+    }
+}
+
+/// The node kinds `node_kind:` may name. The limits each carries
+/// live with the graph detectors; here they are only validated.
+pub const NODE_KINDS: &[&str] = &["splitter", "worker", "code", "gate"];
+
+/// The limits `node_kind_allow:` may lift.
+pub const NODE_KIND_ALLOWANCES: &[&str] = &["model", "write", "shell", "spawn"];
 
 /// One policy document, the roles it applies to, and anything it forbids.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -235,6 +304,29 @@ pub struct Sop {
     /// in a model's response and `on: response` rules about its text
     /// (`crate::decide::gateway`).
     pub decide_rules: Vec<DecideDecl>,
+    /// `scope_paths_mode: enforce` — an out-of-scope write is refused, not
+    /// steered.
+    pub scope_paths_mode: CheckMode,
+    /// `plan_steps_mode: enforce` — an off-plan step in this turn re-asks.
+    pub plan_steps_mode: CheckMode,
+    /// `plan_approval:` — a gate-side rule; see [`PlanApproval`].
+    pub plan_approval: Option<PlanApproval>,
+    /// `closed_lanes:` — the reversibility classes whose actions are held for
+    /// a person.
+    pub closed_lanes: Vec<LaneClass>,
+    /// `open_actions:` — action tokens this SOP's own `closed_lanes:` leave
+    /// open. Read at the top level only, because it weakens.
+    pub open_actions: Vec<String>,
+    /// `on_reask_exhausted: pause` — a loop run's exhausted correction pauses
+    /// the run for review instead of refusing one request.
+    pub on_reask_exhausted: OnReaskExhausted,
+    /// `context_isolation: enforce` — sibling workers handed the same context
+    /// are re-asked rather than steered.
+    pub context_isolation: CheckMode,
+    /// `node_kind:` — the graph node kinds this SOP declares for its roles.
+    pub node_kinds: Vec<String>,
+    /// `node_kind_allow:` — limits lifted from those kinds. Top level only.
+    pub node_kind_allow: Vec<String>,
 }
 
 impl Sop {
@@ -295,6 +387,15 @@ struct FrontMatter {
     sql_allow_dsns: Vec<String>,
     hook_rules: Vec<HookRuleDecl>,
     decide_rules: Vec<DecideDecl>,
+    scope_paths_mode: CheckMode,
+    plan_steps_mode: CheckMode,
+    plan_approval: Option<PlanApproval>,
+    closed_lanes: Vec<LaneClass>,
+    open_actions: Vec<String>,
+    on_reask_exhausted: OnReaskExhausted,
+    context_isolation: CheckMode,
+    node_kinds: Vec<String>,
+    node_kind_allow: Vec<String>,
     /// Rules that failed to parse, kept so they can be reported rather than
     /// dropped. A malformed ordering rule must not read as "no rule declared".
     rule_errors: Vec<String>,
@@ -376,6 +477,69 @@ fn parse_sql_guard(front: &str, any_allowlist: bool) -> (Option<SqlGuardSeverity
     }
 }
 
+/// The values of `key` at any indentation: the reader for keys that can only
+/// strengthen a SOP (`scope_paths_mode:`, `plan_approval:`, …), whose every
+/// line counts and whose strongest value wins.
+fn enum_value<'a>(front: &'a str, key: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    front
+        .lines()
+        .filter_map(move |l| l.trim().strip_prefix(key))
+}
+
+/// The strongest value `key` declares across its lines, by `parse`. An
+/// unrecognised value enforces as `strongest` and is reported — a typo must
+/// never be what switches a guard off, as with `sql_guard:`. `None` when the
+/// key is not written.
+fn strongest_value<T: Ord + Copy>(
+    front: &str,
+    key: &str,
+    parse: impl Fn(&str) -> Option<T>,
+    strongest: T,
+    explain: &str,
+    errors: &mut Vec<String>,
+) -> Option<T> {
+    let mut out: Option<T> = None;
+    for raw in enum_value(front, key) {
+        let v = raw.trim().trim_matches(['"', '\'']).to_ascii_lowercase();
+        if v.is_empty() {
+            continue;
+        }
+        let parsed = parse(&v).unwrap_or_else(|| {
+            errors.push(format!("{key} {} {explain}", json_quoted(&v)));
+            strongest
+        });
+        out = Some(out.map_or(parsed, |o| o.max(parsed)));
+    }
+    out
+}
+
+/// `v` quoted as JSON (and as the TypeScript parser's errors quote it).
+fn json_quoted(v: &str) -> String {
+    serde_json::to_string(v).unwrap_or_default()
+}
+
+/// The entries of a list that `accept` admits; each other entry is dropped
+/// and reported as `<key> "<entry>" <explain>`.
+fn accepted(
+    key: &str,
+    values: Vec<String>,
+    accept: impl Fn(&str) -> bool,
+    explain: &str,
+    errors: &mut Vec<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for v in values {
+        if accept(&v) {
+            if !out.contains(&v) {
+                out.push(v);
+            }
+        } else {
+            errors.push(format!("{key} {} {explain}", json_quoted(&v)));
+        }
+    }
+    out
+}
+
 /// The values of `key` written at the top level of the front matter: lines
 /// that start with the key, with no indentation before it.
 ///
@@ -436,6 +600,85 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
 
     let requires = parse_rules(front, "requires_before:");
     let forbids = parse_rules(front, "forbid_after:");
+    // 3.1 keys. Modifier keys that strengthen are read at any
+    // indentation (`enum_value`); the two that weaken — `open_actions:` and
+    // `node_kind_allow:` — at the top level only, like `mode:`.
+    let mut lld75_errors: Vec<String> = Vec::new();
+    let scope_paths_mode = strongest_value(
+        front,
+        "scope_paths_mode:",
+        CheckMode::parse,
+        CheckMode::Enforce,
+        "is not advise or enforce, so it enforces",
+        &mut lld75_errors,
+    )
+    .unwrap_or_default();
+    let plan_steps_mode = strongest_value(
+        front,
+        "plan_steps_mode:",
+        CheckMode::parse,
+        CheckMode::Enforce,
+        "is not advise or enforce, so it enforces",
+        &mut lld75_errors,
+    )
+    .unwrap_or_default();
+    let plan_approval = strongest_value(
+        front,
+        "plan_approval:",
+        PlanApproval::parse,
+        PlanApproval::Strict,
+        "is not required or strict, so it is strict",
+        &mut lld75_errors,
+    );
+    let on_reask_exhausted = strongest_value(
+        front,
+        "on_reask_exhausted:",
+        OnReaskExhausted::parse,
+        OnReaskExhausted::Pause,
+        "is not block or pause, so it pauses",
+        &mut lld75_errors,
+    )
+    .unwrap_or_default();
+    let context_isolation = strongest_value(
+        front,
+        "context_isolation:",
+        CheckMode::parse,
+        CheckMode::Enforce,
+        "is not advise or enforce, so it enforces",
+        &mut lld75_errors,
+    )
+    .unwrap_or_default();
+    let closed_lanes: Vec<LaneClass> = accepted(
+        "closed_lanes:",
+        list("closed_lanes:", true),
+        |v| LaneClass::parse_closable(v).is_some(),
+        "is not a lane (irreversible, reversible_wide)",
+        &mut lld75_errors,
+    )
+    .iter()
+    .filter_map(|v| LaneClass::parse_closable(v))
+    .collect();
+    let open_actions = accepted(
+        "open_actions:",
+        top_level_list("open_actions:", true),
+        |v| crate::plugins::anomaly::actions::ACTION_TOKENS.contains(&v),
+        "is not an action token",
+        &mut lld75_errors,
+    );
+    let node_kinds = accepted(
+        "node_kind:",
+        list("node_kind:", true),
+        |v| NODE_KINDS.contains(&v),
+        "is not a node kind (splitter, worker, code, gate)",
+        &mut lld75_errors,
+    );
+    let node_kind_allow = accepted(
+        "node_kind_allow:",
+        top_level_list("node_kind_allow:", true),
+        |v| NODE_KIND_ALLOWANCES.contains(&v),
+        "is not a limit (model, write, shell, spawn)",
+        &mut lld75_errors,
+    );
     // `max_calls:` splits on commas (each item is `A <= N`); `forbid_with:`
     // does NOT, because a comma is its own separator between taint and token.
     let counts = parse_items(front, "max_calls:", true, parse_count_bound);
@@ -483,12 +726,22 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
                 .lines()
                 .filter_map(|l| l.trim().strip_prefix("decide:")),
         ),
+        scope_paths_mode,
+        plan_steps_mode,
+        plan_approval,
+        closed_lanes,
+        open_actions,
+        on_reask_exhausted,
+        context_isolation,
+        node_kinds,
+        node_kind_allow,
         rule_errors: {
             let mut e = requires.1;
             e.extend(forbids.1);
             e.extend(counts.1);
             e.extend(cooccur.1);
             e.extend(sql_guard_error);
+            e.extend(lld75_errors);
             e
         },
         body: body.trim_start_matches("\n---").trim().to_string(),
@@ -532,7 +785,7 @@ fn parse_ordering(raw: &str) -> Result<(String, String, bool), String> {
         // This is the single most likely authoring mistake: the rules are about
         // `action:deploy`, but the thing an operator has in mind is `git push`.
         // A command never matches — no harness emits a tool by that name, and
-        // `classify` synthesises only the eight `action:` tokens — so such a rule
+        // `classify` synthesises only the `action:` tokens — so such a rule
         // compiles, loads, and silently never fires. Refusing it here is the only
         // moment anyone finds out.
         if side.split_whitespace().count() > 1 {
@@ -540,7 +793,7 @@ fn parse_ordering(raw: &str) -> Result<(String, String, bool), String> {
                 "{side:?} looks like a shell command. Ordering rules name tools \
                  (`Bash`) or actions (`action:deploy`), never commands — \
                  `classify` in plugins::anomaly::actions maps commands onto the \
-                 eight action tokens, and a rule naming the command itself can \
+                 action tokens, and a rule naming the command itself can \
                  never match."
             ));
         }
@@ -680,7 +933,36 @@ fn parse_rules(front: &str, key: &str) -> (Vec<(String, String, bool)>, Vec<Stri
         .filter(|r| !r.is_empty())
     {
         match parse_ordering(&raw) {
-            Ok(t) => ok.push(t),
+            Ok((before, after, adjacent)) => {
+                use crate::plugins::anomaly::outcome::{qualifier_error, strip_any_qualifier};
+                // A misplaced or unknown qualifier is reported and the rule
+                // kept so that it still refuses: the left side stays literal
+                // (a token nothing emits leaves the rule unmet), the right
+                // side loses the qualifier (so it still names the gated call).
+                // `forbid_after:` takes no qualifier at all, so both sides
+                // lose it there and the rule keeps forbidding.
+                let error = if key == "requires_before:" {
+                    qualifier_error(&before, &after)
+                } else {
+                    let lhs_q = strip_any_qualifier(&before) != before.trim();
+                    let rhs_q = strip_any_qualifier(&after) != after.trim();
+                    (lhs_q || rhs_q).then(|| {
+                        format!("{raw:?}: [ok] qualifies only action:run_tests, on the left of -> in requires_before:")
+                    })
+                };
+                match error {
+                    Some(e) => {
+                        errs.push(format!("{key} {e}"));
+                        let before = if key == "requires_before:" {
+                            before
+                        } else {
+                            strip_any_qualifier(&before)
+                        };
+                        ok.push((before, strip_any_qualifier(&after), adjacent));
+                    }
+                    None => ok.push((before, after, adjacent)),
+                }
+            }
             Err(e) => errs.push(format!("{key} {e}")),
         }
     }
@@ -725,6 +1007,9 @@ pub(crate) fn parse_sop_content(
         && fm.sql_guard.is_none()
         && fm.hook_rules.is_empty()
         && fm.decide_rules.is_empty()
+        && fm.plan_approval.is_none()
+        && fm.closed_lanes.is_empty()
+        && fm.node_kinds.is_empty()
         && fm.rule_errors.is_empty()
     {
         return None;
@@ -791,6 +1076,15 @@ pub(crate) fn parse_sop_content(
         sql_allow_dsns: fm.sql_allow_dsns,
         hook_rules: fm.hook_rules,
         decide_rules: fm.decide_rules,
+        scope_paths_mode: fm.scope_paths_mode,
+        plan_steps_mode: fm.plan_steps_mode,
+        plan_approval: fm.plan_approval,
+        closed_lanes: fm.closed_lanes,
+        open_actions: fm.open_actions,
+        on_reask_exhausted: fm.on_reask_exhausted,
+        context_isolation: fm.context_isolation,
+        node_kinds: fm.node_kinds,
+        node_kind_allow: fm.node_kind_allow,
     })
 }
 
@@ -1197,7 +1491,8 @@ mod enforceability_tests {
 /// lists that disagree is the same defect class as the tool-name lists in
 /// `actions.rs` — one place, or they drift.
 const ENFORCING_FIELDS: &str = "deny_tools, allow_harnesses, plan_steps, scope_paths, \
-     review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard, sql_allow_dsns, hook_rule or decide";
+     review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard, sql_allow_dsns, \
+     closed_lanes, plan_approval, node_kind, hook_rule or decide";
 
 /// Does this SOP declare anything the proxy can act on?
 ///
@@ -1225,6 +1520,9 @@ fn is_enforceable(sop: &Sop) -> bool {
         || sop.sql_guard.is_some()
         || !sop.hook_rules.is_empty()
         || !sop.decide_rules.is_empty()
+        || !sop.closed_lanes.is_empty()
+        || sop.plan_approval.is_some()
+        || !sop.node_kinds.is_empty()
 }
 
 /// What to say when policy loaded but none of it can fire.
@@ -1693,6 +1991,21 @@ pub struct GovernanceFields {
     /// see `plugins::sql_guard` for why.
     pub sql_guard: Option<SqlGuardPolicy>,
     pub governance_block: Option<String>,
+    /// Any applicable SOP says `scope_paths_mode: enforce`.
+    pub scope_paths_enforce: bool,
+    /// Any applicable SOP says `plan_steps_mode: enforce`.
+    pub plan_steps_enforce: bool,
+    /// Any applicable SOP says `context_isolation: enforce`.
+    pub context_isolation_enforce: bool,
+    /// Any applicable SOP says `on_reask_exhausted: pause`.
+    pub on_reask_pause: bool,
+    /// The action tokens closed lanes hold ([`collect_lane_holds`]), already
+    /// merged into `review_before` above; kept apart so a refusal can say a
+    /// lane held it.
+    pub lane_holds: Vec<String>,
+    /// The node kinds the applicable SOPs declare, and the limits they lift.
+    pub node_kinds: Vec<String>,
+    pub node_kind_allow: Vec<String>,
 }
 
 /// Split a resolved SOP set into `(enforcing, shadow)` by [`SopMode`].
@@ -1733,6 +2046,34 @@ pub struct SopShadowReport {
 }
 
 pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
+    governance_fields_with_lanes(sops, role, &[])
+}
+
+/// [`governance_fields_from`], with the workspace's own closed lanes
+/// (`closedLanes` on key-context), which apply to every role and which no
+/// SOP's `open_actions:` reopens.
+pub fn governance_fields_with_lanes(
+    sops: &[Sop],
+    role: &str,
+    workspace_lanes: &[LaneClass],
+) -> GovernanceFields {
+    let applicable = || sops.iter().filter(|s| s.applies_to(role));
+    let lane_holds = collect_lane_holds(sops, role, workspace_lanes);
+    let mut review_before = collect_review_before(sops, role);
+    review_before.extend(lane_holds.iter().cloned());
+    review_before.sort();
+    review_before.dedup();
+    let mut node_kinds: Vec<String> = applicable()
+        .flat_map(|s| s.node_kinds.iter().cloned())
+        .collect();
+    node_kinds.sort();
+    node_kinds.dedup();
+    let mut node_kind_allow: Vec<String> = applicable()
+        .flat_map(|s| s.node_kind_allow.iter().cloned())
+        .collect();
+    node_kind_allow.sort();
+    node_kind_allow.dedup();
+
     let mut max_calls: Vec<(String, usize)> = sops
         .iter()
         .filter(|s| s.applies_to(role))
@@ -1759,7 +2100,7 @@ pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
         denied_tool_sources: collect_deny_sources(sops, role),
         plan_steps: collect_plan_steps(sops, role),
         scope_paths: collect_scope_paths(sops, role),
-        review_before: collect_review_before(sops, role),
+        review_before,
         requires_before: collect_requires_before(sops, role),
         forbid_after: collect_forbid_after(sops, role),
         max_calls,
@@ -1767,7 +2108,57 @@ pub fn governance_fields_from(sops: &[Sop], role: &str) -> GovernanceFields {
         allowed_harnesses: collect_harnesses(sops, role),
         sql_guard: sql_guard_from(sops, role, false),
         governance_block: render(sops, role),
+        scope_paths_enforce: applicable().any(|s| s.scope_paths_mode == CheckMode::Enforce),
+        plan_steps_enforce: applicable().any(|s| s.plan_steps_mode == CheckMode::Enforce),
+        context_isolation_enforce: applicable().any(|s| s.context_isolation == CheckMode::Enforce),
+        on_reask_pause: applicable().any(|s| s.on_reask_exhausted == OnReaskExhausted::Pause),
+        lane_holds,
+        node_kinds,
+        node_kind_allow,
     }
+}
+
+/// The action tokens closed reversibility lanes hold for `role` (3.1
+/// §5.2), once each, in the class table's order:
+///
+/// 1. each applicable SOP that declares `closed_lanes:` holds the tokens of
+///    the classes it lists — plus `reversible_wide` when its `risk_tier` is
+///    HIGH or CRITICAL — less its own `open_actions:`;
+/// 2. the workspace's `closedLanes` hold their tokens for every role, and no
+///    `open_actions:` reopens them;
+/// 3. the union of the two.
+///
+/// `risk_tier` alone closes nothing: it is read by WASM rules today, and
+/// making it close lanes would start holding SOPs written for them.
+pub fn collect_lane_holds(sops: &[Sop], role: &str, workspace_lanes: &[LaneClass]) -> Vec<String> {
+    use crate::plugins::anomaly::actions::tokens_of_class;
+    let mut out: Vec<String> = Vec::new();
+    for sop in sops
+        .iter()
+        .filter(|s| s.applies_to(role) && !s.closed_lanes.is_empty())
+    {
+        let mut classes = sop.closed_lanes.clone();
+        if matches!(sop.risk_tier, Some(RiskLevel::High | RiskLevel::Critical)) {
+            classes.push(LaneClass::ReversibleWide);
+        }
+        for class in classes {
+            out.extend(
+                tokens_of_class(class)
+                    .into_iter()
+                    .filter(|t| !sop.open_actions.iter().any(|o| o.eq_ignore_ascii_case(t)))
+                    .map(str::to_string),
+            );
+        }
+    }
+    for class in workspace_lanes {
+        out.extend(tokens_of_class(*class).into_iter().map(str::to_string));
+    }
+    // In the class table's order (`ACTION_TOKENS`), as lanes.ts lists them.
+    crate::plugins::anomaly::actions::ACTION_TOKENS
+        .iter()
+        .filter(|t| out.iter().any(|o| o == *t))
+        .map(|t| t.to_string())
+        .collect()
 }
 
 /// The SQL guard `sops` declare for `role`, or `None` when none does.
@@ -2513,6 +2904,7 @@ mod tests {
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
             decide_rules: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -2822,6 +3214,7 @@ mod tests {
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
                 decide_rules: Vec::new(),
+                ..Default::default()
             })
             .collect();
         let out = render(&big, "any").unwrap();
@@ -3028,6 +3421,7 @@ mod render_determinism_tests {
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
             decide_rules: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -3384,6 +3778,7 @@ mod discovery_tests {
             sql_allow_dsns: fm.sql_allow_dsns,
             hook_rules: fm.hook_rules,
             decide_rules: fm.decide_rules,
+            ..Default::default()
         }
     }
 
@@ -3663,7 +4058,7 @@ mod discovery_tests {
     /// This is the single most likely authoring mistake. The rules are about
     /// `action:deploy`, but the thing an operator has in mind is `git push` —
     /// and a command never matches, because no harness emits a tool by that name
-    /// and `classify` synthesises only the eight `action:` tokens. Such a rule
+    /// and `classify` synthesises only the `action:` tokens. Such a rule
     /// would compile, load, sit in front matter looking correct, and never fire.
     ///
     /// Rejecting at parse is the only moment anyone finds out.
@@ -3996,6 +4391,7 @@ mod deny_tests {
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
             decide_rules: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -4092,6 +4488,7 @@ mod harness_policy_tests {
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
                 decide_rules: Vec::new(),
+                ..Default::default()
             },
             Sop {
                 risk_tier: None,
@@ -4113,6 +4510,7 @@ mod harness_policy_tests {
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
                 decide_rules: Vec::new(),
+                ..Default::default()
             },
         ];
         assert_eq!(collect_harnesses(&sops, "reviewer"), vec!["claude-code"]);
@@ -4178,6 +4576,7 @@ mod plan_step_tests {
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
                 decide_rules: Vec::new(),
+                ..Default::default()
             },
             Sop {
                 risk_tier: None,
@@ -4199,6 +4598,7 @@ mod plan_step_tests {
                 sql_allow_dsns: Vec::new(),
                 hook_rules: Vec::new(),
                 decide_rules: Vec::new(),
+                ..Default::default()
             },
         ];
         assert_eq!(
@@ -4233,6 +4633,7 @@ mod plan_step_tests {
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
             decide_rules: Vec::new(),
+            ..Default::default()
         }];
         assert!(collect_plan_steps(&sops, "reviewer").is_empty());
         assert!(collect_plan_steps(&sops, "").is_empty());
@@ -4324,6 +4725,7 @@ mod scope_and_review_tests {
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
             decide_rules: Vec::new(),
+            ..Default::default()
         }];
         assert!(collect_scope_paths(&sops, "reviewer").is_empty());
         assert!(collect_review_before(&sops, "reviewer").is_empty());
@@ -4352,6 +4754,7 @@ mod scope_and_review_tests {
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
             decide_rules: Vec::new(),
+            ..Default::default()
         };
         let sops = vec![mk("packages/proxy"), mk("infra"), mk("packages/proxy")];
         assert_eq!(
@@ -4451,6 +4854,7 @@ mod sop_status_snapshot_tests {
             sql_allow_dsns: Vec::new(),
             hook_rules: Vec::new(),
             decide_rules: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -4872,5 +5276,296 @@ mod workspace_cache_version_tests {
             1,
             "with no version recorded at fetch time only the TTL applies"
         );
+    }
+}
+
+#[cfg(test)]
+mod lld75_key_tests {
+    //! The front-matter keys 3.1 added (§1.4): defaults, strongest-wins,
+    //! unknown values enforcing, the two top-level-only keys, and lanes.
+    use super::*;
+    use crate::plugins::anomaly::actions::LaneClass;
+
+    fn fm(front: &str) -> FrontMatter {
+        parse_front_matter(&format!("---\n{front}\n---\nbody"))
+    }
+
+    #[test]
+    fn a_sop_with_none_of_the_new_keys_is_unchanged() {
+        let f = fm("deny_tools: Bash");
+        assert_eq!(f.scope_paths_mode, CheckMode::Advise);
+        assert_eq!(f.plan_steps_mode, CheckMode::Advise);
+        assert_eq!(f.plan_approval, None);
+        assert!(f.closed_lanes.is_empty() && f.open_actions.is_empty());
+        assert_eq!(f.on_reask_exhausted, OnReaskExhausted::Block);
+        assert_eq!(f.context_isolation, CheckMode::Advise);
+        assert!(f.node_kinds.is_empty() && f.node_kind_allow.is_empty());
+        assert!(f.rule_errors.is_empty());
+    }
+
+    #[test]
+    fn the_strongest_value_wins_and_an_unknown_one_enforces() {
+        let f = fm("scope_paths_mode: advise\n  scope_paths_mode: enforce\nplan_steps_mode: \"enforce\"\nplan_approval: required\nplan_approval: strict\non_reask_exhausted: pause\ncontext_isolation: enforce");
+        assert_eq!(f.scope_paths_mode, CheckMode::Enforce);
+        assert_eq!(f.plan_steps_mode, CheckMode::Enforce);
+        assert_eq!(f.plan_approval, Some(PlanApproval::Strict));
+        assert_eq!(f.on_reask_exhausted, OnReaskExhausted::Pause);
+        assert_eq!(f.context_isolation, CheckMode::Enforce);
+        assert!(f.rule_errors.is_empty(), "{:?}", f.rule_errors);
+
+        let typo = fm("scope_paths_mode: enfroce\nplan_approval: requird\non_reask_exhausted: pasue\ncontext_isolation: maybe");
+        assert_eq!(typo.scope_paths_mode, CheckMode::Enforce);
+        assert_eq!(typo.plan_approval, Some(PlanApproval::Strict));
+        assert_eq!(typo.on_reask_exhausted, OnReaskExhausted::Pause);
+        assert_eq!(typo.context_isolation, CheckMode::Enforce);
+        assert_eq!(typo.rule_errors.len(), 4, "{:?}", typo.rule_errors);
+    }
+
+    #[test]
+    fn lists_drop_unknown_entries_and_weakening_keys_are_top_level_only() {
+        let f = fm("closed_lanes: irreversible, reversible_contained\nopen_actions: action:publish, Bash\nnode_kind: worker, robot\nnode_kind_allow: spawn, fly\nmeta:\n  open_actions: action:destroy\n  node_kind_allow: model");
+        assert_eq!(f.closed_lanes, vec![LaneClass::Irreversible]);
+        assert_eq!(f.open_actions, vec!["action:publish"]);
+        assert_eq!(f.node_kinds, vec!["worker"]);
+        assert_eq!(f.node_kind_allow, vec!["spawn"]);
+        assert_eq!(f.rule_errors.len(), 4, "{:?}", f.rule_errors);
+    }
+
+    #[test]
+    fn a_misplaced_qualifier_is_an_error_and_still_refuses() {
+        let f = fm("requires_before: action:run_tests[ok] -> action:deploy, action:deploy[ok] -> action:release, action:run_tests -> action:publish[ok]");
+        assert_eq!(
+            f.requires_before,
+            vec![
+                ("action:run_tests[ok]".into(), "action:deploy".into(), false),
+                // Left literal: nothing emits it, so release is always refused.
+                ("action:deploy[ok]".into(), "action:release".into(), false),
+                // Right stripped: the gated call is still named.
+                ("action:run_tests".into(), "action:publish".into(), false),
+            ]
+        );
+        assert_eq!(f.rule_errors.len(), 2, "{:?}", f.rule_errors);
+        assert!(f.rule_errors[0].contains("[ok] qualifies only action:run_tests"));
+
+        let fa = fm("forbid_after: action:secret_read[ok] -> action:http_post");
+        assert_eq!(
+            fa.forbid_after,
+            vec![(
+                "action:secret_read".into(),
+                "action:http_post".into(),
+                false
+            )]
+        );
+        assert_eq!(fa.rule_errors.len(), 1);
+    }
+
+    #[test]
+    fn the_new_enforcing_keys_make_a_sop_enforceable() {
+        for front in [
+            "closed_lanes: irreversible",
+            "plan_approval: required",
+            "node_kind: code",
+        ] {
+            let sop = parse_sop_content(
+                "t".into(),
+                &format!("---\n{front}\n---\n"),
+                "test",
+                SopScope::Workspace,
+            )
+            .unwrap_or_else(|| panic!("{front} alone is a SOP"));
+            assert!(is_enforceable(&sop), "{front}");
+        }
+        for key in ["closed_lanes", "plan_approval", "node_kind"] {
+            assert!(ENFORCING_FIELDS.contains(key), "{key}");
+        }
+    }
+
+    fn lane_sop(front: &str, roles: &[&str]) -> Sop {
+        let mut sop = parse_sop_content(
+            "lanes".into(),
+            &format!("---\n{front}\n---\n"),
+            "test",
+            SopScope::Workspace,
+        )
+        .expect("a sop");
+        sop.roles = roles.iter().map(|r| r.to_string()).collect();
+        sop
+    }
+
+    #[test]
+    fn lane_holds_follow_classes_risk_tier_open_actions_and_the_workspace() {
+        let irreversible = lane_sop(
+            "closed_lanes: irreversible\nopen_actions: action:publish",
+            &[],
+        );
+        assert_eq!(
+            collect_lane_holds(std::slice::from_ref(&irreversible), "", &[]),
+            vec!["action:destroy", "action:force_push", "action:payment"]
+        );
+        let typo = fm("closed_lanes: irreversable, irreversible\nopen_actions: action:publsh");
+        assert_eq!(
+            typo.rule_errors,
+            vec![
+                "closed_lanes: \"irreversable\" is not a lane (irreversible, reversible_wide)",
+                "open_actions: \"action:publsh\" is not an action token"
+            ]
+        );
+        // risk_tier HIGH widens a SOP that closes a lane to reversible_wide.
+        let high = lane_sop("closed_lanes: irreversible\nrisk_tier: HIGH", &["deployer"]);
+        let held = collect_lane_holds(std::slice::from_ref(&high), "deployer", &[]);
+        assert!(held.contains(&"action:deploy".to_string()), "{held:?}");
+        assert!(held.contains(&"action:publish".to_string()), "{held:?}");
+        assert!(collect_lane_holds(&[high], "reviewer", &[]).is_empty());
+        // risk_tier alone closes nothing.
+        assert!(collect_lane_holds(
+            &[lane_sop("risk_tier: CRITICAL\ndeny_tools: x", &[])],
+            "",
+            &[]
+        )
+        .is_empty());
+        // The workspace's lanes are not reopened by an SOP's open_actions.
+        let ws = collect_lane_holds(&[irreversible], "", &[LaneClass::Irreversible]);
+        assert!(ws.contains(&"action:publish".to_string()), "{ws:?}");
+    }
+
+    #[test]
+    fn governance_merges_lane_holds_into_review_before_and_reads_the_modes() {
+        let sop = lane_sop(
+            "closed_lanes: irreversible\nreview_before: action:deploy\nscope_paths: src\nscope_paths_mode: enforce\non_reask_exhausted: pause\nnode_kind: worker",
+            &[],
+        );
+        let gov = governance_fields_with_lanes(std::slice::from_ref(&sop), "", &[]);
+        assert_eq!(
+            gov.review_before,
+            vec![
+                "action:deploy",
+                "action:destroy",
+                "action:force_push",
+                "action:payment",
+                "action:publish"
+            ]
+        );
+        assert!(gov.scope_paths_enforce && gov.on_reask_pause);
+        assert!(!gov.plan_steps_enforce && !gov.context_isolation_enforce);
+        assert_eq!(gov.node_kinds, vec!["worker"]);
+        // Without lanes, governance_fields_from is today's answer.
+        let plain = lane_sop("review_before: action:deploy", &[]);
+        assert_eq!(
+            governance_fields_from(&[plain], "").review_before,
+            vec!["action:deploy"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod lld75_sops_vectors {
+    //! 3.1's shared vectors that need the front-matter parser:
+    //! `lane-vectors.json` (`laneHoldTokens`, `frontMatter`) and
+    //! `scope-plan-vectors.json` (`collectScopePaths`, `collectPlanSteps`).
+    use super::*;
+    use crate::plugins::anomaly::actions::LaneClass;
+    use serde_json::Value;
+
+    fn strings(v: &Value) -> Vec<String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn lane_holds_follow_the_vectors() {
+        let Some(v) = crate::plugins::anomaly::outcome::lld75_fixture("lane-vectors.json") else {
+            return;
+        };
+        for c in v["laneHoldTokens"].as_array().unwrap() {
+            let sops: Vec<Sop> = c["sops"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| Sop {
+                    closed_lanes: strings(&s["closedLanes"])
+                        .iter()
+                        .filter_map(|l| LaneClass::parse_closable(l))
+                        .collect(),
+                    open_actions: strings(&s["openActions"]),
+                    risk_tier: s["riskTier"]
+                        .as_str()
+                        .and_then(|r| parse_risk_tier(&format!("risk_tier: {r}"))),
+                    ..Default::default()
+                })
+                .collect();
+            let ws: Vec<LaneClass> = strings(&c["workspaceLanes"])
+                .iter()
+                .filter_map(|l| LaneClass::parse_closable(l))
+                .collect();
+            assert_eq!(
+                collect_lane_holds(&sops, "", &ws),
+                strings(&c["tokens"]),
+                "{}",
+                c["name"]
+            );
+        }
+        for c in v["frontMatter"].as_array().unwrap() {
+            let raw = format!("---{}---\nbody", c["front"].as_str().unwrap());
+            let fm = parse_front_matter(&raw);
+            let sop =
+                parse_sop_content("t".into(), &raw, "test", SopScope::Workspace).expect("a sop");
+            assert_eq!(
+                collect_lane_holds(&[sop], "", &[]),
+                strings(&c["tokens"]),
+                "{}",
+                c["name"]
+            );
+            assert_eq!(fm.rule_errors, strings(&c["errors"]), "{}", c["name"]);
+        }
+    }
+
+    fn sops_of(c: &Value, field: &str) -> Vec<Sop> {
+        c["sops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| {
+                let mut sop = Sop {
+                    scope: SopScope::from_wire(s["scope"].as_str()),
+                    roles: strings(&s["roles"]),
+                    ..Default::default()
+                };
+                if field == "scopePaths" {
+                    sop.scope_paths = strings(&s[field]);
+                } else {
+                    sop.plan_steps = strings(&s[field]);
+                }
+                sop
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scope_and_plan_collection_follow_the_vectors() {
+        let Some(v) = crate::plugins::anomaly::outcome::lld75_fixture("scope-plan-vectors.json")
+        else {
+            return;
+        };
+        for c in v["collectScopePaths"].as_array().unwrap() {
+            assert_eq!(
+                collect_scope_paths(&sops_of(c, "scopePaths"), c["role"].as_str().unwrap()),
+                strings(&c["paths"]),
+                "{}",
+                c["name"]
+            );
+        }
+        for c in v["collectPlanSteps"].as_array().unwrap() {
+            assert_eq!(
+                collect_plan_steps(&sops_of(c, "planSteps"), c["role"].as_str().unwrap()),
+                strings(&c["steps"]),
+                "{}",
+                c["name"]
+            );
+        }
     }
 }

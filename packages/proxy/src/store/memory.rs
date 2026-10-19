@@ -199,6 +199,9 @@ struct ScopeIndex {
     seen: std::collections::HashSet<String>,
 }
 
+/// One graph's recorded node kinds (`node → kind`) and when they expire.
+type GraphKinds = (HashMap<String, String>, u64);
+
 #[derive(Default)]
 pub struct MemoryStore {
     arms: Mutex<HashMap<String, HashMap<String, BanditArmState>>>,
@@ -257,6 +260,15 @@ pub struct MemoryStore {
     /// No TTL here. The process lifetime is shorter than the one-hour window
     /// the Valkey path uses, so the restart is the expiry.
     reask_attempts: Mutex<HashMap<String, u32>>,
+    /// Recorded test outcomes per session scope. Bounded with
+    /// the other per-session maps by `touch_scope`'s cap.
+    action_outcomes: Mutex<HashMap<String, HashMap<String, String>>>,
+    /// Context signatures per graph, with the Valkey hash's
+    /// contract: set-if-absent, a field cap, a TTL and an LRU of graphs.
+    context_sigs: Mutex<crate::context_sig::CtxSigMemoryStore>,
+    /// Recorded node kinds per graph: `key → (node → kind,
+    /// expires_at)`, capped like the signatures.
+    node_kinds: Mutex<HashMap<String, GraphKinds>>,
     /// Per-key rate counters, keyed by `key_limits::rate_counter_keys`, each
     /// with the minute it counts. A proxy without Valkey is one process, so
     /// these are the whole count; old minutes are dropped as new ones start.
@@ -420,6 +432,11 @@ impl MemoryStore {
             }
         }
         if let Ok(mut m) = self.tool_signatures.lock() {
+            for k in &evicted {
+                m.remove(k);
+            }
+        }
+        if let Ok(mut m) = self.action_outcomes.lock() {
             for k in &evicted {
                 m.remove(k);
             }
@@ -1010,6 +1027,98 @@ impl LocalStore for MemoryStore {
         *n
     }
 
+    async fn reset_reask_attempt(&self, scope: &str, detector_id: &str) {
+        if let Ok(mut m) = lock(&self.reask_attempts, "reask_attempts") {
+            m.remove(&format!("{scope}|{detector_id}"));
+        }
+    }
+
+    async fn action_outcomes(&self, scope: &str) -> Option<HashMap<String, String>> {
+        let m = lock(&self.action_outcomes, "action_outcomes").ok()?;
+        Some(m.get(scope).cloned().unwrap_or_default())
+    }
+
+    async fn record_action_outcome(&self, scope: &str, token: &str, value: &str) -> bool {
+        {
+            let Ok(mut m) = lock(&self.action_outcomes, "action_outcomes") else {
+                return false;
+            };
+            m.entry(scope.to_string())
+                .or_default()
+                .insert(token.to_string(), value.to_string());
+        }
+        self.touch_scope(scope);
+        true
+    }
+
+    async fn context_signatures(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+    ) -> Option<Vec<(String, String)>> {
+        let mut store = lock(&self.context_sigs, "context_sigs").ok()?;
+        Some(store.get_all(&format!("{workspace_id}:{graph_id}"), unix_secs()))
+    }
+
+    async fn store_context_signature(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+        value: &str,
+    ) -> bool {
+        let Ok(mut store) = lock(&self.context_sigs, "context_sigs") else {
+            return false;
+        };
+        store.set_if_absent(
+            &format!("{workspace_id}:{graph_id}"),
+            node_id,
+            value.to_string(),
+            unix_secs(),
+        )
+    }
+
+    async fn recorded_node_kind(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+    ) -> Option<String> {
+        let m = lock(&self.node_kinds, "node_kinds").ok()?;
+        let (fields, expires_at) = m.get(&format!("{workspace_id}:{graph_id}"))?;
+        if *expires_at <= unix_secs() {
+            return None;
+        }
+        fields.get(node_id).cloned()
+    }
+
+    async fn record_node_kind(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+        kind: &str,
+    ) {
+        let Ok(mut m) = lock(&self.node_kinds, "node_kinds") else {
+            return;
+        };
+        let now = unix_secs();
+        let key = format!("{workspace_id}:{graph_id}");
+        if !m.contains_key(&key) && m.len() >= crate::context_sig::CTXSIG_MEMORY_GRAPHS {
+            // Expired graphs first, then any: a bounded map, not a cache to
+            // tune — a lost kind only lets one child through unrefused.
+            m.retain(|_, (_, exp)| *exp > now);
+            if m.len() >= crate::context_sig::CTXSIG_MEMORY_GRAPHS {
+                if let Some(victim) = m.keys().next().cloned() {
+                    m.remove(&victim);
+                }
+            }
+        }
+        let entry = m.entry(key).or_insert_with(|| (HashMap::new(), 0));
+        entry.0.insert(node_id.to_string(), kind.to_string());
+        entry.1 = now + crate::node_kind::NODE_KIND_TTL_SECS;
+    }
+
     async fn loop_review_reason(&self, _loop_run_id: &str) -> Option<String> {
         None
     }
@@ -1289,6 +1398,13 @@ impl ControlPlaneCache for NullControlPlaneCache {
     async fn is_sandbox_attested(&self, _workspace_id: &str, _session_id: &str) -> bool {
         false
     }
+}
+
+/// Seconds since the epoch, for the graph maps' TTLs.
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 #[cfg(test)]

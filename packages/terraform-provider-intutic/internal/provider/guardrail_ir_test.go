@@ -197,3 +197,40 @@ func TestDecideIRBuildsFromItsAttributes(t *testing.T) {
 		t.Fatalf("reason = %q", reason)
 	}
 }
+
+// The vocabulary the reversibility lanes add: thirteen action tokens, and the one qualified
+// token, accepted only on the left of a requires_before.
+func TestActionTokensAndTheQualifiedToken(t *testing.T) {
+	for _, tok := range []string{"action:migrate", "action:prod_write", "action:destroy", "action:force_push", "action:payment"} {
+		if msg := checkItem("token", tok); msg != "" {
+			t.Errorf("%s: %s", tok, msg)
+		}
+	}
+	if len(grammar.ActionTokens) != 13 {
+		t.Fatalf("action tokens = %v", grammar.ActionTokens)
+	}
+	if !slices.Equal(grammar.QualifiedTokens, []string{"action:run_tests[ok]"}) {
+		t.Fatalf("qualified tokens = %v", grammar.QualifiedTokens)
+	}
+	if msg := checkItem("token", "action:run_tests[ok]"); msg == "" {
+		t.Fatal("the qualified token is refused anywhere but the left of requires_before")
+	}
+	// Samples for the left side of a requires_before stay here: the control
+	// plane's grammar parity test runs the file's samples through other kinds.
+	for _, v := range []string{"action:run_tests[ok]", "action:run_tests", "Bash", "action:destroy"} {
+		if msg := checkItem("orderingFirst", v); msg != "" {
+			t.Errorf("%q should be a valid first side: %s", v, msg)
+		}
+	}
+	for _, v := range []string{"action:deploy[ok]", "action:run_tests[OK]", "action:run_tests[failed]", "Bash[ok]", "npm test"} {
+		if checkItem("orderingFirst", v) == "" {
+			t.Errorf("%q should be refused as a first side", v)
+		}
+	}
+	if msg := checkItem("orderingFirst", "action:deploy[ok]"); !strings.Contains(msg, "[ok] qualifies only action:run_tests") {
+		t.Fatalf("action:deploy[ok]: %q", msg)
+	}
+	if grammar.Kinds["requires_before"]["first"].Item != "orderingFirst" || grammar.Kinds["forbid_after"]["first"].Item != "token" {
+		t.Fatal("only requires_before's first side takes a qualified token")
+	}
+}

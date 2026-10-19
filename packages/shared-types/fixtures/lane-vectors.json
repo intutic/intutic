@@ -1,0 +1,939 @@
+{
+ "_doc": "Reversibility lanes of the loops, graphs and gates release, and the order of evidence. classes: every action token's class (shared-types lanes.ts TOKEN_CLASS, the proxy's actions.rs token_class(), intutic_clawde actions.py TOKEN_CLASS). laneOf: the strongest class among tokens. laneHoldTokens: applicable SOPs (closedLanes, openActions, riskTier) and the workspace closedLanes to the held tokens, in class-table order. frontMatter: SOP front matter (the text between the fences) to the held tokens, through the front-matter parser (guardrailRender.ts parseFrontMatterEnforcing and sops.rs) then laneHoldTokens, and the rule errors it reports; it pins that open_actions: is read at the top level only and closed_lanes: at any indentation. classify: shell commands and every token the classifier gives them, in order (run through the shell tool `bash`), for the tokens 3.1 added: actions.rs, gate-js actions.ts and actions.py must give exactly these, and action_vectors.json carries them. holdPatterns: the snapshot rules each token's hold compiles to (lanes.ts laneHoldPatterns), and the rule ids. orderOfEvidence: the rows every decide evaluator (decideEvaluate.ts and its copies, decide_evaluate.py, the proxy's decide/gateway.rs) must keep: deterministic is the verdict of the tiers before decide (allow, refuse, or hold: a lane or revert hold not released), decide is what the decide rule would answer; outcome is the call's, and asked says whether the engine was asked at all.",
+ "classes": {
+  "action:deploy": "reversible_wide",
+  "action:publish": "irreversible",
+  "action:release": "reversible_wide",
+  "action:db_write": "reversible_wide",
+  "action:secret_read": "reversible_contained",
+  "action:http_post": "reversible_wide",
+  "action:pii_export": "reversible_contained",
+  "action:run_tests": "reversible_contained",
+  "action:migrate": "reversible_wide",
+  "action:prod_write": "reversible_wide",
+  "action:destroy": "irreversible",
+  "action:force_push": "irreversible",
+  "action:payment": "irreversible"
+ },
+ "laneOf": [
+  {
+   "tokens": [],
+   "lane": null
+  },
+  {
+   "tokens": [
+    "Bash"
+   ],
+   "lane": null
+  },
+  {
+   "tokens": [
+    "action:run_tests"
+   ],
+   "lane": "reversible_contained"
+  },
+  {
+   "tokens": [
+    "action:run_tests",
+    "action:deploy"
+   ],
+   "lane": "reversible_wide"
+  },
+  {
+   "tokens": [
+    "action:deploy",
+    "action:publish"
+   ],
+   "lane": "irreversible"
+  },
+  {
+   "tokens": [
+    "action:force_push",
+    "action:deploy"
+   ],
+   "lane": "irreversible"
+  },
+  {
+   "tokens": [
+    "action:unknown",
+    "action:secret_read"
+   ],
+   "lane": "reversible_contained"
+  }
+ ],
+ "laneHoldTokens": [
+  {
+   "name": "nothing declared",
+   "sops": [],
+   "workspaceLanes": null,
+   "tokens": []
+  },
+  {
+   "name": "irreversible",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": [],
+     "riskTier": null
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "reversible_wide",
+   "sops": [
+    {
+     "closedLanes": [
+      "reversible_wide"
+     ],
+     "openActions": []
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:deploy",
+    "action:release",
+    "action:db_write",
+    "action:http_post",
+    "action:migrate",
+    "action:prod_write"
+   ]
+  },
+  {
+   "name": "both",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible",
+      "reversible_wide"
+     ],
+     "openActions": []
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:deploy",
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:http_post",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "open_actions reopens a token",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": [
+      "action:publish"
+     ],
+     "riskTier": null
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "HIGH risk adds reversible_wide",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": [],
+     "riskTier": "HIGH"
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:deploy",
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:http_post",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "critical in lower case",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": [
+      "action:deploy"
+     ],
+     "riskTier": "critical"
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:http_post",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "MEDIUM risk adds nothing",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": [],
+     "riskTier": "MEDIUM"
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "risk_tier alone closes nothing",
+   "sops": [
+    {
+     "closedLanes": [],
+     "openActions": [],
+     "riskTier": "CRITICAL"
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": []
+  },
+  {
+   "name": "one SOP's open_actions does not reopen another's",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": [
+      "action:publish"
+     ]
+    },
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": []
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "workspace lanes for everyone",
+   "sops": [],
+   "workspaceLanes": [
+    "irreversible"
+   ],
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "open_actions cannot reopen a workspace lane",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversible"
+     ],
+     "openActions": [
+      "action:publish"
+     ]
+    }
+   ],
+   "workspaceLanes": [
+    "irreversible"
+   ],
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "union of SOP and workspace",
+   "sops": [
+    {
+     "closedLanes": [
+      "reversible_wide"
+     ],
+     "openActions": [
+      "action:http_post"
+     ]
+    }
+   ],
+   "workspaceLanes": [
+    "irreversible"
+   ],
+   "tokens": [
+    "action:deploy",
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ]
+  },
+  {
+   "name": "reversible_contained never closes",
+   "sops": [
+    {
+     "closedLanes": [
+      "reversible_contained"
+     ],
+     "openActions": []
+    }
+   ],
+   "workspaceLanes": [
+    "reversible_contained"
+   ],
+   "tokens": []
+  },
+  {
+   "name": "an unknown class closes nothing",
+   "sops": [
+    {
+     "closedLanes": [
+      "irreversable"
+     ],
+     "openActions": []
+    }
+   ],
+   "workspaceLanes": null,
+   "tokens": []
+  }
+ ],
+ "frontMatter": [
+  {
+   "name": "top-level closed_lanes",
+   "front": "\nclosed_lanes: irreversible\n",
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": []
+  },
+  {
+   "name": "indented closed_lanes still closes",
+   "front": "\nsteps:\n  closed_lanes: irreversible\n",
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": []
+  },
+  {
+   "name": "top-level open_actions reopens",
+   "front": "\nclosed_lanes: irreversible\nopen_actions: action:publish\n",
+   "tokens": [
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": []
+  },
+  {
+   "name": "indented open_actions is ignored",
+   "front": "\nclosed_lanes: irreversible\nnested:\n  open_actions: action:publish\n",
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": []
+  },
+  {
+   "name": "lists, quotes and case",
+   "front": "\nclosed_lanes: [\"Irreversible\", 'reversible_wide']\nopen_actions: action:deploy, action:payment\n",
+   "tokens": [
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:http_post",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push"
+   ],
+   "errors": []
+  },
+  {
+   "name": "lines union",
+   "front": "\nclosed_lanes: reversible_wide\nclosed_lanes: irreversible\n",
+   "tokens": [
+    "action:deploy",
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:http_post",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": []
+  },
+  {
+   "name": "risk_tier at the top level",
+   "front": "\nrisk_tier: high\nclosed_lanes: irreversible\n",
+   "tokens": [
+    "action:deploy",
+    "action:publish",
+    "action:release",
+    "action:db_write",
+    "action:http_post",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": []
+  },
+  {
+   "name": "an indented risk_tier is not read",
+   "front": "\nclosed_lanes: irreversible\nnested:\n  risk_tier: high\n",
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": []
+  },
+  {
+   "name": "an unknown class is dropped and reported",
+   "front": "\nclosed_lanes: irreversable, irreversible\n",
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": [
+    "closed_lanes: \"irreversable\" is not a lane (irreversible, reversible_wide)"
+   ]
+  },
+  {
+   "name": "an unknown open action is dropped and reported",
+   "front": "\nclosed_lanes: irreversible\nopen_actions: action:publsh\n",
+   "tokens": [
+    "action:publish",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
+   ],
+   "errors": [
+    "open_actions: \"action:publsh\" is not an action token"
+   ]
+  }
+ ],
+ "classify": [
+  [
+   "terraform destroy -auto-approve",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "kubectl delete deployment web",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "helm uninstall web",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "helm delete web",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "psql -c \"DROP TABLE users\"",
+   [
+    "action:db_write",
+    "action:destroy"
+   ]
+  ],
+  [
+   "psql -c \"DROP DATABASE app\"",
+   [
+    "action:db_write",
+    "action:destroy"
+   ]
+  ],
+  [
+   "psql -c \"TRUNCATE events\"",
+   [
+    "action:db_write",
+    "action:destroy"
+   ]
+  ],
+  [
+   "aws s3 rb s3://bucket --force",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "aws s3 rm s3://bucket/key",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "git push origin main --force",
+   [
+    "action:deploy",
+    "action:force_push"
+   ]
+  ],
+  [
+   "git push -f origin main",
+   [
+    "action:deploy",
+    "action:force_push"
+   ]
+  ],
+  [
+   "git push origin feature -f",
+   [
+    "action:deploy",
+    "action:force_push"
+   ]
+  ],
+  [
+   "git\tpush\t--force",
+   [
+    "action:deploy",
+    "action:force_push"
+   ]
+  ],
+  [
+   "git push --force-with-lease origin main",
+   [
+    "action:deploy"
+   ]
+  ],
+  [
+   "git push origin +main",
+   [
+    "action:deploy"
+   ]
+  ],
+  [
+   "git fetch -f",
+   []
+  ],
+  [
+   "curl -X POST https://api.stripe.com/v1/charges -d amount=100",
+   [
+    "action:http_post",
+    "action:payment"
+   ]
+  ],
+  [
+   "stripe charges create --amount 100 --currency usd",
+   [
+    "action:payment"
+   ]
+  ],
+  [
+   "stripe payouts create --amount 5",
+   [
+    "action:payment"
+   ]
+  ],
+  [
+   "curl https://api-m.paypal.com/v2/payments/captures",
+   [
+    "action:payment"
+   ]
+  ],
+  [
+   "stripe charges list",
+   []
+  ],
+  [
+   "npx prisma migrate deploy",
+   [
+    "action:migrate"
+   ]
+  ],
+  [
+   "npx prisma migrate dev",
+   []
+  ],
+  [
+   "alembic upgrade head",
+   [
+    "action:migrate"
+   ]
+  ],
+  [
+   "python manage.py migrate",
+   [
+    "action:migrate"
+   ]
+  ],
+  [
+   "bundle exec rails db:migrate",
+   [
+    "action:migrate"
+   ]
+  ],
+  [
+   "npx knex migrate:latest",
+   [
+    "action:migrate"
+   ]
+  ],
+  [
+   "npx sequelize db:migrate",
+   [
+    "action:migrate"
+   ]
+  ],
+  [
+   "flyway migrate",
+   [
+    "action:migrate"
+   ]
+  ],
+  [
+   "vercel deploy --prod",
+   [
+    "action:deploy",
+    "action:prod_write"
+   ]
+  ],
+  [
+   "RAILS_ENV=production bin/rails runner x",
+   [
+    "action:prod_write"
+   ]
+  ],
+  [
+   "NODE_ENV=production node scripts/seed.js",
+   [
+    "action:prod_write"
+   ]
+  ],
+  [
+   "kubectl apply -f x.yaml -n production",
+   [
+    "action:deploy",
+    "action:prod_write"
+   ]
+  ],
+  [
+   "kubectl --context prod apply -f deploy.yaml",
+   [
+    "action:deploy",
+    "action:prod_write"
+   ]
+  ],
+  [
+   "serverless deploy --stage prod",
+   [
+    "action:deploy",
+    "action:prod_write"
+   ]
+  ],
+  [
+   "npm run build -- --production",
+   [
+    "action:prod_write"
+   ]
+  ],
+  [
+   "rm -rf /var/lib/app",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "rm -rf ~/projects/old",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "rm -fr ../shared",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "rm -r -f /tmp/x",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "sudo rm -Rf /opt/app",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "cd build && rm -rf ../dist",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "rm --recursive --force /data",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "rm -rf -- /data",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "/bin/rm -rf \"/srv/www\"",
+   [
+    "action:destroy"
+   ]
+  ],
+  [
+   "rm -rf node_modules dist",
+   []
+  ],
+  [
+   "rm -rf build/",
+   []
+  ],
+  [
+   "rm -rf ./build",
+   []
+  ],
+  [
+   "rm -f /tmp/x.log",
+   []
+  ],
+  [
+   "rm -r /tmp/dir",
+   []
+  ],
+  [
+   "rm -rf build; ls /",
+   []
+  ],
+  [
+   "echo rm -rf",
+   []
+  ],
+  [
+   "terraform plan",
+   []
+  ],
+  [
+   "kubectl get pods",
+   []
+  ],
+  [
+   "helm list",
+   []
+  ],
+  [
+   "aws s3 ls s3://bucket",
+   []
+  ]
+ ],
+ "holdPatterns": [
+  {
+   "token": "action:deploy",
+   "id": "sop.lane.reversible_wide.action:deploy",
+   "patterns": [
+    {
+     "subject": "phrase",
+     "source": "git push|kubectl apply|kubectl rollout|helm upgrade|helm install|terraform apply|docker push|serverless deploy|fly deploy|vercel deploy|gcloud run deploy|aws deploy|aws s3 sync|eb deploy",
+     "ignoreCase": true
+    }
+   ]
+  },
+  {
+   "token": "action:destroy",
+   "id": "sop.lane.irreversible.action:destroy",
+   "patterns": [
+    {
+     "subject": "phrase",
+     "source": "terraform destroy|kubectl delete|helm uninstall|helm delete|drop table|drop database|drop schema|truncate |aws s3 rb|aws s3 rm",
+     "ignoreCase": true
+    },
+    {
+     "subject": "action",
+     "source": " (action:destroy) ",
+     "ignoreCase": true
+    }
+   ]
+  },
+  {
+   "token": "action:force_push",
+   "id": "sop.lane.irreversible.action:force_push",
+   "patterns": [
+    {
+     "subject": "action",
+     "source": " (action:force_push) ",
+     "ignoreCase": true
+    },
+    {
+     "subject": "phrase",
+     "source": "git push --force|git push -f",
+     "ignoreCase": true
+    }
+   ]
+  },
+  {
+   "token": "action:payment",
+   "id": "sop.lane.irreversible.action:payment",
+   "patterns": [
+    {
+     "subject": "phrase",
+     "source": "api.stripe.com/v1/charges|api.stripe.com/v1/payment_intents|api.stripe.com/v1/transfers|api.stripe.com/v1/payouts|api.stripe.com/v1/refunds|stripe charges create|stripe payment_intents create|stripe transfers create|stripe payouts create|api-m.paypal.com/v2/payments|api.paypal.com/v1/payments",
+     "ignoreCase": true
+    }
+   ]
+  },
+  {
+   "token": "action:prod_write",
+   "id": "sop.lane.reversible_wide.action:prod_write",
+   "patterns": [
+    {
+     "subject": "phrase",
+     "source": "--prod|rails_env=production|node_env=production|--context prod|--namespace production|-n production|--environment production|--stage prod",
+     "ignoreCase": true
+    }
+   ]
+  },
+  {
+   "token": "action:secret_read",
+   "id": "sop.lane.reversible_contained.action:secret_read",
+   "patterns": [
+    {
+     "subject": "action",
+     "source": " (action:secret_read) ",
+     "ignoreCase": true
+    }
+   ]
+  }
+ ],
+ "revertHoldIds": [
+  [
+   "action:migrate",
+   "revert.action:migrate"
+  ],
+  [
+   "action:deploy",
+   "revert.action:deploy"
+  ]
+ ],
+ "orderOfEvidence": [
+  {
+   "name": "a decide allow never releases a hold",
+   "deterministic": "hold",
+   "decide": "allow",
+   "outcome": "hold",
+   "asked": false
+  },
+  {
+   "name": "a held call stays held whatever decide would say",
+   "deterministic": "hold",
+   "decide": "refuse",
+   "outcome": "hold",
+   "asked": false
+  },
+  {
+   "name": "a deterministic refusal is never asked about",
+   "deterministic": "refuse",
+   "decide": "allow",
+   "outcome": "refuse",
+   "asked": false
+  },
+  {
+   "name": "decide refuses inside an open lane",
+   "deterministic": "allow",
+   "decide": "refuse",
+   "outcome": "refuse",
+   "asked": true
+  },
+  {
+   "name": "decide escalates inside an open lane",
+   "deterministic": "allow",
+   "decide": "escalate",
+   "outcome": "escalate",
+   "asked": true
+  },
+  {
+   "name": "decide allows an open-lane call",
+   "deterministic": "allow",
+   "decide": "allow",
+   "outcome": "allow",
+   "asked": true
+  }
+ ]
+}

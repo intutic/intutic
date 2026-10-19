@@ -172,6 +172,8 @@ pub fn parse_call(raw: &str) -> Option<ToolInvocation> {
         name: name.to_string(),
         input: serde_json::Value::Object(map),
         source: InvocationSource::Call,
+        call_id: None,
+        is_error: None,
     })
 }
 
@@ -314,6 +316,8 @@ fn call(name: &str, args: serde_json::Value) -> ToolInvocation {
         name: name.into(),
         input: args,
         source: InvocationSource::Call,
+        call_id: None,
+        is_error: None,
     }
 }
 

@@ -92,16 +92,24 @@ pub enum Code {
     ResponseUnparseable,
     /// Output DLP found content it could not redact without breaking the body.
     OutputDlp,
+    /// A qualified `requires_before:` prerequisite is not met: no passing
+    /// run, a failed or unreadable one, or one made stale by a later write.
+    PrerequisiteUnmet,
+    /// A file-changing call outside `scope_paths` under
+    /// `scope_paths_mode: enforce`.
+    OutOfScope,
 }
 
 impl Code {
-    pub const ALL: [Code; 6] = [
+    pub const ALL: [Code; 8] = [
         Code::CostGateExceeded,
         Code::ToolDenied,
         Code::SsoGroup,
         Code::SqlGuard,
         Code::ResponseUnparseable,
         Code::OutputDlp,
+        Code::PrerequisiteUnmet,
+        Code::OutOfScope,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -112,8 +120,172 @@ impl Code {
             Code::SqlGuard => "SQL_GUARD",
             Code::ResponseUnparseable => "RESPONSE_UNPARSEABLE",
             Code::OutputDlp => "OUTPUT_DLP",
+            Code::PrerequisiteUnmet => "PREREQUISITE_UNMET",
+            Code::OutOfScope => "OUT_OF_SCOPE",
         }
     }
+}
+
+/// Most entries a [`RefusalScope`] list, or a refusal's evidence, carries.
+pub const DETAIL_MAX_ITEMS: usize = 8;
+/// Longest string a [`RefusalScope`] or [`RefusalEvidence`] field carries, in
+/// characters (code points, as the TypeScript and Python ports count them).
+pub const DETAIL_MAX_CHARS: usize = 256;
+
+/// `s` with C0 control characters (U+0000–U+001F) removed and cut to [`DETAIL_MAX_CHARS`]
+/// bytes. A refusal's detail is shown to an agent and written to logs; a
+/// newline or escape in it must not reshape either.
+pub fn bound_detail(s: &str) -> String {
+    s.chars()
+        .filter(|c| (*c as u32) >= 0x20)
+        .take(DETAIL_MAX_CHARS)
+        .collect()
+}
+
+fn bound_list(items: &[String]) -> Vec<String> {
+    items
+        .iter()
+        .map(|s| bound_detail(s))
+        .filter(|s| !s.is_empty())
+        .take(DETAIL_MAX_ITEMS)
+        .collect()
+}
+
+/// What a refusal was about, so an agent can retry inside it: the paths
+/// outside a scope, the tools off a plan, the prerequisite step it skipped.
+/// `shared-types` refusalDetail.ts `RefusalScope`, held equal by
+/// `fixtures/refusal-detail-vectors.json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RefusalScope {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detector: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+}
+
+impl RefusalScope {
+    pub fn tools<I: IntoIterator<Item = S>, S: Into<String>>(tools: I) -> Self {
+        Self {
+            tools: tools.into_iter().map(Into::into).collect(),
+            ..Self::default()
+        }
+    }
+
+    pub fn paths<I: IntoIterator<Item = S>, S: Into<String>>(paths: I) -> Self {
+        Self {
+            paths: paths.into_iter().map(Into::into).collect(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_step(mut self, step: impl Into<String>) -> Self {
+        self.step = Some(step.into());
+        self
+    }
+
+    pub fn with_rule(mut self, rule: impl Into<String>) -> Self {
+        self.rule = Some(rule.into());
+        self
+    }
+
+    pub fn with_detector(mut self, detector: impl Into<String>) -> Self {
+        self.detector = Some(detector.into());
+        self
+    }
+
+    /// Every list at most [`DETAIL_MAX_ITEMS`] long, every string at most
+    /// [`DETAIL_MAX_CHARS`] and free of control characters.
+    pub fn bounded(&self) -> Self {
+        let one = |s: &Option<String>| s.as_deref().map(bound_detail).filter(|s| !s.is_empty());
+        Self {
+            paths: bound_list(&self.paths),
+            tools: bound_list(&self.tools),
+            step: one(&self.step),
+            detector: one(&self.detector),
+            rule: one(&self.rule),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+            && self.tools.is_empty()
+            && self.step.is_none()
+            && self.detector.is_none()
+            && self.rule.is_none()
+    }
+
+    /// The `[Intutic] Retry scope:` line's value: the paths, else the tools.
+    pub fn retry_hint(&self) -> Option<String> {
+        if !self.paths.is_empty() {
+            return Some(self.paths.join(", "));
+        }
+        (!self.tools.is_empty()).then(|| self.tools.join(", "))
+    }
+}
+
+/// One piece of evidence behind a refusal: `{kind, detail}`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RefusalEvidence {
+    pub kind: String,
+    pub detail: String,
+}
+
+impl RefusalEvidence {
+    pub fn new(kind: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            detail: detail.into(),
+        }
+    }
+}
+
+/// The extra stderr line an exit-code harness prints for a refusal
+/// (`retryScopeLine`): `[Intutic] Retry scope: ` and the bounded scope's
+/// paths, else its tools. `None` under OPAQUE, or with neither.
+pub fn retry_scope_line(scope: Option<&RefusalScope>, mode: InterventionMode) -> Option<String> {
+    if mode == InterventionMode::Opaque {
+        return None;
+    }
+    let s = scope?.bounded();
+    s.retry_hint()
+        .map(|h| format!("[Intutic] Retry scope: {h}"))
+}
+
+/// At most [`DETAIL_MAX_ITEMS`] items, each field bounded like a scope's; an
+/// item with a field empty after cleaning is dropped and does not count.
+pub fn bound_evidence(items: &[RefusalEvidence]) -> Vec<RefusalEvidence> {
+    items
+        .iter()
+        .map(|e| RefusalEvidence {
+            kind: bound_detail(&e.kind),
+            detail: bound_detail(&e.detail),
+        })
+        .filter(|e| !e.kind.is_empty() && !e.detail.is_empty())
+        .take(DETAIL_MAX_ITEMS)
+        .collect()
+}
+
+/// The refusal detail an agent under `mode` may see: both bounded, both
+/// dropped under OPAQUE (only the code survives, as with
+/// [`Refusal::for_mode`]). SILENT_LOG shows them, as TRANSPARENT does.
+pub fn detail_for_mode(
+    scope: Option<&RefusalScope>,
+    evidence: &[RefusalEvidence],
+    mode: InterventionMode,
+) -> (Option<RefusalScope>, Vec<RefusalEvidence>) {
+    if mode == InterventionMode::Opaque {
+        return (None, Vec::new());
+    }
+    (
+        scope.map(RefusalScope::bounded).filter(|s| !s.is_empty()),
+        bound_evidence(evidence),
+    )
 }
 
 /// One in-band refusal: what refused, and which rule decided.
@@ -121,6 +293,9 @@ impl Code {
 pub struct Refusal {
     pub code: Code,
     pub rule: String,
+    /// What the refusal was about, for the agent to retry inside it.
+    pub scope: Option<RefusalScope>,
+    pub evidence: Vec<RefusalEvidence>,
 }
 
 impl Refusal {
@@ -128,17 +303,29 @@ impl Refusal {
         Self {
             code,
             rule: rule.into(),
+            scope: None,
+            evidence: Vec::new(),
         }
+    }
+
+    /// The same refusal, carrying `scope`.
+    pub fn with_scope(mut self, scope: Option<RefusalScope>) -> Self {
+        self.scope = scope;
+        self
     }
 
     /// The refusal as the agent may see it under `mode`. Under OPAQUE the rule
     /// id is emptied, which leaves the rule header off ([`Refusal::apply`])
     /// and the stream marker's `rule` an empty string; the code is kept, so
-    /// an SDK still knows what kind of refusal it was.
+    /// an SDK still knows what kind of refusal it was. The scope and evidence
+    /// go too.
     pub fn for_mode(mut self, mode: InterventionMode) -> Self {
         if mode == InterventionMode::Opaque {
             self.rule.clear();
         }
+        let (scope, evidence) = detail_for_mode(self.scope.as_ref(), &self.evidence, mode);
+        self.scope = scope;
+        self.evidence = evidence;
         self
     }
 
@@ -160,11 +347,20 @@ impl Refusal {
     /// included. `message` is the text the agent is shown, so an SDK reading
     /// the stream raises with the same reason.
     pub fn stream_marker(&self, message: &str) -> String {
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "code": self.code.as_str(),
             "rule": self.rule,
             "message": message,
         });
+        // Only when there is something to say, so a refusal with none keeps
+        // the three-key marker every older SDK parses.
+        if let Some(scope) = self.scope.as_ref().filter(|s| !s.is_empty()) {
+            payload["scope"] = serde_json::to_value(scope.bounded()).unwrap_or_default();
+        }
+        if !self.evidence.is_empty() {
+            payload["evidence"] =
+                serde_json::to_value(bound_evidence(&self.evidence)).unwrap_or_default();
+        }
         format!("{STREAM_MARKER}{payload}\n\n")
     }
 }
@@ -318,11 +514,167 @@ mod tests {
     }
 
     #[test]
+    fn refusal_detail_is_bounded_and_stripped_of_control_characters() {
+        let long = "x".repeat(400);
+        let scope = RefusalScope {
+            paths: (0..12).map(|i| format!("p{i}\n")).collect(),
+            tools: vec![long.clone(), "\u{1b}[31mBash".into(), "\u{7}".into()],
+            step: Some("prerequisite\r".into()),
+            ..RefusalScope::default()
+        }
+        .bounded();
+        assert_eq!(scope.paths.len(), DETAIL_MAX_ITEMS);
+        assert_eq!(scope.paths[0], "p0");
+        assert_eq!(scope.tools[0].chars().count(), DETAIL_MAX_CHARS);
+        assert_eq!(scope.tools[1], "[31mBash");
+        assert_eq!(scope.tools.len(), 2, "an all-control entry is dropped");
+        assert_eq!(scope.step.as_deref(), Some("prerequisite"));
+        // Characters, not bytes.
+        assert_eq!(bound_detail(&"é".repeat(300)).chars().count(), 256);
+        let ev: Vec<RefusalEvidence> = (0..10)
+            .map(|i| RefusalEvidence::new("k", format!("d{i}")))
+            .collect();
+        assert_eq!(bound_evidence(&ev).len(), DETAIL_MAX_ITEMS);
+    }
+
+    #[test]
+    fn opaque_drops_scope_and_evidence_and_silent_log_keeps_them() {
+        let mut r = Refusal::new(Code::OutOfScope, "scope_paths.Deploy")
+            .with_scope(Some(RefusalScope::paths(["infra/x.tf"])));
+        r.evidence.push(RefusalEvidence::new("scope", "packages/"));
+        let opaque = r.clone().for_mode(InterventionMode::Opaque);
+        assert!(opaque.scope.is_none() && opaque.evidence.is_empty());
+        let marker = opaque.stream_marker(OPAQUE_MESSAGE);
+        assert!(!marker.contains("scope") && !marker.contains("evidence"));
+        for mode in [InterventionMode::Transparent, InterventionMode::SilentLog] {
+            let shown = r.clone().for_mode(mode);
+            assert_eq!(shown.scope, r.scope);
+            let line = shown.stream_marker("m");
+            let payload: serde_json::Value =
+                serde_json::from_str(line.trim_end().strip_prefix(STREAM_MARKER).unwrap()).unwrap();
+            assert_eq!(payload["scope"]["paths"][0], "infra/x.tf");
+            assert_eq!(payload["evidence"][0]["kind"], "scope");
+        }
+    }
+
+    #[test]
+    fn the_new_codes_name_themselves() {
+        assert_eq!(Code::PrerequisiteUnmet.as_str(), "PREREQUISITE_UNMET");
+        assert_eq!(Code::OutOfScope.as_str(), "OUT_OF_SCOPE");
+        assert_eq!(Code::ALL.len(), 8);
+    }
+
+    #[test]
     fn tool_rule_ids_keep_only_rule_id_characters() {
         assert_eq!(tool_rule_id("deny_tools", "Bash"), "deny_tools.Bash");
         assert_eq!(
             tool_rule_id("deny_tools", "run cmd/x\u{e9}"),
             "deny_tools.run_cmd_x_"
         );
+    }
+}
+
+#[cfg(test)]
+mod lld75_vectors {
+    //! `fixtures/refusal-detail-vectors.json`: bounding, the
+    //! intervention mode, and the retry line, as the TypeScript and Python
+    //! ports read them.
+    use super::*;
+    use serde_json::Value;
+
+    /// A scope from loosely typed JSON: non-strings dropped, as the ports do.
+    fn scope_of(v: &Value) -> Option<RefusalScope> {
+        let o = v.as_object()?;
+        let list = |k: &str| -> Vec<String> {
+            o.get(k)
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let one = |k: &str| o.get(k).and_then(Value::as_str).map(str::to_string);
+        Some(RefusalScope {
+            paths: list("paths"),
+            tools: list("tools"),
+            step: one("step"),
+            detector: one("detector"),
+            rule: one("rule"),
+        })
+    }
+
+    fn evidence_of(v: &Value) -> Vec<RefusalEvidence> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_object())
+                    .map(|o| {
+                        RefusalEvidence::new(
+                            o.get("kind").and_then(Value::as_str).unwrap_or(""),
+                            o.get("detail").and_then(Value::as_str).unwrap_or(""),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn bounded_json(s: Option<&RefusalScope>) -> Value {
+        s.map(RefusalScope::bounded)
+            .filter(|b| !b.is_empty())
+            .map(|b| serde_json::to_value(b).unwrap())
+            .unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn every_refusal_detail_vector_holds() {
+        let Some(v) =
+            crate::plugins::anomaly::outcome::lld75_fixture("refusal-detail-vectors.json")
+        else {
+            return;
+        };
+        for c in v["scope"].as_array().unwrap() {
+            assert_eq!(
+                bounded_json(scope_of(&c["input"]).as_ref()),
+                c["output"],
+                "{}",
+                c["name"]
+            );
+        }
+        for c in v["evidence"].as_array().unwrap() {
+            assert_eq!(
+                serde_json::to_value(bound_evidence(&evidence_of(&c["input"]))).unwrap(),
+                c["output"],
+                "{}",
+                c["name"]
+            );
+        }
+        for c in v["forMode"].as_array().unwrap() {
+            let mode = InterventionMode::parse(c["mode"].as_str());
+            let (s, e) = detail_for_mode(
+                scope_of(&c["scope"]).as_ref(),
+                &evidence_of(&c["evidence"]),
+                mode,
+            );
+            let mut out = serde_json::Map::new();
+            if let Some(s) = s {
+                out.insert("scope".into(), serde_json::to_value(s).unwrap());
+            }
+            if !e.is_empty() {
+                out.insert("evidence".into(), serde_json::to_value(e).unwrap());
+            }
+            assert_eq!(Value::Object(out), c["output"], "{}", c["name"]);
+        }
+        for c in v["retryLine"].as_array().unwrap() {
+            let mode = InterventionMode::parse(c["mode"].as_str());
+            assert_eq!(
+                retry_scope_line(scope_of(&c["scope"]).as_ref(), mode).as_deref(),
+                c["line"].as_str(),
+                "{}",
+                c["name"]
+            );
+        }
     }
 }

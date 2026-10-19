@@ -62,6 +62,13 @@ pub struct ToolInvocation {
     pub name: String,
     pub input: serde_json::Value,
     pub source: InvocationSource,
+    /// The id that pairs a call with its result: Anthropic `tool_use.id` /
+    /// `tool_result.tool_use_id`, OpenAI `tool_calls[].id` / `tool_call_id`,
+    /// Responses `call_id`. `None` when the wire carried none, which leaves
+    /// the result unpaired (`plugins::anomaly::outcome`).
+    pub call_id: Option<String>,
+    /// Anthropic's `is_error` on a `tool_result`; `None` everywhere else.
+    pub is_error: Option<bool>,
 }
 
 /// Harnesses resend the full message history per request, so the extractor's
@@ -154,6 +161,8 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
                             name: name.to_string(),
                             input,
                             source: InvocationSource::Call,
+                            call_id: str_field(tc, "id"),
+                            is_error: None,
                         });
                     } else if let Some(name) = tc.get("name").and_then(|n| n.as_str()) {
                         let input = tc.get("input").cloned().unwrap_or(serde_json::Value::Null);
@@ -161,6 +170,8 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
                             name: name.to_string(),
                             input,
                             source: InvocationSource::Call,
+                            call_id: str_field(tc, "id"),
+                            is_error: None,
                         });
                     }
                 }
@@ -177,6 +188,8 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
                             name: name.to_string(),
                             input,
                             source: InvocationSource::Result,
+                            call_id: str_field(msg, "tool_call_id"),
+                            is_error: None,
                         });
                     }
                 }
@@ -202,13 +215,23 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
                                         .or_else(|| block.get("content"))
                                         .cloned()
                                         .unwrap_or(serde_json::Value::Null);
+                                    let is_use = block_type == "tool_use";
                                     tool_names.push(ToolInvocation {
                                         name,
                                         input,
-                                        source: if block_type == "tool_use" {
+                                        source: if is_use {
                                             InvocationSource::Call
                                         } else {
                                             InvocationSource::Result
+                                        },
+                                        call_id: str_field(
+                                            block,
+                                            if is_use { "id" } else { "tool_use_id" },
+                                        ),
+                                        is_error: if is_use {
+                                            None
+                                        } else {
+                                            block.get("is_error").and_then(|e| e.as_bool())
                                         },
                                     });
                                 }
@@ -220,6 +243,64 @@ pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInv
         }
     }
     tool_names
+}
+
+/// A non-empty string field of a JSON object.
+fn str_field(v: &serde_json::Value, key: &str) -> Option<String> {
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+}
+
+/// The Responses API's `function_call` and `function_call_output` input
+/// items, as invocations — read only to pair a test run with its result
+/// (`plugins::anomaly::outcome`), never into the tool sequence.
+///
+/// [`extract_request_tool_invocations`] does not read Responses bodies, and
+/// teaching it to would start every sequence detector on Codex traffic: a
+/// change to live enforcement of its own, like the Gemini gap below.
+pub fn extract_responses_outcome_items(body: &serde_json::Value) -> Vec<ToolInvocation> {
+    let Some(items) = body.get("input").and_then(|i| i.as_array()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let call_id = str_field(item, "call_id");
+        match item.get("type").and_then(|t| t.as_str()) {
+            Some("function_call") => {
+                let Some(name) = item.get("name").and_then(|n| n.as_str()) else {
+                    continue;
+                };
+                let input = match item.get("arguments") {
+                    Some(serde_json::Value::String(raw)) => serde_json::from_str(raw)
+                        .unwrap_or_else(|_| serde_json::Value::String(raw.clone())),
+                    Some(v) => v.clone(),
+                    None => serde_json::Value::Null,
+                };
+                out.push(ToolInvocation {
+                    name: name.to_string(),
+                    input,
+                    source: InvocationSource::Call,
+                    call_id,
+                    is_error: None,
+                });
+            }
+            Some("function_call_output") => out.push(ToolInvocation {
+                // The call names the tool; the output carries only its id.
+                name: String::new(),
+                input: item
+                    .get("output")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                source: InvocationSource::Result,
+                call_id,
+                is_error: None,
+            }),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// `tool_use_id` → tool name, over every Anthropic `tool_use` block in a body.
@@ -359,7 +440,7 @@ pub struct ChangeEntry {
 }
 
 /// Tool names harnesses use for "create a file".
-const WRITE_TOOLS: &[&str] = &[
+pub(crate) const WRITE_TOOLS: &[&str] = &[
     "write",
     "write_file",
     "writefile",
@@ -367,7 +448,7 @@ const WRITE_TOOLS: &[&str] = &[
     "createfile",
 ];
 /// Tool names harnesses use for "change part of a file".
-const EDIT_TOOLS: &[&str] = &[
+pub(crate) const EDIT_TOOLS: &[&str] = &[
     "edit",
     "edit_file",
     "editfile",
@@ -376,8 +457,20 @@ const EDIT_TOOLS: &[&str] = &[
     "str_replace",
     "notebookedit",
 ];
-const DELETE_TOOLS: &[&str] = &["delete_file", "deletefile", "remove_file", "rm_file"];
-const MOVE_TOOLS: &[&str] = &["move_file", "movefile", "rename_file", "rename"];
+pub(crate) const DELETE_TOOLS: &[&str] = &["delete_file", "deletefile", "remove_file", "rm_file"];
+pub(crate) const MOVE_TOOLS: &[&str] = &["move_file", "movefile", "rename_file", "rename"];
+
+/// Whether a tool, by its name alone, may change files: the write, edit,
+/// delete and move tools, and the text editor (whose `command` decides).
+/// What a stream must hold to judge a call's targets before it runs.
+pub(crate) fn may_change_files(name: &str) -> bool {
+    use crate::plugins::anomaly::actions::{tool_is, EDITOR_TOOLS};
+    tool_is(name, WRITE_TOOLS)
+        || tool_is(name, EDIT_TOOLS)
+        || tool_is(name, DELETE_TOOLS)
+        || tool_is(name, MOVE_TOOLS)
+        || tool_is(name, EDITOR_TOOLS)
+}
 
 /// Argument keys that name a filesystem path.
 const PATH_KEYS: &[&str] = &[
@@ -583,6 +676,23 @@ pub fn manifest_from_invocations(invocations: &[ToolInvocation]) -> Vec<ChangeEn
     out
 }
 
+/// The mutations one tool call makes (`changeTargets` in shared-types
+/// scopeMatch.ts): the manifest's write, edit, delete and move entries whose
+/// target is a non-empty path. A shell call has none — a command is never a
+/// path.
+pub fn change_targets(tool: &str, input: &serde_json::Value) -> Vec<ChangeEntry> {
+    manifest_from_invocations(&[ToolInvocation {
+        name: tool.to_string(),
+        input: input.clone(),
+        source: InvocationSource::Call,
+        call_id: None,
+        is_error: None,
+    }])
+    .into_iter()
+    .filter(|e| e.op.is_mutation() && e.target_kind == TargetKind::Path && !e.target.is_empty())
+    .collect()
+}
+
 /// The manifest as a trace stores it: each target through
 /// `dlp::redact_for_storage`. A target is the command, path or URL a call
 /// named, so it is where an address, a phone number or a token in a header
@@ -766,11 +876,15 @@ mod tests {
                 name: "Bash".into(),
                 input: json!({"command": "git push origin main"}),
                 source: InvocationSource::Call,
+                call_id: None,
+                is_error: None,
             },
             ToolInvocation {
                 name: "Bash".into(),
                 input: json!("Everything up-to-date"),
                 source: InvocationSource::Result,
+                call_id: None,
+                is_error: None,
             },
         ];
         let seq = expand_tool_actions(&inv);
@@ -803,6 +917,52 @@ mod tests {
         );
     }
 
+    /// 3.1: a result pairs with its call by id, in each wire shape.
+    #[test]
+    fn results_pair_with_their_calls_by_id_in_every_wire_shape() {
+        // Anthropic: tool_use.id / tool_result.tool_use_id, with is_error.
+        let anthropic = json!({"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "pytest"}}]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "is_error": true, "content": "Exit code 1"}]},
+        ]});
+        let inv = extract_request_tool_invocations(&anthropic);
+        assert_eq!(inv[0].call_id.as_deref(), Some("toolu_1"));
+        assert_eq!(inv[1].call_id.as_deref(), Some("toolu_1"));
+        assert_eq!(inv[1].is_error, Some(true));
+        assert_eq!(inv[0].is_error, None);
+
+        // OpenAI chat: tool_calls[].id / tool_call_id.
+        let openai = json!({"messages": [
+            {"role": "assistant", "tool_calls": [
+                {"id": "call_9", "function": {"name": "Bash", "arguments": "{\"command\":\"pytest\"}"}}]},
+            {"role": "tool", "name": "Bash", "tool_call_id": "call_9", "content": "== 3 passed in 1s =="},
+        ]});
+        let inv = extract_request_tool_invocations(&openai);
+        assert_eq!(inv[0].call_id.as_deref(), Some("call_9"));
+        assert_eq!(inv[1].call_id.as_deref(), Some("call_9"));
+        assert_eq!(inv[1].source, InvocationSource::Result);
+
+        // Responses: call_id on function_call and function_call_output.
+        let responses = json!({"input": [
+            {"type": "message", "role": "user", "content": "run the tests"},
+            {"type": "function_call", "call_id": "fc_1", "name": "shell", "arguments": "{\"command\":[\"pytest\"]}"},
+            {"type": "function_call_output", "call_id": "fc_1", "output": "{\"output\":\"ok\",\"metadata\":{\"exit_code\":0}}"},
+        ]});
+        let inv = extract_responses_outcome_items(&responses);
+        assert_eq!(inv.len(), 2);
+        assert_eq!(inv[0].name, "shell");
+        assert_eq!(inv[0].input["command"][0], "pytest");
+        assert_eq!(inv[1].source, InvocationSource::Result);
+        assert_eq!(inv[1].call_id.as_deref(), Some("fc_1"));
+        let e = crate::plugins::anomaly::outcome::latest_test_outcome(&inv, 1).unwrap();
+        assert_eq!(e.o, crate::plugins::anomaly::outcome::Outcome::Ok);
+        assert!(!e.changed);
+        // The ordinary extractor still ignores a Responses body.
+        assert!(extract_request_tool_invocations(&responses).is_empty());
+    }
+
     /// Gemini traffic yields nothing, and that is a known gap rather than a
     /// silent one.
     ///
@@ -825,6 +985,8 @@ mod tests {
             name: name.into(),
             input,
             source: InvocationSource::Call,
+            call_id: None,
+            is_error: None,
         }
     }
 
@@ -1035,5 +1197,39 @@ mod tests {
             !src.contains(&pii_needle),
             "PII_PATH_FRAGMENTS must be imported, not duplicated"
         );
+    }
+}
+
+#[cfg(test)]
+mod lld75_scope_vectors {
+    //! `fixtures/scope-plan-vectors.json`: `changeTargets` and
+    //! `isFileWriteCall` against the manifest and `outcome::is_file_write_call`.
+    use super::*;
+
+    #[test]
+    fn change_targets_and_file_writes_follow_the_vectors() {
+        let Some(v) = crate::plugins::anomaly::outcome::lld75_fixture("scope-plan-vectors.json")
+        else {
+            return;
+        };
+        for c in v["changeTargets"].as_array().unwrap() {
+            let got: Vec<serde_json::Value> =
+                change_targets(c["tool"].as_str().unwrap(), &c["input"])
+                    .into_iter()
+                    .map(|e| serde_json::json!({"op": e.op, "target": e.target}))
+                    .collect();
+            assert_eq!(serde_json::Value::Array(got), c["targets"], "{}", c["name"]);
+        }
+        for c in v["isFileWriteCall"].as_array().unwrap() {
+            assert_eq!(
+                crate::plugins::anomaly::outcome::is_file_write_call(
+                    c["tool"].as_str().unwrap(),
+                    &c["input"]
+                ),
+                c["write"].as_bool().unwrap(),
+                "{}",
+                c["name"]
+            );
+        }
     }
 }

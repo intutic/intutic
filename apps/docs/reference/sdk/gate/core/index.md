@@ -295,6 +295,7 @@ Port of `intutic_headers()` from
 | Property | Type | Description |
 | ------ | ------ | ------ |
 | <a id="property-evaluatesdecide"></a> `evaluatesDecide?` | `boolean` | The caller evaluates the decide rules the records carry. Only then is a decoded record's fallback line skipped; otherwise the fallback line refuses the rule's tools, exactly as in a gate that reads no records. |
+| <a id="property-evaluatesrules"></a> `evaluatesRules?` | `boolean` | The caller evaluates the `@rule` records (Tier R). Only then is a decoded record's fallback line skipped; otherwise the fallback line refuses what the rule covers, exactly as in a gate that reads no records. |
 
 ***
 
@@ -327,6 +328,35 @@ What the registry decides, per workspace. The MCP proxy's `McpRegistryPolicy` ha
 | <a id="property-defaultpolicy"></a> `defaultPolicy` | `"deny"` \| `"allow"` | - |
 | <a id="property-disabledtools"></a> `disabledTools` | `Record`\<`string`, `string`[]\> | Server name → tool names disabled within it. |
 | <a id="property-heldservers"></a> `heldServers` | `string`[] | Servers a high-risk tool change returned to the approval queue; refused under either default. |
+
+***
+
+### RefusalEvidence
+
+One thing the refuser saw.
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-detail"></a> `detail` | `string` |
+| <a id="property-kind"></a> `kind` | `string` |
+
+***
+
+### RefusalScope
+
+Where a refusal applies, so a retry can stay out of it.
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-detector"></a> `detector?` | `string` |
+| <a id="property-paths"></a> `paths?` | `string`[] |
+| <a id="property-rule"></a> `rule?` | `string` |
+| <a id="property-step"></a> `step?` | `string` |
+| <a id="property-tools-1"></a> `tools?` | `string`[] |
 
 ***
 
@@ -396,6 +426,20 @@ the mode when there is no policy snapshot to read it from.
 | <a id="property-issuedat"></a> `issuedAt` | `string` |
 | <a id="property-member"></a> `member` | \| \{ `memberId`: `string`; `ssoGroups`: `string`[]; \} \| `null` |
 | <a id="property-policy"></a> `policy` | [`SsoGroupPolicy`](#ssogrouppolicy) |
+
+***
+
+### ToolOutcome
+
+What a tool call's result says about how it went, for [Gate.recordOutcome](classes/Gate.md#recordoutcome).
+
+#### Properties
+
+| Property | Type |
+| ------ | ------ |
+| <a id="property-exitcode"></a> `exitCode?` | `number` \| `null` |
+| <a id="property-iserror"></a> `isError?` | `boolean` \| `null` |
+| <a id="property-output"></a> `output?` | `string` \| `null` |
 
 ***
 
@@ -515,6 +559,36 @@ type GateRefusalCode = typeof GATE_REFUSAL_CODES[number];
 
 ***
 
+### GateRuleCode
+
+```ts
+type GateRuleCode = 
+  | "PREREQUISITE_UNMET"
+  | "OUT_OF_SCOPE"
+  | "OFF_PLAN"
+  | "PLAN_NOT_APPROVED";
+```
+
+The refusal codes Tier R gives.
+
+***
+
+### GateRuleKind
+
+```ts
+type GateRuleKind = "requires_outcome" | "scope_paths" | "plan_approval";
+```
+
+***
+
+### GateRuleRecord
+
+```ts
+type GateRuleRecord = RequiresOutcomeRecord | ScopePathsRecord | PlanApprovalRecord;
+```
+
+***
+
 ### ImageRefusalCode
 
 ```ts
@@ -548,6 +622,16 @@ type ImageVerdict =
 ```
 
 `code` is `''` on a pass and names the failure otherwise.
+
+***
+
+### LaneClass
+
+```ts
+type LaneClass = "irreversible" | "reversible_wide" | "reversible_contained";
+```
+
+A token's reversibility class.
 
 ***
 
@@ -651,6 +735,18 @@ The largest tool arguments, in UTF-8 bytes of compact JSON, the gate evaluates.
 
 ***
 
+### CAN\_EVALUATE\_RULE\_RECORDS
+
+```ts
+const CAN_EVALUATE_RULE_RECORDS: true = true;
+```
+
+Whether this gate evaluates the `@rule` records a snapshot carries (Tier
+R). Only a gate that does skips a record's fallback line, and only when
+the record decoded.
+
+***
+
 ### COMMAND\_SIZE\_LIMIT
 
 ```ts
@@ -674,13 +770,23 @@ How long the hook script the sandbox bootstrap writes may run, from process star
 ### GATE\_REFUSAL\_CODES
 
 ```ts
-const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "INSUFFICIENT_SCOPE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
+const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "PREREQUISITE_UNMET", "OUT_OF_SCOPE", "OFF_PLAN", "PLAN_NOT_APPROVED", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "INSUFFICIENT_SCOPE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
 ```
 
 Every `code` an [IntuticGateRefusal](classes/IntuticGateRefusal.md) can carry: the tier that refused,
 or for the image-integrity tier the specific failure. Held to
 `packages/shared-types/fixtures/refusal-codes.json` (`gate`) by a test, as
 the Python gate's list and the gate SDK reference are.
+
+***
+
+### PLAN\_CACHE\_MS
+
+```ts
+const PLAN_CACHE_MS: 30000 = 30_000;
+```
+
+How long Tier R keeps a session's plan before reading it again.
 
 ***
 
@@ -1441,6 +1547,28 @@ tier be silently inert.
 #### Returns
 
 `boolean`
+
+***
+
+### toolOutcomeOf()
+
+```ts
+function toolOutcomeOf(result): ToolOutcome;
+```
+
+What a tool's return value says about how it went: a string is its
+output; an object's numeric `exitCode`, `exit_code` or `returncode` is its
+exit code, and its string `output`, `stdout` or `stderr` its output.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `result` | `unknown` |
+
+#### Returns
+
+[`ToolOutcome`](#tooloutcome)
 
 ***
 

@@ -16,7 +16,7 @@
       "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
     },
     "requires_before": {
-      "first": { "type": "string", "required": true, "item": "token" },
+      "first": { "type": "string", "required": true, "item": "orderingFirst" },
       "then": { "type": "string", "required": true, "item": "token" },
       "roles": { "type": "list", "required": false, "item": "role", "maxItems": 8 }
     },
@@ -69,8 +69,14 @@
     "action:secret_read",
     "action:http_post",
     "action:pii_export",
-    "action:run_tests"
+    "action:run_tests",
+    "action:migrate",
+    "action:prod_write",
+    "action:destroy",
+    "action:force_push",
+    "action:payment"
   ],
+  "qualifiedTokens": ["action:run_tests[ok]"],
   "knownHarnessTools": ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "NotebookEdit"],
   "taints": ["secrets()", "pii()"],
   "hookRuleRoles": ["owner", "admin", "em", "developer", "viewer"],

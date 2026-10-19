@@ -41,6 +41,7 @@ type irField struct {
 type irGrammar struct {
 	Kinds             map[string]map[string]irField `json:"kinds"`
 	ActionTokens      []string                      `json:"actionTokens"`
+	QualifiedTokens   []string                      `json:"qualifiedTokens"`
 	KnownHarnessTools []string                      `json:"knownHarnessTools"`
 	Taints            []string                      `json:"taints"`
 	HookRuleRoles     []string                      `json:"hookRuleRoles"`
@@ -99,6 +100,16 @@ func checkHookRuleRole(role string) string {
 // checkItem says why value is not a valid item of its kind, or "".
 func checkItem(item, value string) string {
 	switch item {
+	case "orderingFirst":
+		// The left side of a requires_before: a token, or a qualified token
+		// (action:run_tests[ok], met only when the latest test run passed).
+		if slices.Contains(grammar.QualifiedTokens, value) {
+			return ""
+		}
+		if strings.ContainsAny(value, "[]") {
+			return fmt.Sprintf("%q: [ok] qualifies only action:run_tests, on the left of ->", value)
+		}
+		return checkItem("token", value)
 	case "token":
 		if strings.HasPrefix(value, "action:") && !slices.Contains(grammar.ActionTokens, value) {
 			return fmt.Sprintf("%q is not one of the action tokens (%s)", value, strings.Join(grammar.ActionTokens, ", "))

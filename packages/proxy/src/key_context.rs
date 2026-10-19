@@ -193,11 +193,185 @@ pub fn decide_log_upload(body: &Value) -> (bool, bool) {
     (on("decideLogUploadEnabled"), on("decideLogUploadArgs"))
 }
 
+/// The workspace's closed reversibility lanes (`closedLanes`),
+/// from a key-context body: they hold their action tokens for every role.
+/// Absent, null or empty closes nothing; an entry this proxy does not know is
+/// skipped (the control plane validates the setting on write).
+pub fn closed_lanes(body: &Value) -> Vec<crate::plugins::anomaly::actions::LaneClass> {
+    let mut out: Vec<_> = body
+        .get("closedLanes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(crate::plugins::anomaly::actions::LaneClass::parse_closable)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// `revertLane.mode`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RevertLaneMode {
+    /// The default: rates are computed and shown, nothing is held.
+    #[default]
+    Off,
+    /// A would-be hold is recorded as a shadowed finding.
+    Shadow,
+    /// Reversible-wide tokens over the threshold join `review_before`.
+    Enforce,
+}
+
+/// The workspace's `revertLane` setting.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RevertLane {
+    pub mode: RevertLaneMode,
+    /// `max(revert_rate, rejection_rate)` at or above which a subject is held.
+    pub threshold: f64,
+}
+
+/// The default threshold when `revertLane.threshold` is absent.
+pub const REVERT_LANE_DEFAULT_THRESHOLD: f64 = 0.25;
+
+impl Default for RevertLane {
+    fn default() -> Self {
+        Self {
+            mode: RevertLaneMode::Off,
+            threshold: REVERT_LANE_DEFAULT_THRESHOLD,
+        }
+    }
+}
+
+/// `revertLane` from a key-context body. Absent, null or an unknown mode is
+/// `off`, the default: the setting holds nothing until a person turns it on.
+/// A threshold outside `(0, 1]` falls back to the default.
+pub fn revert_lane(body: &Value) -> RevertLane {
+    let Some(v) = body.get("revertLane").filter(|v| v.is_object()) else {
+        return RevertLane::default();
+    };
+    let mode = match v.get("mode").and_then(Value::as_str) {
+        Some("shadow") => RevertLaneMode::Shadow,
+        Some("enforce") => RevertLaneMode::Enforce,
+        _ => RevertLaneMode::Off,
+    };
+    let threshold = v
+        .get("threshold")
+        .and_then(Value::as_f64)
+        .filter(|t| *t > 0.0 && *t <= 1.0)
+        .unwrap_or(REVERT_LANE_DEFAULT_THRESHOLD);
+    RevertLane { mode, threshold }
+}
+
+/// The reversible-wide action tokens a revert-rate map holds for `role`:
+/// every subject that is a reversible-wide token, for `role`
+/// or for all roles (`''`), whose `max(r, j)` reaches `threshold`. Tool-name
+/// subjects and irreversible tokens are never held here — the second are
+/// closed lanes' job. `rates` is the raw `v2:revert:{workspace}` value; an
+/// unreadable one holds nothing.
+pub fn revert_hold_tokens(rates: &str, role: &str, threshold: f64) -> Vec<String> {
+    use crate::plugins::anomaly::actions::{token_class, LaneClass};
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(rates) else {
+        return Vec::new();
+    };
+    let role = role.to_ascii_lowercase();
+    let mut out: Vec<String> = map
+        .iter()
+        .filter_map(|(key, v)| {
+            let (r, subject) = key.split_once('|')?;
+            if !(r.is_empty() || r.eq_ignore_ascii_case(&role)) {
+                return None;
+            }
+            let subject = subject.to_ascii_lowercase();
+            if token_class(&subject) != Some(LaneClass::ReversibleWide) {
+                return None;
+            }
+            let rate = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+            (rate("r").max(rate("j")) >= threshold).then_some(subject)
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The highest role-level revert or rejection rate the map records for one
+/// subject (`role`, else `''`), for the decide log's `revertRate`. `None`
+/// when neither rate is published (both null: under their floors).
+pub fn revert_rate_of(rates: &str, role: &str, subject: &str) -> Option<f64> {
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(rates) else {
+        return None;
+    };
+    // A rate below its floor is published as null: no rate, not zero.
+    let pick = |r: &str| {
+        map.get(&format!("{r}|{subject}")).and_then(|v| {
+            let rate = |k: &str| v.get(k).and_then(Value::as_f64);
+            match (rate("r"), rate("j")) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (a, b) => a.or(b),
+            }
+        })
+    };
+    pick(role).or_else(|| pick(""))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn closed_lanes_and_revert_lane_read_their_defaults_and_values() {
+        use crate::plugins::anomaly::actions::LaneClass;
+        assert!(closed_lanes(&serde_json::json!({})).is_empty());
+        assert_eq!(
+            closed_lanes(
+                &serde_json::json!({"closedLanes": ["reversible_wide", "irreversible", "bogus"]})
+            ),
+            vec![LaneClass::ReversibleWide, LaneClass::Irreversible]
+        );
+        assert_eq!(revert_lane(&serde_json::json!({})), RevertLane::default());
+        let on =
+            revert_lane(&serde_json::json!({"revertLane": {"mode": "enforce", "threshold": 0.5}}));
+        assert_eq!(on.mode, RevertLaneMode::Enforce);
+        assert_eq!(on.threshold, 0.5);
+        let bad = revert_lane(&serde_json::json!({"revertLane": {"mode": "loud", "threshold": 7}}));
+        assert_eq!(bad, RevertLane::default());
+    }
+
+    #[test]
+    fn revert_holds_take_only_reversible_wide_tokens_over_the_threshold() {
+        let rates = r#"{"|action:deploy": {"r": 0.3, "j": 0.0},
+                        "deployer|action:migrate": {"r": 0.0, "j": 0.4},
+                        "reviewer|action:release": {"r": 0.9},
+                        "|action:publish": {"r": 0.9},
+                        "|Bash": {"r": 0.9},
+                        "|action:http_post": {"r": 0.1, "j": 0.2}}"#;
+        assert_eq!(
+            revert_hold_tokens(rates, "deployer", 0.25),
+            vec!["action:deploy", "action:migrate"]
+        );
+        assert_eq!(revert_hold_tokens(rates, "", 0.25), vec!["action:deploy"]);
+        assert!(revert_hold_tokens("not json", "", 0.25).is_empty());
+        assert_eq!(
+            revert_rate_of(rates, "deployer", "action:migrate"),
+            Some(0.4)
+        );
+        assert_eq!(
+            revert_rate_of(rates, "deployer", "action:deploy"),
+            Some(0.3)
+        );
+        assert_eq!(revert_rate_of(rates, "", "action:destroy"), None);
+        // A rate under its floor is null: it holds nothing and records none.
+        let floored = r#"{"|action:deploy": {"r": null, "j": null}, "|action:release": {"r": null, "j": 0.5}}"#;
+        assert_eq!(
+            revert_hold_tokens(floored, "", 0.25),
+            vec!["action:release"]
+        );
+        assert_eq!(revert_rate_of(floored, "", "action:deploy"), None);
+        assert_eq!(revert_rate_of(floored, "", "action:release"), Some(0.5));
+    }
 
     /// A key-context answer with every field set
     /// (`packages/shared-types/fixtures/responses/key-context.json`, which the

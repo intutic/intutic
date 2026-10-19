@@ -17,6 +17,12 @@
  *      ordinary allow path) and records `hold_approved_bypass_used`, naming
  *      the original hold and who approved it;
  *  (d) a different command under the same rule gets its own hash and is held.
+ *
+ * And since 3.1: the in-process gates (OpenCode's plugin, Pi's
+ * extension, OpenClaw's plugin) hold and honour a bypass the same way, driven
+ * through `inProcessGates.ts`; and the hold ids that batch adds — lane holds
+ * `sop.lane.<class>.<token>` and revert holds `revert.<subject>`, both on the
+ * `phrase` subject — are held and bypassed at every gate.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync, statSync } from 'node:fs'
@@ -29,6 +35,7 @@ import { writeApprovedBypasses, type ApprovedBypassEntry } from '../../src/lib/a
 import { NORMALISE_CONTRACT } from '../../src/harness/protectedPaths.js'
 import { toRulesLine, REVIEW_REQUESTS_LOG } from '../../src/harness/gateBody.js'
 import { buildSnapshotRules } from '../../src/lib/policySnapshot.js'
+import { runInProcessGate, inProcessShellTool } from './inProcessGates.js'
 
 const WORKSPACE_ID = 'ws_test'
 /** The local `review_before: action:deploy` token, as the snapshot names it. */
@@ -52,9 +59,18 @@ const DRIVABLE = GATES.filter(
   (g) => g.migrated && (g.contract === 'exit2' || g.contract === 'stdout-cancel' || g.contract === 'stdout-decision-deny'),
 )
 
+/** The in-process gates, driven through their hosts' own hook shapes. */
+const IN_PROCESS = GATES.filter((g) => g.migrated && (g.contract === 'plugin-throw' || g.contract === 'plugin-block'))
+
 const home = mkdtempSync(join(tmpdir(), 'intutic-hold-'))
 const roots = new Map<string, string>()
 const snapshot = join(home, 'hold.rules')
+/** A snapshot with one lane hold and one revert hold. */
+const laneSnapshot = join(home, 'lanes.rules')
+const LANE_RULE_ID = 'sop.lane.irreversible.action:destroy'
+const LANE_COMMAND = 'terraform destroy -auto-approve'
+const REVERT_RULE_ID = 'revert.action:migrate'
+const REVERT_COMMAND = 'npx prisma migrate deploy'
 
 function writeRulesFixture(target: string, rules: ReturnType<typeof buildSnapshotRules>): void {
   const lines = rules.map(toRulesLine)
@@ -71,7 +87,23 @@ beforeAll(async () => {
       ['action:deploy'],
     ),
   )
-  for (const g of DRIVABLE) {
+  writeRulesFixture(
+    laneSnapshot,
+    buildSnapshotRules({
+      workspaceId: WORKSPACE_ID,
+      interventionMode: 'ENFORCE',
+      sopRules: [],
+      mcpAllowedServers: [],
+      sqlDropStrictBlock: false,
+      // As resolve serves them: compiled hold rules on the phrase subject.
+      holdRules: [
+        { id: LANE_RULE_ID, source: 'terraform destroy|kubectl delete', subject: 'phrase', ignoreCase: true, severity: 'hold', reason: 'Held for human review: action:destroy is in the closed irreversible lane' },
+        { id: REVERT_RULE_ID, source: 'prisma migrate deploy|alembic upgrade', subject: 'phrase', ignoreCase: true, severity: 'hold', reason: 'Held for human review: action:migrate was reverted 40% of the time' },
+      ],
+      revertHolds: [{ subject: 'action:migrate', revertRate: 0.4, rejectionRate: null }],
+    }),
+  )
+  for (const g of [...DRIVABLE, ...IN_PROCESS]) {
     const root = join(home, g.name)
     mkdirSync(root, { recursive: true })
     roots.set(g.name, root)
@@ -93,11 +125,11 @@ afterAll(() => {
   try { rmSync(home, { recursive: true, force: true }) } catch { /* hardened files */ }
 })
 
-function runGate(g: GateEntry, payload: unknown): Promise<RunResult> {
+function runGate(g: GateEntry, payload: unknown, rules: string = snapshot): Promise<RunResult> {
   const root = roots.get(g.name)!
   return new Promise((resolve, reject) => {
     const child = spawn(g.runner, [join(root, g.artifact)], {
-      env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: snapshot },
+      env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: rules },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     let stdout = ''
@@ -171,6 +203,14 @@ describe('review hold registry coverage', () => {
     )
     expect(DRIVABLE.length).toBeGreaterThan(10)
   })
+
+  it('every registry entry declares how it honours an approved bypass, and every file reader is driven here', () => {
+    for (const g of GATES) expect(['file', 'api', 'refuses-by-design'], `${g.name} declares no holdBypass`).toContain(g.holdBypass)
+    expect(GATES.filter((g) => g.holdBypass === 'file').map((g) => g.name).sort()).toEqual(
+      [...DRIVABLE, ...IN_PROCESS].map((g) => g.name).sort(),
+    )
+    expect(GATES.filter((g) => g.holdBypass === 'refuses-by-design').map((g) => g.contract).sort()).toEqual(['js-throw', 'python-raise'])
+  })
 })
 
 for (const g of DRIVABLE) {
@@ -243,3 +283,185 @@ for (const g of DRIVABLE) {
     })
   })
 }
+
+/** An exact bypass for a call: the key every gate computes for it. */
+function bypassFor(ruleId: string, tool: string, command: string, overrides: Partial<ApprovedBypassEntry> = {}): ApprovedBypassEntry {
+  return bypassEntry({
+    sopRuleId: ruleId,
+    toolNameNormalized: NORMALISE_CONTRACT.js(tool),
+    targetHash: createHash('sha256').update(NORMALISE_CONTRACT.js(command) + '\u0000' + NORMALISE_CONTRACT.js('')).digest('hex'),
+    ...overrides,
+  })
+}
+
+describe('in-process gates: review_before hold and bypass', () => {
+  it('covers OpenCode, Pi and OpenClaw', () => {
+    expect(IN_PROCESS.map((g) => g.name).sort()).toEqual(['openclaw', 'opencode', 'pi'])
+  })
+
+  for (const g of IN_PROCESS) {
+    const tool = inProcessShellTool(g)
+    const bypassDir = () => join(roots.get(g.name)!, '.intutic', 'hooks')
+    const call = (command: string, rules = snapshot) =>
+      runInProcessGate(g, roots.get(g.name)!, tool, { command }, { INTUTIC_SNAPSHOT_RULES: rules })
+
+    describe(g.name, () => {
+      it('holds the call when no bypass cache exists, and records it for review', async () => {
+        rmSync(join(bypassDir(), 'approved-bypasses.jsonl'), { force: true })
+        const before = holdLog(g)
+        const r = await call(COMMAND)
+        expect(r.refused, `${g.name} let a held deploy run: ${r.stderr.slice(0, 300)}`).toBe(true)
+        expect(r.stderr).toMatch(/HELD/)
+        const added = holdLog(g).slice(before.length).trim().split('\n').filter(Boolean)
+        expect(added).toHaveLength(1)
+        expect(JSON.parse(added[0]!).reason).toBe(SOP_RULE_ID)
+      })
+
+      it('does NOT bypass on an expired or foreign-workspace entry', async () => {
+        await writeApprovedBypasses([bypassFor(SOP_RULE_ID, tool, COMMAND, { expiresAt: new Date(Date.now() - 60_000).toISOString() })], WORKSPACE_ID, bypassDir())
+        expect((await call(COMMAND)).refused).toBe(true)
+        await writeApprovedBypasses([bypassFor(SOP_RULE_ID, tool, COMMAND, { workspaceId: 'ws_other' })], 'ws_other', bypassDir())
+        expect((await call(COMMAND)).refused).toBe(true)
+      })
+
+      it('DOES bypass on a valid exact-match entry, loudly; a different command is still held', async () => {
+        await writeApprovedBypasses([bypassFor(SOP_RULE_ID, tool, COMMAND)], WORKSPACE_ID, bypassDir())
+        const r = await call(COMMAND)
+        expect(r.refused, `${g.name} refused an approved call: ${r.stderr.slice(0, 300)}`).toBe(false)
+        // Pi's extension keeps the host's terminal clean, so the use is read
+        // from the audit log rather than stderr.
+        expect(auditLog(g)).toMatch(/hold_approved_bypass_used/)
+        expect((await call('kubectl apply -f other.yaml')).refused).toBe(true)
+      })
+    })
+  }
+})
+
+describe('lane and revert holds: held and bypassed at every gate', () => {
+  for (const g of [...DRIVABLE, ...IN_PROCESS]) {
+    const inProcess = IN_PROCESS.includes(g)
+    const tool = inProcess ? inProcessShellTool(g) : 'Bash'
+    const bypassDir = () => join(roots.get(g.name)!, '.intutic', 'hooks')
+    const call = async (command: string): Promise<{ refused: boolean; stderr: string }> => {
+      if (inProcess) return runInProcessGate(g, roots.get(g.name)!, tool, { command }, { INTUTIC_SNAPSHOT_RULES: laneSnapshot })
+      const r = await runGate(g, { tool_name: 'Bash', tool_input: { command }, session_id: 'sess_test' }, laneSnapshot)
+      return { refused: refused(g, r), stderr: r.stderr }
+    }
+
+    for (const [ruleId, command] of [[LANE_RULE_ID, LANE_COMMAND], [REVERT_RULE_ID, REVERT_COMMAND]] as const) {
+      it(`${g.name}: holds \`${command}\` under ${ruleId}, and lets the approved retry through`, async () => {
+        rmSync(join(bypassDir(), 'approved-bypasses.jsonl'), { force: true })
+        const before = holdLog(g)
+        const held = await call(command)
+        expect(held.refused, `${g.name} let \`${command}\` run: ${held.stderr.slice(0, 300)}`).toBe(true)
+        expect(held.stderr).toMatch(/HELD/)
+        const added = holdLog(g).slice(before.length).trim().split('\n').filter(Boolean)
+        expect(added.map((l) => JSON.parse(l).reason)).toEqual([ruleId])
+
+        await writeApprovedBypasses([bypassFor(ruleId, tool, command)], WORKSPACE_ID, bypassDir())
+        const approved = await call(command)
+        expect(approved.refused, `${g.name} refused the approved retry: ${approved.stderr.slice(0, 300)}`).toBe(false)
+        expect(auditLog(g)).toContain(`Approved bypass for ${ruleId}`)
+      }, 60_000)
+    }
+  }
+})
+
+/**
+ * A force push is held by two rules under ONE id (3.1,
+ * `laneHoldPatterns`): the `action` rule a v23 classifier matches (the
+ * `git push` phrase and a whole-word --force or -f), and the partial
+ * `phrase` rule `git push --force|git push -f` a gate older than v23 holds
+ * by. The batch first shipped the phrase rule as `<id>.legacy`, which v23
+ * gates skipped; the 3.1 SDKs (gate-js, intutic-clawde) read the same
+ * snapshot without skipping it, so approving the action-rule hold left the
+ * retry held again under `.legacy`. With one id:
+ *  (i)   a v23 gate evaluates only the action rule (it skips a phrase rule
+ *        that shares an action rule's id): --force-with-lease, which the
+ *        partial phrase matches, is not held;
+ *  (ii)  the 2.9.0 gate (body v21), whose classifier predates the token,
+ *        holds through the phrase rule;
+ *  (iii) in each case the approved bypass for the id that held releases the
+ *        identical retry.
+ */
+describe('force push: one hold id across gate generations', () => {
+  const FP_ID = 'sop.lane.irreversible.action:force_push'
+  const FP_COMMAND = 'git push --force origin main'
+  const fpSnapshot = join(home, 'force-push.rules')
+
+  beforeAll(() => {
+    writeRulesFixture(
+      fpSnapshot,
+      buildSnapshotRules(
+        { workspaceId: WORKSPACE_ID, interventionMode: 'ENFORCE', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false },
+        [],
+        'hold',
+        [{ sopId: 'local:lanes.md', title: 'No one-way doors', content: '---\nclosed_lanes: irreversible\n---\n# No one-way doors\n', contentHash: '', harnessTargets: [] }],
+      ),
+    )
+  })
+
+  it('the snapshot carries both rules under the one id, action rule first', () => {
+    const lines = readFileSync(fpSnapshot, 'utf8').split('\n').filter((l) => l.startsWith(`${FP_ID}\t`))
+    expect(lines.map((l) => l.split('\t')[3])).toEqual(['action', 'phrase'])
+    expect(readFileSync(fpSnapshot, 'utf8')).not.toContain('.legacy')
+  })
+
+  for (const g of [...DRIVABLE, ...IN_PROCESS]) {
+    const inProcess = IN_PROCESS.includes(g)
+    const tool = inProcess ? inProcessShellTool(g) : 'Bash'
+    const bypassDir = () => join(roots.get(g.name)!, '.intutic', 'hooks')
+    const call = async (command: string): Promise<{ refused: boolean; stderr: string }> => {
+      if (inProcess) return runInProcessGate(g, roots.get(g.name)!, tool, { command }, { INTUTIC_SNAPSHOT_RULES: fpSnapshot })
+      const r = await runGate(g, { tool_name: 'Bash', tool_input: { command }, session_id: 'sess_test' }, fpSnapshot)
+      return { refused: refused(g, r), stderr: r.stderr }
+    }
+
+    it(`${g.name} (v23): holds by the action rule only, and the approved retry passes`, async () => {
+      rmSync(join(bypassDir(), 'approved-bypasses.jsonl'), { force: true })
+      const lease = await call('git push --force-with-lease origin main')
+      expect(lease.refused, `${g.name} held --force-with-lease: the partial phrase rule was evaluated`).toBe(false)
+      const before = holdLog(g)
+      const held = await call(FP_COMMAND)
+      expect(held.refused, `${g.name} let a force push run: ${held.stderr.slice(0, 300)}`).toBe(true)
+      const added = holdLog(g).slice(before.length).trim().split('\n').filter(Boolean)
+      expect(added.map((l) => JSON.parse(l).reason)).toEqual([FP_ID])
+
+      await writeApprovedBypasses([bypassFor(FP_ID, tool, FP_COMMAND)], WORKSPACE_ID, bypassDir())
+      const approved = await call(FP_COMMAND)
+      expect(approved.refused, `${g.name} refused the approved retry: ${approved.stderr.slice(0, 300)}`).toBe(false)
+      expect(auditLog(g)).toContain(`Approved bypass for ${FP_ID}`)
+    }, 60_000)
+  }
+
+  it('the 2.9.0 gate (v21): holds through the phrase rule under the same id, and the approved retry passes', async () => {
+    const root = join(home, 'old-gate-fp')
+    mkdirSync(join(root, '.intutic', 'events'), { recursive: true })
+    const gate = join(root, 'claude-code-check.js')
+    const fixture = join(__dirname, '..', 'fixtures', 'gate-2.9.0', 'claude-code-check.js')
+    writeFileSync(gate, readFileSync(fixture, 'utf8').split('__INTUTIC_TEST_ROOT__').join(root))
+    const run = (command: string) =>
+      new Promise<RunResult>((resolve, reject) => {
+        const child = spawn(process.execPath, [gate], {
+          cwd: root,
+          env: { ...process.env, HOME: root, USERPROFILE: root, INTUTIC_SNAPSHOT_RULES: fpSnapshot },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', (d) => { stdout += d })
+        child.stderr.on('data', (d) => { stderr += d })
+        child.on('error', reject)
+        child.on('close', (code) => resolve({ status: code ?? -1, stdout, stderr }))
+        child.stdin.end(JSON.stringify({ tool_name: 'Bash', tool_input: { command }, session_id: 'sess_test' }))
+      })
+    const held = await run(FP_COMMAND)
+    expect(held.status, held.stderr).toBe(2)
+    expect(held.stderr).toMatch(/HELD/)
+    expect(held.stderr).toContain(FP_ID)
+    await writeApprovedBypasses([bypassFor(FP_ID, 'Bash', FP_COMMAND)], WORKSPACE_ID, join(root, '.intutic', 'hooks'))
+    const approved = await run(FP_COMMAND)
+    expect(approved.status, `the 2.9.0 gate refused the approved retry: ${approved.stderr.slice(0, 300)}`).toBe(0)
+    expect(approved.stderr).toMatch(/BYPASSED/)
+  }, 60_000)
+})

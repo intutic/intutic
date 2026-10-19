@@ -78,8 +78,21 @@ def guard(func: Optional[Callable] = None, *, name: Optional[str] = None,
                     "No gate configured: call intutic_clawde.gate.install(Gate(...)) "
                     "or pass gate= to @guard. Refusing to run the tool unguarded."
                 )
-            g.guard(tool_name, _render_tool_input(f, args, kwargs))
-            return f(*args, **kwargs)
+            tool_input = _render_tool_input(f, args, kwargs)
+            g.guard(tool_name, tool_input)
+            # How the call went feeds Tier R (a qualified requires_before,
+            # requires_before): a raise is a failure; a returned exit code or text is
+            # read by the test-outcome rules. Recording never changes what the
+            # tool returns.
+            try:
+                result = f(*args, **kwargs)
+            except BaseException as exc:
+                _record(g, tool_name, tool_input, {"is_error": True, "output": str(exc)})
+                raise
+            if inspect.isawaitable(result):
+                return _recorded_awaitable(g, tool_name, tool_input, result)
+            _record(g, tool_name, tool_input, tool_outcome_of(result))
+            return result
 
         wrapper.__intutic_guarded__ = True
         return wrapper
@@ -87,6 +100,51 @@ def guard(func: Optional[Callable] = None, *, name: Optional[str] = None,
     if func is not None:
         return decorate(func)
     return decorate
+
+
+def tool_outcome_of(result: Any) -> Dict[str, Any]:
+    """What a tool's return value says about how it went, as record_outcome's
+    keyword arguments: a string is its output; a mapping's or an object's
+    integer exitCode, exit_code or returncode is its exit code, and its string
+    output, stdout or stderr its output (subprocess.CompletedProcess reads
+    this way)."""
+    if isinstance(result, str):
+        return {"output": result}
+
+    def get(key):
+        if isinstance(result, dict):
+            return result.get(key)
+        return getattr(result, key, None)
+
+    if result is None or isinstance(result, (list, tuple, int, float, bool)):
+        return {}
+    out: Dict[str, Any] = {}
+    for key in ("exitCode", "exit_code", "returncode"):
+        v = get(key)
+        if isinstance(v, int) and not isinstance(v, bool):
+            out["exit_code"] = v
+            break
+    text = [v for v in (get("output"), get("stdout"), get("stderr")) if isinstance(v, str)]
+    if text:
+        out["output"] = "\n".join(text)
+    return out
+
+
+def _record(g: Gate, tool_name: str, tool_input: Dict[str, Any], outcome: Dict[str, Any]) -> None:
+    """record_outcome, on a gate that has it; a gate subclass without it records nothing."""
+    record = getattr(g, "record_outcome", None)
+    if callable(record):
+        record(tool_name, tool_input, **outcome)
+
+
+async def _recorded_awaitable(g: Gate, tool_name: str, tool_input: Dict[str, Any], awaitable: Any) -> Any:
+    try:
+        result = await awaitable
+    except BaseException as exc:
+        _record(g, tool_name, tool_input, {"is_error": True, "output": str(exc)})
+        raise
+    _record(g, tool_name, tool_input, tool_outcome_of(result))
+    return result
 
 
 def _tool_name(tool: Any) -> Optional[str]:

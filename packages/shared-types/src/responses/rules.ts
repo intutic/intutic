@@ -215,6 +215,54 @@ export const PolicyResolveResponse = McpCuration.extend({
 })
 export type PolicyResolveResponse = z.infer<typeof PolicyResolveResponse>
 
+/** A hold rule policy resolve compiles, in the snapshot's rule shape. */
+export const ServedHoldRuleResponse = z.object({
+  id: z.string().describe('`sop.lane.<class>.<token>` for a closed lane, `revert.<token>` for a revert hold.'),
+  source: z.string().describe('For `phrase`, the token\'s phrases joined by `|`; for `action`, a pattern over the classified action tokens.'),
+  subject: z.enum(['phrase', 'action']),
+  ignoreCase: z.literal(true),
+  severity: z.enum(['hold', 'shadow']),
+  reason: z.string(),
+  rationale: z.string(),
+})
+export type ServedHoldRuleResponse = z.infer<typeof ServedHoldRuleResponse>
+
+/** A `@rule` record a workspace SOP compiles to; the daemon encodes the line and its fallback. */
+export const ServedGateRecordResponse = z.object({
+  sopId: z.string(),
+  kind: z.enum(['requires_outcome', 'scope_paths', 'plan_approval']),
+  rollout: z.enum(['shadow', 'enforce']),
+  fallbackId: z.string().nullable().describe('`<kind>-fallback:<n>@<sha256(sopId)[:12]>`; null for a shadow record, which has no fallback line.'),
+  payload: z.object({ v: z.literal(1), ref: z.string(), sopTitle: z.string() }).passthrough().describe('The record\'s canonical JSON payload: `{v, ref, sopTitle, …kind fields}`.'),
+})
+export type ServedGateRecordResponse = z.infer<typeof ServedGateRecordResponse>
+
+/** `GET /api/v1/policy/resolve`, with the 3.1 fields. */
+export const PolicyResolveGatesResponse = PolicyResolveResponse.extend({
+  gateRecords: z.array(ServedGateRecordResponse).describe('Qualified `requires_before`, enforced `scope_paths` and `plan_approval` of the enforced SOPs with no `roles:`.'),
+  holdRules: z.array(ServedHoldRuleResponse).describe('Closed-lane holds (SOP `closed_lanes:` and the workspace `closedLanes`) and revert holds.'),
+  revertHolds: z
+    .array(z.object({ subject: z.string(), revertRate: z.number().nullable(), rejectionRate: z.number().nullable() }))
+    .describe('Reversible-wide tokens held by `revertLane` (role \'\' only); empty when the mode is off.'),
+})
+export type PolicyResolveGatesResponse = z.infer<typeof PolicyResolveGatesResponse>
+
+// ─── Plans (routes/plans.ts) ──────────────────────────────────────────
+
+/** `GET /api/v1/plans/approved`: the plans hook gates may treat as approved. */
+export const ApprovedPlansResponse = z.object({
+  plans: z.array(
+    z.object({
+      sessionId: z.string().describe('The harness session the plan governs.'),
+      planId: z.string(),
+      state: z.enum(['APPROVED', 'EXECUTING']),
+      tools: z.array(z.string()).describe('The tool names of the plan\'s steps, deduped case-insensitively. Compare case-insensitively.'),
+      updatedAt: z.string(),
+    }),
+  ),
+})
+export type ApprovedPlansResponse = z.infer<typeof ApprovedPlansResponse>
+
 // ─── Decisions and rule candidates (routes/decisions.ts) ─────────────
 
 /** `POST /api/v1/decisions`: how many holds became queue entries. */

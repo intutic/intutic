@@ -9,8 +9,9 @@ looks and what `INTUTIC_SOPS_DIR` is for.
 
 ## The keys
 
-Eleven keys can block, steer or hold a run, and a twelfth, `decide:`, asks a
-self-hosted model about a tool call before the hook gates let it run. Everything
+Fourteen keys can block, steer or hold a run, and a fifteenth, `decide:`, asks a
+self-hosted model about a tool call before the hook gates let it run. Six more
+[modifier keys](#modifier-keys) change how some of them act. Everything
 else in a SOP is prose, injected into the agent's context and advisory by
 construction — the model may ignore it.
 
@@ -28,12 +29,15 @@ construction — the model may ignore it.
 | `sql_guard:` | `refuse` or `warn`, with `sql_allow_dsns:` | Refuses (or logs) destructive SQL in a shell call aimed at a database not on the allowlist. See [Destructive SQL](#destructive-sql). |
 | `hook_rule:` | one JSON object per line | Refuses a tool call by tool name and argument literals. See [Hook rules](#hook-rules). |
 | `decide:` | one JSON object per line | Narrow questions a self-hosted model answers about a tool call or a response; the hook gates and gate SDKs refuse, allow or ask a person from the answers, and the gateway evaluates both kinds. See [Decide rules](#decide-rules). |
+| `closed_lanes:` | `irreversible`, `reversible_wide` | Holds every action in the listed reversibility lanes for human approval, as `review_before:` does. See [Lanes](#lanes). |
+| `plan_approval:` | `required` or `strict` | At the hook gates and gate SDKs: refuses calls until the session's plan is approved (`PLAN_NOT_APPROVED`); `strict` also refuses a tool that is not a step of it (`OFF_PLAN`). Not enforced by the gateway. |
+| `node_kind:` | `splitter`, `worker`, `code`, `gate` | Limits what a graph node in these roles may do: a `code` node calls no model, a `worker` or `gate` node may not start child agents, a `gate` node may not change files or run shell commands. See [Graph Guardrails](/guide/graph-guardrails). |
 
 ::: warning Two shapes that look right and match nothing
 
 **`plan_steps:` takes tool names, not prose.** The detector lowercases the list
 and filters the session's tool sequence for entries that are not in it — and
-that sequence holds real tool names (`Read`, `Edit`, `Bash`) and the eight
+that sequence holds real tool names (`Read`, `Edit`, `Bash`) and the
 `action:` tokens, never verbs. A plan of `investigate, patch, test` puts *every*
 step off-plan, past the 0.4 deviation tolerance, so the detector steers on every
 request. This page documented exactly that example.
@@ -51,6 +55,30 @@ nothing, which reads as an over-eager product rather than a misconfiguration.
 [WASM rules](/guide/wasm-rules), which may act on it. A SOP declaring only
 `risk_tier:` will be reported as enforcing nothing, because as far as the proxy's
 own detectors are concerned, it is.
+
+### Modifier keys {#modifier-keys}
+
+Each changes how another key acts and declares nothing of its own. Every one is
+opt-in: a SOP without it behaves exactly as before.
+
+| Key | Values (default first) | What it does |
+| :--- | :--- | :--- |
+| `scope_paths_mode:` | `advise`, `enforce` | `enforce` refuses an out-of-scope write instead of steering: the gateway withholds the call before it runs (`OUT_OF_SCOPE`, rule `scope_paths.<SOP title>`) and refuses the request that reports one it missed. |
+| `plan_steps_mode:` | `advise`, `enforce` | `enforce` re-asks (409 `policy_reask`) on any call in the current turn that is not a plan step — no tolerance, and only this turn's calls, so the agent can correct itself. Gateway only. |
+| `on_reask_exhausted:` | `block`, `pause` | In a loop run, `pause` holds the whole run for review on the third failed correction (403 `LOOP_RUN_PENDING_REVIEW`) instead of refusing one request. After approval the run gets three fresh attempts. |
+| `context_isolation:` | `advise`, `enforce` | Sibling workers handed nearly the same brief are steered by default; `enforce` re-asks. See [Graph Guardrails](/guide/graph-guardrails). |
+| `open_actions:` | action tokens | Re-opens these tokens in this SOP's own `closed_lanes:`. Never re-opens a lane the workspace closed. |
+| `node_kind_allow:` | `model`, `write`, `shell`, `spawn` | Lifts these limits from the kinds `node_kind:` (or the request) declares. |
+
+Keys that can only strengthen a SOP are read at any indentation, and the
+strongest value across lines wins. `open_actions:` and `node_kind_allow:` weaken
+it, so they are read at the top level only, like `mode:` — an indented
+`open_actions:` re-opens nothing. **An unrecognised value enforces**: a typo in
+`scope_paths_mode:` reads as `enforce` and `on_reask_exhausted:` as `pause`,
+and is reported at load. An unknown entry in a list is dropped and reported.
+
+An older proxy ignores keys it does not know, so a gateway older than the
+version that reads a key does not enforce it.
 
 ### Informational keys
 
@@ -168,6 +196,46 @@ Declaring rules under a key **replaces that detector's floor** — so
 `forbid_after:` replaces the three forbidden pairs, and `requires_before:`
 replaces the three required ones. Each detector reads only its own key, so
 declaring one cannot silently disarm the other.
+
+### Qualified prerequisites {#qualified-prerequisites}
+
+```yaml
+requires_before: action:run_tests[ok] -> action:deploy
+```
+
+`[ok]` asks for more than a test run: **the latest test run in the session
+passed**. Anything else leaves the rule unmet, and the gated call is refused
+`PREREQUISITE_UNMET`, with a reason that says which case applies:
+
+| Case | Reason |
+| :--- | :--- |
+| No run | `action:deploy needs a passing action:run_tests first; none ran in this session` |
+| Failed | `… the last action:run_tests failed (<why>)` |
+| Unreadable | `… the result of the last action:run_tests could not be read; rerun the tests so their summary is visible` |
+| Files changed | `… files changed after the last passing action:run_tests; rerun the tests` |
+| `~>`, not adjacent | `… action:deploy must come directly after it, and another call came between` |
+
+- **The qualifier is exact:** `[ok]`, on `action:run_tests`, on the left of the
+  arrow. Anything else is a rule error, and the rule still refuses rather than
+  vanishing.
+- **Deciding "ok".** A non-zero exit code or an error result fails. So does a
+  runner summary reporting a failure (pytest, jest, vitest, go test,
+  `cargo test`, mocha, rspec) or saying no test ran. Exit code 0, or a summary
+  with passes and no failures, is ok. Anything else — phpunit or gradle output
+  with no exit code, say — is unknown, and unknown is not ok.
+- **A file write makes a pass stale**: an edit, write, delete or move, or a
+  shell command such as `sed -i`, `git checkout`, `git pull` or `git stash pop`.
+  The next deploy needs a new passing run.
+- **At the gateway** the result of each test call is paired with its call by
+  id and read, and a gated call in the model's response is withheld before it
+  runs, on a stream as well. The request that reports a gated call that ran
+  anyway is refused, with `error.scope` naming it.
+- **`npm test && git push` in one call** is checked before that command's tests
+  run, so an earlier passing run is still required.
+- An outcome older than a day is ignored.
+
+The built-in floors stay unqualified: a harness whose results cannot be read
+would otherwise never deploy.
 
 ## Count bounds
 
@@ -421,6 +489,47 @@ case-insensitive.
 **A command is not a token.** `git push` names a command, and no harness emits a
 tool by that name — such a rule would load, look correct, and never fire. Rules
 naming a command are refused at load, with a message pointing here.
+
+## Lanes {#lanes}
+
+Every action token has a reversibility class:
+
+| Class | Tokens |
+| :--- | :--- |
+| `reversible_contained` | `action:run_tests`, `action:secret_read`, `action:pii_export` |
+| `reversible_wide` | `action:deploy`, `action:release`, `action:db_write`, `action:http_post`, `action:migrate`, `action:prod_write` |
+| `irreversible` | `action:publish`, `action:destroy`, `action:force_push`, `action:payment` |
+
+```yaml
+---
+closed_lanes: irreversible
+open_actions: action:publish
+---
+```
+
+`closed_lanes:` holds every token of the listed classes for a person, exactly
+as listing them in `review_before:` would. A SOP whose `risk_tier:` is `HIGH` or
+`CRITICAL` also closes `reversible_wide` once it closes any lane;
+`risk_tier:` alone still closes nothing. `open_actions:` (top level only)
+re-opens tokens in this SOP's own lanes. A workspace can close lanes for every
+role with its `closedLanes` setting, which no SOP re-opens.
+`reversible_contained` never closes.
+
+What the five newer tokens match, in a shell command:
+
+| Token | Matches |
+| :--- | :--- |
+| `action:migrate` | `prisma migrate deploy`, `prisma db push`, `alembic upgrade` / `downgrade`, `rails db:migrate`, `rake db:migrate`, `manage.py migrate`, `flyway migrate`, `liquibase update`, `knex migrate:latest`, `sequelize db:migrate` |
+| `action:prod_write` | `--prod`, `RAILS_ENV=production`, `NODE_ENV=production`, `--context prod`, `--namespace production`, `-n production`, `--environment production`, `--stage prod` |
+| `action:destroy` | `terraform destroy`, `kubectl delete`, `helm uninstall`, `helm delete`, `drop table` / `database` / `schema`, `truncate`, `aws s3 rb`, `aws s3 rm`; and a recursive forced `rm` whose target is absolute, under `~`, or contains `..` (`rm -rf build/` is not one) |
+| `action:force_push` | `git push` with a whole-word `--force` or `-f` (`--force-with-lease` is not one) |
+| `action:payment` | Stripe charge, payment-intent, transfer, payout and refund calls (`api.stripe.com/v1/charges`, `stripe charges create`, …) and PayPal payments |
+
+`drop` and `truncate` are both `action:db_write` and `action:destroy`.
+
+A hold is released by the same approval as any `review_before:` hold. A decide
+rule's `allow` never releases one: holds are evaluated before decide rules, and
+only a person releases them.
 
 ## What happens to a malformed rule
 

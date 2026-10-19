@@ -35,7 +35,7 @@ STATUS = {
 def _proxy_errors():
     source = PROXY_RS.read_text(encoding="utf-8")
     found = []
-    for name, code in re.findall(r'json_error\(\s*StatusCode::([A-Z_]+),\s*"([A-Za-z_]+)"', source):
+    for name, code in re.findall(r'json_error(?:_detailed)?\(\s*StatusCode::([A-Z_]+),\s*"([A-Za-z_]+)"', source):
         assert name in STATUS, f"unmapped StatusCode::{name}"
         found.append((STATUS[name], code))
     assert len(found) > 20

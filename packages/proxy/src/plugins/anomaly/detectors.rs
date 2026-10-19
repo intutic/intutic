@@ -9,6 +9,7 @@
 //! tuning surface is visible in one place.
 
 use super::{AnomalyDetector, AnomalyFinding, AnomalyKind};
+use crate::refusal::RefusalScope;
 use crate::wasm::context::RequestContext;
 use std::collections::HashSet;
 
@@ -68,11 +69,14 @@ impl AnomalyDetector for ConsecutiveRepeatDetector {
                     // measured. An agent that is genuinely stuck gets told so
                     // and can change approach; one doing repetitive but
                     // productive work says so and continues.
-                    return Some(AnomalyFinding::reask(
-                        AnomalyKind::LoopDetected,
-                        format!("Loop detected: '{}' called {} {}", seq[i], run, SPIN_MARKER),
-                        threshold_confidence(run, self.threshold),
-                    ));
+                    return Some(
+                        AnomalyFinding::reask(
+                            AnomalyKind::LoopDetected,
+                            format!("Loop detected: '{}' called {} {}", seq[i], run, SPIN_MARKER),
+                            threshold_confidence(run, self.threshold),
+                        )
+                        .with_scope(RefusalScope::tools([seq[i].as_str()])),
+                    );
                 }
             } else {
                 run = 1;
@@ -129,14 +133,17 @@ impl AnomalyDetector for PingPongCycleDetector {
         }
         // Reask — same reasoning as ConsecutiveRepeat. Read→Write→Read→Write is
         // a stuck agent and is also how you edit a file you keep re-checking.
-        Some(AnomalyFinding::reask(
-            AnomalyKind::LoopDetected,
-            format!(
-                "Loop detected: '{}' and '{}' {} {} cycles with no other activity",
-                a, b, ALTERNATION_MARKER, self.cycles
-            ),
-            threshold_confidence(self.cycles, self.cycles),
-        ))
+        Some(
+            AnomalyFinding::reask(
+                AnomalyKind::LoopDetected,
+                format!(
+                    "Loop detected: '{}' and '{}' {} {} cycles with no other activity",
+                    a, b, ALTERNATION_MARKER, self.cycles
+                ),
+                threshold_confidence(self.cycles, self.cycles),
+            )
+            .with_scope(RefusalScope::tools([a.as_str(), b.as_str()])),
+        )
     }
 }
 
@@ -445,6 +452,10 @@ impl AnomalyDetector for LandmarkCycleDetector {
             // recently run, and so it can only name tools the period was
             // actually scored over.
             let cycle = describe_cycle(&symbols, &survivors, p);
+            let mut cycle_tools: Vec<&str> = cycle.split(" \u{2192} ").collect();
+            cycle_tools.sort_unstable();
+            cycle_tools.dedup();
+            let scope = RefusalScope::tools(cycle_tools);
             // Both counts are anchors — `action:` tokens were stripped before
             // any of this ran — so an operator scrolling a raw transcript sees a
             // longer window than `window.len()` reports. Saying what is counted
@@ -452,19 +463,22 @@ impl AnomalyDetector for LandmarkCycleDetector {
             // second number derived from the projection, correct only as long as
             // someone keeps it in sync, while these two are the numbers the
             // verdict was actually computed from.
-            return Some(AnomalyFinding::steer(
-                AnomalyKind::LoopDetected,
-                format!(
-                    "Loop detected: {} of the last {} concrete tool calls (synthesised action: steps not counted) are {} {} ({}), matching {:.0}% of the time",
-                    survivors.len(),
-                    window_len,
-                    CYCLE_PERIOD_MARKER,
-                    p,
-                    cycle,
-                    score * 100.0
-                ),
-                score,
-            ));
+            return Some(
+                AnomalyFinding::steer(
+                    AnomalyKind::LoopDetected,
+                    format!(
+                        "Loop detected: {} of the last {} concrete tool calls (synthesised action: steps not counted) are {} {} ({}), matching {:.0}% of the time",
+                        survivors.len(),
+                        window_len,
+                        CYCLE_PERIOD_MARKER,
+                        p,
+                        cycle,
+                        score * 100.0
+                    ),
+                    score,
+                )
+                .with_scope(scope),
+            );
         }
         None
     }
@@ -805,6 +819,66 @@ impl AnomalyDetector for MissingPredecessorDetector {
         };
 
         for (tool, prerequisite, adjacent) in rules {
+            // A qualified prerequisite (`action:run_tests[ok]`):
+            // met only when a run appears before the gated call AND the
+            // session's recorded outcome is `ok`. Checked on this turn's calls
+            // only: the gated call is already in the rolling window on every
+            // later request, and the outcome may have moved since it ran (a
+            // later failing run, a later write), which must not re-kill a
+            // deploy that was legitimate when it happened. The response gate
+            // withholds the call before it runs; this is the after-the-fact
+            // backstop for whatever it did not see.
+            let (base, qualifier) = super::outcome::split_qualifier(prerequisite);
+            if qualifier.is_some() {
+                if !ctx
+                    .new_tool_calls
+                    .iter()
+                    .any(|t| t.eq_ignore_ascii_case(tool))
+                {
+                    continue;
+                }
+                let Some(used) = seq.iter().rposition(|t| t.eq_ignore_ascii_case(tool)) else {
+                    continue;
+                };
+                let ran = if *adjacent {
+                    used > 0 && seq[used - 1].eq_ignore_ascii_case(base)
+                } else {
+                    seq[..used].iter().any(|t| t.eq_ignore_ascii_case(base))
+                };
+                let in_sequence = seq[..used].iter().any(|t| t.eq_ignore_ascii_case(base));
+                // The sequence decides adjacency; the record decides the rest.
+                let unmet = if !in_sequence {
+                    Some((super::outcome::Case::None, None))
+                } else if !ran {
+                    Some((super::outcome::Case::NotAdjacent, None))
+                } else {
+                    super::outcome::prerequisite_unmet(
+                        ctx.action_outcomes.as_deref(),
+                        base,
+                        false,
+                        chrono::Utc::now().timestamp_millis(),
+                    )
+                };
+                let Some((case, why)) = unmet else {
+                    continue;
+                };
+                return Some(
+                    AnomalyFinding::kill(
+                        AnomalyKind::ScopeViolation,
+                        format!(
+                            "Ordering violation: {}",
+                            super::outcome::prerequisite_unmet_reason(
+                                base,
+                                tool,
+                                case,
+                                why.as_deref(),
+                                &ctx.harness
+                            )
+                        ),
+                    )
+                    .with_scope(RefusalScope::tools([*tool]).with_step(*prerequisite)),
+                );
+            }
             // `else { continue }`, not `?`. The `?` returned `None` from the
             // whole function rather than skipping the rule, so evaluation
             // stopped at the first rule whose tool was absent from the
@@ -832,13 +906,16 @@ impl AnomalyDetector for MissingPredecessorDetector {
             if satisfied {
                 continue;
             }
-            return Some(AnomalyFinding::kill(
-                AnomalyKind::ScopeViolation,
-                format!(
-                    "Ordering violation: '{}' ran with no prior '{}' anywhere in this session",
-                    tool, prerequisite
-                ),
-            ));
+            return Some(
+                AnomalyFinding::kill(
+                    AnomalyKind::ScopeViolation,
+                    format!(
+                        "Ordering violation: '{}' ran with no prior '{}' anywhere in this session",
+                        tool, prerequisite
+                    ),
+                )
+                .with_scope(RefusalScope::tools([*tool]).with_step(*prerequisite)),
+            );
         }
         None
     }
@@ -861,6 +938,37 @@ const FORBIDDEN_SUCCESSIONS: &[(&str, &str)] = &[
 /// something lives before editing it. Firing on the first unlisted step would make the
 /// check useless on any plan not written by someone watching a transcript.
 const PLAN_DEVIATION_TOLERANCE: f64 = 0.4;
+
+/// The off-plan steps of `sequence` against `plan` (`planOffSteps` in
+/// shared-types scopeMatch.ts): empty when nothing is declared, when every
+/// step is on the plan, or when the off-plan share is at most `tolerance`;
+/// otherwise the off-plan names sorted and deduped, with the share. Names
+/// compare ignoring ASCII case.
+pub(crate) fn plan_off_steps<'a>(
+    sequence: &'a [String],
+    plan: &[String],
+    tolerance: f64,
+) -> (Vec<&'a str>, f64) {
+    if plan.is_empty() || sequence.is_empty() {
+        return (Vec::new(), 0.0);
+    }
+    let plan: HashSet<String> = plan.iter().map(|s| s.to_ascii_lowercase()).collect();
+    let mut off: Vec<&str> = sequence
+        .iter()
+        .filter(|t| !plan.contains(&t.to_ascii_lowercase()))
+        .map(String::as_str)
+        .collect();
+    if off.is_empty() {
+        return (Vec::new(), 0.0);
+    }
+    let ratio = off.len() as f64 / sequence.len() as f64;
+    if ratio <= tolerance {
+        return (Vec::new(), ratio);
+    }
+    off.sort_unstable();
+    off.dedup();
+    (off, ratio.min(1.0))
+}
 
 /// Work outside the plan the SOP declared for this task.
 ///
@@ -906,7 +1014,36 @@ impl AnomalyDetector for PlanAdherenceDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        if ctx.plan_steps.is_empty() || ctx.tool_sequence.is_empty() {
+        if ctx.plan_steps.is_empty() {
+            return None;
+        }
+        // `plan_steps_mode: enforce` reads this turn's calls,
+        // not the window, for the reason `ReviewGateDetector` reads the delta:
+        // scored on the window, an off-plan step would re-ask on every request
+        // until it rolled out, and the agent could never correct its way past
+        // it. No tolerance: an enforced plan is a boundary.
+        if ctx.modes.plan_steps {
+            let (offplan, _) = plan_off_steps(&ctx.new_tool_calls, &ctx.plan_steps, 0.0);
+            if offplan.is_empty() {
+                return None;
+            }
+            let shown = offplan.len().min(5);
+            let suffix = if offplan.len() > shown { ", …" } else { "" };
+            return Some(
+                AnomalyFinding::reask(
+                    AnomalyKind::ScopeViolation,
+                    format!(
+                        "Off the declared plan: {}{} — plan_steps_mode: enforce allows only {}",
+                        offplan[..shown].join(", "),
+                        suffix,
+                        ctx.plan_steps.join(", ")
+                    ),
+                    1.0,
+                )
+                .with_scope(RefusalScope::tools(offplan.iter().copied())),
+            );
+        }
+        if ctx.tool_sequence.is_empty() {
             return None;
         }
 
@@ -944,16 +1081,19 @@ impl AnomalyDetector for PlanAdherenceDetector {
         let shown = named.len().min(5);
         let suffix = if named.len() > shown { ", …" } else { "" };
 
-        Some(AnomalyFinding::steer(
-            AnomalyKind::ScopeViolation,
-            format!(
-                "Work outside the declared plan: {:.0}% of steps are unlisted ({}{})",
-                ratio * 100.0,
-                named[..shown].join(", "),
-                suffix
-            ),
-            ratio.min(1.0),
-        ))
+        Some(
+            AnomalyFinding::steer(
+                AnomalyKind::ScopeViolation,
+                format!(
+                    "Work outside the declared plan: {:.0}% of steps are unlisted ({}{})",
+                    ratio * 100.0,
+                    named[..shown].join(", "),
+                    suffix
+                ),
+                ratio.min(1.0),
+            )
+            .with_scope(RefusalScope::tools(named.iter().copied())),
+        )
     }
 }
 
@@ -1050,16 +1190,24 @@ impl AnomalyDetector for ScopePathDetector {
         let shown = outside.len().min(5);
         let suffix = if outside.len() > shown { ", …" } else { "" };
 
-        Some(AnomalyFinding::steer(
-            AnomalyKind::ScopeViolation,
-            format!(
-                "Changed files outside its declared file scope: {}{} (scope: {})",
-                outside[..shown].join(", "),
-                suffix,
-                ctx.scope_paths.join(", ")
-            ),
-            ratio.min(1.0),
-        ))
+        let reason = format!(
+            "Changed files outside its declared file scope: {}{} (scope: {})",
+            outside[..shown].join(", "),
+            suffix,
+            ctx.scope_paths.join(", ")
+        );
+        // `scope_paths_mode: enforce`: a declared boundary the
+        // operator asked to hold. The response gate withholds such a write
+        // before it runs; this kills the request that reports one it missed.
+        let finding = if ctx.modes.scope_paths {
+            AnomalyFinding::kill(
+                AnomalyKind::ScopeViolation,
+                format!("{reason} — scope_paths_mode: enforce"),
+            )
+        } else {
+            AnomalyFinding::steer(AnomalyKind::ScopeViolation, reason, ratio.min(1.0))
+        };
+        Some(finding.with_scope(RefusalScope::paths(outside.iter().copied())))
     }
 }
 
@@ -1139,14 +1287,17 @@ impl AnomalyDetector for ReviewGateDetector {
         // the cleared-watermark and the proxy compares it before re-holding, so
         // changing one character would make every already-approved run re-hold
         // itself — the exact failure the watermark exists to prevent.
-        Some(AnomalyFinding::ask(
-            AnomalyKind::ScopeViolation,
-            format!(
-                "Run {}: {} — declared in review_before:",
-                REVIEW_HOLD_MARKER,
-                hits.join(", ")
-            ),
-        ))
+        Some(
+            AnomalyFinding::ask(
+                AnomalyKind::ScopeViolation,
+                format!(
+                    "Run {}: {} — declared in review_before:",
+                    REVIEW_HOLD_MARKER,
+                    hits.join(", ")
+                ),
+            )
+            .with_scope(RefusalScope::tools(hits.iter().copied())),
+        )
     }
 }
 
@@ -1181,13 +1332,16 @@ impl AnomalyDetector for CallCeilingDetector {
                 .filter(|t| t.eq_ignore_ascii_case(token))
                 .count();
             if seen > *max {
-                return Some(AnomalyFinding::kill(
-                    AnomalyKind::ScopeViolation,
-                    format!(
-                        "Call ceiling exceeded: '{token}' ran {seen} times against a declared \
-                         maximum of {max}"
-                    ),
-                ));
+                return Some(
+                    AnomalyFinding::kill(
+                        AnomalyKind::ScopeViolation,
+                        format!(
+                            "Call ceiling exceeded: '{token}' ran {seen} times against a declared \
+                             maximum of {max}"
+                        ),
+                    )
+                    .with_scope(RefusalScope::tools([token.as_str()])),
+                );
             }
         }
         None
@@ -1321,13 +1475,16 @@ impl AnomalyDetector for ForbiddenSuccessionDetector {
             if !violated {
                 continue;
             }
-            return Some(AnomalyFinding::kill(
-                AnomalyKind::ScopeViolation,
-                format!(
-                    "Forbidden succession: '{}' ran after '{}' in the same session",
-                    then, first
-                ),
-            ));
+            return Some(
+                AnomalyFinding::kill(
+                    AnomalyKind::ScopeViolation,
+                    format!(
+                        "Forbidden succession: '{}' ran after '{}' in the same session",
+                        then, first
+                    ),
+                )
+                .with_scope(RefusalScope::tools([*first, *then])),
+            );
         }
         None
     }
@@ -1807,20 +1964,24 @@ impl AnomalyDetector for UnauthorizedToolDetector {
                 .any(|(t, _)| t.eq_ignore_ascii_case(h))
         });
 
-        Some(AnomalyFinding::kill(
-            AnomalyKind::UnauthorizedTool,
-            if attributed {
-                format!(
-                    "Forbidden tool call: {} — declared in deny_tools",
-                    named.join(", ")
-                )
-            } else {
-                format!(
-                    "Forbidden tool call: {} — denied by an SOP in force for this node",
-                    named.join(", ")
-                )
-            },
-        ))
+        let scope = RefusalScope::tools(hits.iter().copied());
+        Some(
+            AnomalyFinding::kill(
+                AnomalyKind::UnauthorizedTool,
+                if attributed {
+                    format!(
+                        "Forbidden tool call: {} — declared in deny_tools",
+                        named.join(", ")
+                    )
+                } else {
+                    format!(
+                        "Forbidden tool call: {} — denied by an SOP in force for this node",
+                        named.join(", ")
+                    )
+                },
+            )
+            .with_scope(scope),
+        )
     }
 }
 
@@ -2182,6 +2343,11 @@ pub mod test_support {
 
     pub fn base_ctx() -> RequestContext {
         RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             session_id: "ses_test".into(),
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
@@ -2225,6 +2391,11 @@ pub mod test_support {
 
     pub fn ctx_with_sequence(seq: &[&str]) -> RequestContext {
         RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             tool_sequence: seq.iter().map(|s| s.to_string()).collect(),
             ..base_ctx()
         }
@@ -2238,6 +2409,11 @@ pub mod test_support {
     /// directly, so a future field on `ChangeEntry` is one edit, not ten.
     pub fn ctx_with_changes(changes: &[crate::manifest::ChangeEntry]) -> RequestContext {
         RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             changes: changes.to_vec(),
             ..base_ctx()
         }
@@ -3836,6 +4012,8 @@ mod scope_path_tests {
                 "new_str": "replicas: 0",
             }),
             source: InvocationSource::Call,
+            call_id: None,
+            is_error: None,
         }]);
 
         let c = ctx(&["packages/proxy"], changes);
@@ -4471,6 +4649,11 @@ mod code_as_action_tests {
 
     fn code_call(tool: &str, code: &str) -> RequestContext {
         RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             tool_calls: vec![crate::wasm::context::ToolCall {
                 id: "tc_probe".into(),
                 name: tool.into(),
@@ -4593,6 +4776,11 @@ mod sop_key_replay_vectors {
 
     fn ctx_for(v: &Vector) -> RequestContext {
         RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             denied_tools: v.rules.deny_tools.clone(),
             denied_tool_sources: Vec::new(),
             requires_before: v
@@ -4682,6 +4870,204 @@ mod sop_key_replay_vectors {
                     v.name
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod lld75_detector_tests {
+    //! 3.1: the qualified prerequisite (§2.4), the enforce modes (§4.1)
+    //! and the scope every finding now carries (§6.2).
+    use super::test_support::{base_ctx, ctx_with_changes};
+    use super::*;
+    fn entry(state: &str) -> crate::plugins::anomaly::outcome::OutcomeEntry {
+        use crate::plugins::anomaly::outcome::{Outcome, OutcomeEntry};
+        let (o, why, changed) = match state {
+            "ok" => (Outcome::Ok, "exit_zero", false),
+            "failed" => (Outcome::Failed, "summary_failed", false),
+            "unknown" => (Outcome::Unknown, "no_signal", false),
+            _ => (Outcome::Ok, "exit_zero", true),
+        };
+        OutcomeEntry {
+            o,
+            at: chrono::Utc::now().timestamp_millis() - 1_000,
+            why: Some(why.into()),
+            changed,
+            later: false,
+        }
+    }
+    use crate::plugins::anomaly::Disposition;
+
+    fn qualified_ctx(seq: &[&str], new: &[&str], outcome: Option<&str>) -> RequestContext {
+        let mut ctx = base_ctx();
+        ctx.tool_sequence = seq.iter().map(|s| s.to_string()).collect();
+        ctx.new_tool_calls = new.iter().map(|s| s.to_string()).collect();
+        ctx.requires_before = vec![("action:run_tests[ok]".into(), "action:deploy".into(), false)];
+        ctx.action_outcomes = Some(
+            outcome
+                .map(|state| vec![("action:run_tests".to_string(), entry(state))])
+                .unwrap_or_default(),
+        );
+        ctx
+    }
+
+    #[test]
+    fn a_qualified_prerequisite_is_met_only_by_a_passing_run() {
+        let d = MissingPredecessorDetector::default();
+        let seq = ["Bash", "action:run_tests", "Bash", "action:deploy"];
+        let new = ["Bash", "action:deploy"];
+        assert!(d.detect(&qualified_ctx(&seq, &new, Some("ok"))).is_none());
+
+        let failed = d
+            .detect(&qualified_ctx(&seq, &new, Some("failed")))
+            .expect("a failed run leaves it unmet");
+        assert_eq!(failed.disposition, Disposition::Kill);
+        assert!(
+            failed
+                .reason
+                .contains("the last action:run_tests failed (summary_failed)"),
+            "{}",
+            failed.reason
+        );
+        let scope = failed.scope.expect("scope");
+        assert_eq!(scope.tools, vec!["action:deploy"]);
+        assert_eq!(scope.step.as_deref(), Some("action:run_tests[ok]"));
+
+        let unknown = d
+            .detect(&qualified_ctx(&seq, &new, Some("unknown")))
+            .unwrap();
+        assert!(
+            unknown.reason.contains("could not be read"),
+            "{}",
+            unknown.reason
+        );
+        let stale = d
+            .detect(&qualified_ctx(&seq, &new, Some("changed")))
+            .unwrap();
+        assert!(stale.reason.contains("files changed"), "{}", stale.reason);
+        let none = d
+            .detect(&qualified_ctx(&["Bash", "action:deploy"], &new, None))
+            .unwrap();
+        assert!(
+            none.reason.contains("none ran in this session"),
+            "{}",
+            none.reason
+        );
+
+        // An unreadable store fails closed.
+        let mut unread = qualified_ctx(&seq, &new, Some("ok"));
+        unread.action_outcomes = None;
+        assert!(d.detect(&unread).is_some());
+
+        // A deploy from an earlier turn is not re-judged against a later outcome.
+        assert!(d
+            .detect(&qualified_ctx(&seq, &["Read"], Some("failed")))
+            .is_none());
+    }
+
+    #[test]
+    fn scope_paths_enforce_kills_and_names_the_paths() {
+        use crate::manifest::{ChangeEntry, ChangeOp, TargetKind};
+        let change = ChangeEntry {
+            tool: "Write".into(),
+            op: ChangeOp::Write,
+            target: "infra/main.tf".into(),
+            target_kind: TargetKind::Path,
+            risk: Vec::new(),
+            bytes: None,
+        };
+        let mut ctx = ctx_with_changes(&[change]);
+        ctx.scope_paths = vec!["src".into()];
+        let advise = ScopePathDetector.detect(&ctx).unwrap();
+        assert_eq!(advise.disposition, Disposition::Steer);
+        ctx.modes.scope_paths = true;
+        let enforce = ScopePathDetector.detect(&ctx).unwrap();
+        assert_eq!(enforce.disposition, Disposition::Kill);
+        assert!(enforce.reason.ends_with("scope_paths_mode: enforce"));
+        assert_eq!(enforce.scope.unwrap().paths, vec!["infra/main.tf"]);
+    }
+
+    #[test]
+    fn plan_steps_enforce_reads_this_turn_with_no_tolerance() {
+        let mut ctx = base_ctx();
+        ctx.plan_steps = vec!["Read".into(), "Edit".into()];
+        // The window is mostly off-plan, but this turn is on-plan: no finding.
+        ctx.tool_sequence = ["Bash", "Bash", "Bash", "Read"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        ctx.new_tool_calls = vec!["Read".into()];
+        ctx.modes.plan_steps = true;
+        assert!(PlanAdherenceDetector::default().detect(&ctx).is_none());
+        // One off-plan call this turn re-asks.
+        ctx.new_tool_calls = vec!["Read".into(), "Bash".into()];
+        let f = PlanAdherenceDetector::default().detect(&ctx).unwrap();
+        assert_eq!(f.disposition, Disposition::Reask);
+        assert_eq!(f.scope.unwrap().tools, vec!["Bash"]);
+        // Advise mode is today's window ratio.
+        ctx.modes.plan_steps = false;
+        assert_eq!(
+            PlanAdherenceDetector::default()
+                .detect(&ctx)
+                .unwrap()
+                .disposition,
+            Disposition::Steer
+        );
+    }
+
+    #[test]
+    fn declared_findings_carry_their_scope() {
+        let mut ctx = base_ctx();
+        ctx.review_before = vec!["action:destroy".into()];
+        ctx.new_tool_calls = vec!["Bash".into(), "action:destroy".into()];
+        let hold = ReviewGateDetector.detect(&ctx).unwrap();
+        assert_eq!(hold.scope.unwrap().tools, vec!["action:destroy"]);
+        // The hold reason stays byte-identical: the watermark compares it whole.
+        assert_eq!(
+            hold.reason,
+            "Run held for human review: action:destroy — declared in review_before:"
+        );
+
+        let mut ctx = base_ctx();
+        ctx.tool_sequence = vec!["action:secret_read".into(), "action:http_post".into()];
+        let f = ForbiddenSuccessionDetector::default().detect(&ctx).unwrap();
+        assert_eq!(
+            f.scope.unwrap().tools,
+            vec!["action:secret_read", "action:http_post"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod lld75_scope_plan_vectors {
+    //! `fixtures/scope-plan-vectors.json`: `isWithinScope` and `planOffSteps`.
+    use super::*;
+
+    #[test]
+    fn scope_and_plan_follow_the_vectors() {
+        let Some(v) = crate::plugins::anomaly::outcome::lld75_fixture("scope-plan-vectors.json")
+        else {
+            return;
+        };
+        let strings = |x: &serde_json::Value| -> Vec<String> {
+            x.as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_string())
+                .collect()
+        };
+        for c in v["isWithinScope"].as_array().unwrap() {
+            assert_eq!(
+                is_within_scope(c["target"].as_str().unwrap(), &strings(&c["scopes"])),
+                c["within"].as_bool().unwrap(),
+                "{c}"
+            );
+        }
+        for c in v["planOffSteps"].as_array().unwrap() {
+            let seq = strings(&c["sequence"]);
+            let (off, _) =
+                plan_off_steps(&seq, &strings(&c["plan"]), c["tolerance"].as_f64().unwrap());
+            assert_eq!(serde_json::json!(off), c["offPlan"], "{}", c["name"]);
         }
     }
 }

@@ -244,7 +244,9 @@ process.stdin.on('end', async () => {
     // command and the target independently.
     // Cursor enforces an ask on its shell and MCP hooks only; on preToolUse
     // it accepts one and runs the call, so an escalation there refuses.
-    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input, '',
+    // Cursor's session is its conversation (conversation_id), which
+    // requires_before [ok] and plan_approval key their state on (gate body v23).
+    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input, String(ctx.conversation_id || ''),
       { canAsk: event === 'beforeshellexecution' || event === 'beforemcpexecution' });
 
     // Allow — explicitly: with failClosed set, Cursor treats a hook that

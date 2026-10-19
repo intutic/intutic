@@ -47,6 +47,7 @@ from . import sso_groups as sso
 from . import actions
 from . import mcp_registry
 from . import decide_record
+from . import rule_record
 from . import opaque as opaque_mode
 from .phrases import has_phrase, phrase_text
 from .sequence import compile_sequence, sequence_match
@@ -110,6 +111,13 @@ class Snapshot:
     # evaluates_decide); a record that does not decode is not here, and its
     # fallback line refuses. Empty on a snapshot that fails its integrity check.
     decide_rules: list = field(default_factory=list)
+    # The @rule records (rule_record.py) that decoded, in snapshot
+    # order: qualified prerequisites, enforced scopes and plan approval, which
+    # Tier R evaluates. Each one's fallback line is skipped only for a caller
+    # that evaluates rule records (load_snapshot's evaluates_rules); a record
+    # that does not decode is not here, and its fallback line refuses. Empty
+    # on a snapshot that fails its integrity check.
+    rule_records: list = field(default_factory=list)
 
     @property
     def health_message(self) -> str:
@@ -159,7 +167,8 @@ def _normalise(value) -> str:
     return " " + re.sub(r"\s+", " ", str(value if value is not None else "")) + " "
 
 
-def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_decide: bool = False) -> Snapshot:
+def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_decide: bool = False,
+                  evaluates_rules: bool = False) -> Snapshot:
     """Read the policy snapshot the sync daemon compiled: from `path`, else
     `INTUTIC_SNAPSHOT_RULES`, else `~/.intutic/hooks/policy-snapshot.rules`.
 
@@ -167,6 +176,8 @@ def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_dec
     snapshot whose digest does not match its rules, or that was compiled for a
     workspace other than a non-empty `workspace_id`, is "invalid": its rules
     and MCP records are dropped.
+
+    `evaluates_rules`: the same for the @rule records (Tier R).
 
     `evaluates_decide`: the caller evaluates the decide rules the records
     carry. Only then is a decoded record's fallback line skipped; otherwise the
@@ -212,6 +223,11 @@ def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_dec
             if record is not None:
                 snap.decide_rules.append(record)
             continue
+        if line.startswith(rule_record.RULE_RECORD_TAG + "\t"):
+            record = rule_record.decode_gate_rule_record(line)
+            if record is not None:
+                snap.rule_records.append(record)
+            continue
         f = line.split("\t")
         # Column order: id, severity, flags, subject, reason, source(regex).
         # Flags: i = case-insensitive, s = a sequence rule.
@@ -235,6 +251,21 @@ def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_dec
         skip = {r["fallbackId"] for r in snap.decide_rules}
         snap.rules = [r for r in snap.rules if not (r.id.startswith(decide_record.DECIDE_FALLBACK_PREFIX) and r.id in skip)]
 
+    # The same for a rule record's fallback line: skipped only for a caller
+    # that evaluates rule records, and only when a record that decoded names it.
+    if evaluates_rules and snap.rule_records:
+        skip = {r["fallbackId"] for r in snap.rule_records if r["fallbackId"] is not None}
+        snap.rules = [r for r in snap.rules if r.id not in skip]
+
+    # A hold token's rules share one id (lanes.ts laneHoldPatterns): a phrase
+    # rule a gate whose classifier predates the token holds by, and for
+    # force_push and destroy an action rule. This classifier knows every
+    # token, so it holds by the action rule alone: the partial phrase
+    # "git push --force" also matches --force-with-lease, which is no force
+    # push. One id, so one approval releases the call whichever gate held it.
+    action_ids = {r.id for r in snap.rules if r.subject == "action"}
+    if action_ids:
+        snap.rules = [r for r in snap.rules if r.subject != "phrase" or r.id not in action_ids]
     # Integrity. A digest nobody recomputes is a comment; a workspace id nobody
     # compares means workspace A's rules get enforced on B's machine and B's
     # events attribute A's policy to B.
@@ -264,6 +295,7 @@ def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_dec
         snap.mcp_allowlist = None
         # The decide records go with the rest of the dynamic tier.
         snap.decide_rules = []
+        snap.rule_records = []
 
     if snap.state == "ok" and snap.generated_at:
         try:

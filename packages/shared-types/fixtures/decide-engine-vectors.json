@@ -3701,6 +3701,222 @@
       }
     },
     {
+      "name": "a hold before decide asks the engine nothing: a decide allow never releases it",
+      "deterministic": "hold",
+      "tool": "Bash",
+      "toolInput": {
+        "command": "pg_dump -h prod > /tmp/x.sql"
+      },
+      "cwd": "/repo",
+      "rules": [
+        {
+          "ref": "local:data.md#prod-data-export",
+          "rule": {
+            "id": "prod-data-export",
+            "on": "tool_call",
+            "tools": [
+              "Bash"
+            ],
+            "questions": {
+              "exports": {
+                "type": "yes_no",
+                "ask": "Does this command copy customer data out of the production database?"
+              }
+            },
+            "when": "exports",
+            "rollout": "enforce"
+          },
+          "rollout": "enforce",
+          "stampedBy": "rule",
+          "sopTitle": "Production data handling",
+          "ruleText": "Customer data never leaves production.",
+          "pins": [
+            {
+              "modelDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "evalRunId": "eval_local_01",
+              "source": "local"
+            }
+          ]
+        }
+      ],
+      "engine": {
+        "adapter": "logprobs",
+        "model": "m",
+        "ollama": true
+      },
+      "replay": [
+        {
+          "method": "GET",
+          "path": "/api/tags",
+          "status": 200,
+          "times": 5,
+          "body": {
+            "models": [
+              {
+                "name": "m",
+                "model": "m",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "QUESTION: Does this command copy customer data",
+          "status": 200,
+          "body": {
+            "choices": [
+              {
+                "logprobs": {
+                  "content": [
+                    {
+                      "top_logprobs": [
+                        {
+                          "token": "no",
+                          "logprob": -0.01
+                        },
+                        {
+                          "token": "yes",
+                          "logprob": -5
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "times": 1
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "--no-preserve-root\\\"}\\n\\nQUESTION: Does",
+          "status": 200,
+          "body": {
+            "choices": [
+              {
+                "logprobs": {
+                  "content": [
+                    {
+                      "top_logprobs": [
+                        {
+                          "token": "yes",
+                          "logprob": -0.01
+                        },
+                        {
+                          "token": "no",
+                          "logprob": -5
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "times": 1
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "ls -la",
+          "status": 200,
+          "body": {
+            "choices": [
+              {
+                "logprobs": {
+                  "content": [
+                    {
+                      "top_logprobs": [
+                        {
+                          "token": "no",
+                          "logprob": -0.01
+                        },
+                        {
+                          "token": "yes",
+                          "logprob": -5
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "times": 1
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "A) delete_files",
+          "status": 200,
+          "body": {
+            "choices": [
+              {
+                "logprobs": {
+                  "content": [
+                    {
+                      "top_logprobs": [
+                        {
+                          "token": "A",
+                          "logprob": -0.02
+                        },
+                        {
+                          "token": "C",
+                          "logprob": -4
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "times": 1
+        },
+        {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "match": "A) none_of_these",
+          "status": 200,
+          "body": {
+            "choices": [
+              {
+                "logprobs": {
+                  "content": [
+                    {
+                      "top_logprobs": [
+                        {
+                          "token": "C",
+                          "logprob": -0.02
+                        },
+                        {
+                          "token": "A",
+                          "logprob": -4
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "times": 1
+        }
+      ],
+      "expect": {
+        "outcome": "refuse",
+        "code": null,
+        "ruleRef": null,
+        "rules": [],
+        "canary": null,
+        "canaryStored": null,
+        "requests": 0
+      }
+    },
+    {
       "name": "a call no rule names asks the engine nothing",
       "deterministic": "allow",
       "tool": "Read",

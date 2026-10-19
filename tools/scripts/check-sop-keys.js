@@ -45,12 +45,20 @@ for (const m of src.matchAll(/strip_prefix\("([a-z_]+):"\)/g)) keys.add(m[1])
 // floor. A check that inspects part of the input and reports success is the
 // defect it exists to catch, so the floor is now the real count.
 for (const m of src.matchAll(/\blist\("([a-z_]+):"/g)) keys.add(m[1])
+// Keys read at the top level only (`mode:`, `risk_tier:`, `sql_guard:`) and
+// the lists that weaken (`top_level_list("open_actions:", …)`), and the
+// 3.1 modifier keys read through `enum_value` / `strongest_value`, where
+// the strongest value across lines wins.
+for (const m of src.matchAll(/\btop_level_values\(\s*front,\s*"([a-z_]+):"/g)) keys.add(m[1])
+for (const m of src.matchAll(/\btop_level_list\(\s*"([a-z_]+):"/g)) keys.add(m[1])
+for (const m of src.matchAll(/\benum_value\(\s*front,\s*"([a-z_]+):"/g)) keys.add(m[1])
+for (const m of src.matchAll(/\bstrongest_value\(\s*front,\s*"([a-z_]+):"/g)) keys.add(m[1])
 
 // `roles:` is scoping, not enforcement — it selects which roles a SOP applies
 // to and blocks nothing on its own.
 keys.delete('roles')
 
-const MIN_KEYS = 11
+const MIN_KEYS = 24
 if (keys.size < MIN_KEYS) {
   console.error(
     `✖ found only ${keys.size} front-matter key(s) in sops.rs, expected at least ` +
@@ -88,7 +96,23 @@ const doc = readFileSync(refPage, 'utf8')
 // `intutic_enforced` is the sync record `intutic sops pull` writes: `false`
 // skips the whole file (a pulled copy of a SOP the control plane does not
 // enforce), so it declares no condition of its own either.
-const NOT_ENFORCING = new Set(['risk_tier', 'mode', 'intutic_enforced'])
+//
+// The 3.1 modifier keys are the same shape: each changes how another key
+// acts (`scope_paths_mode:` and `plan_steps_mode:` make scope and plan
+// enforce, `on_reask_exhausted:` and `context_isolation:` change a re-ask,
+// `open_actions:` and `node_kind_allow:` lift what `closed_lanes:` and
+// `node_kind:` impose) and declares no condition of its own.
+const NOT_ENFORCING = new Set([
+  'risk_tier',
+  'mode',
+  'intutic_enforced',
+  'scope_paths_mode',
+  'plan_steps_mode',
+  'on_reask_exhausted',
+  'context_isolation',
+  'open_actions',
+  'node_kind_allow',
+])
 
 const undocumented = [...keys].filter((k) => !doc.includes(k))
 const missingFromEnforcing = [...keys].filter(

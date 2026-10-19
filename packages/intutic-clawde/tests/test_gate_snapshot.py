@@ -302,3 +302,27 @@ class TestDecideRecords:
         s = snap.load_snapshot(WS, _rules_file(tmp_path, ["@format\t3", "@novel\trecord", self.FALLBACK]))
         assert s.format_version == 3
         assert snap.evaluate("Bash", "", "ls", s).rule_id == self.FB
+
+
+class TestActionRuleShadowsPhrase:
+    """A hold token with an action rule: force_push's action
+    rule, then the partial phrase rule a gate older than v23 holds by, under
+    one id. This classifier knows the token, so it holds by the action rule."""
+
+    FP = "sop.lane.irreversible.action:force_push"
+
+    def _snap(self, tmp_path):
+        return snap.load_snapshot(WS, _rules_file(tmp_path, [
+            line(self.FP, "hold", "i", "action", "Held for human review", " (action:force_push) "),
+            line(self.FP, "hold", "i", "phrase", "Held for human review", "git push --force|git push -f"),
+        ]))
+
+    def test_drops_the_shadowed_phrase_rule(self, tmp_path):
+        assert [r.subject for r in self._snap(tmp_path).rules] == ["action"]
+
+    def test_holds_a_force_push_once_and_not_force_with_lease(self, tmp_path):
+        s = self._snap(tmp_path)
+        d = snap.evaluate("Bash", "", "git push --force origin main", s)
+        assert (d.severity, d.rule_id) == ("hold", self.FP)
+        assert snap.evaluate("Bash", "", "git push --force origin main", s, False, d.next).severity is None
+        assert snap.evaluate("Bash", "", "git push --force-with-lease origin main", s).severity is None

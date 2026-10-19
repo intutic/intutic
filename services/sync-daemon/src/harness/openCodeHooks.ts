@@ -270,11 +270,11 @@ function intuticEvaluate(toolName, args, sessionID, awaited) {
   const targetPath = args.filePath || args.path || args.file_path || args.file || args.target || args.notebook_path || '';
   const command = args.command || args.cmd || args.script || '';
   if (awaited) {
-    return intuticGateWithDecide(tool, targetPath, command, logEvent, _intuticWsId, args).then(function () {
+    return intuticGateWithDecide(tool, targetPath, command, logEvent, _intuticWsId, args, _intuticSessionId).then(function () {
       logEvent('tool_allowed', tool, '');
     });
   }
-  intuticGate(tool, targetPath, command, logEvent, _intuticWsId, args);
+  intuticGate(tool, targetPath, command, logEvent, _intuticWsId, args, _intuticSessionId);
   logEvent('tool_allowed', tool, '');
 }
 

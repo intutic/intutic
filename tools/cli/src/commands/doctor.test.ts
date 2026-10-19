@@ -26,10 +26,30 @@ function health(over: Partial<PolicySnapshotHealth> = {}): PolicySnapshotHealth 
     droppedRules: 0,
     formatVersion: 1,
     decideRules: 0,
+    gateRules: 0,
+    planApproval: false,
     path: '/home/dev/.intutic/hooks/policy-snapshot.rules',
     ...over,
   }
 }
+
+describe('describePlanApproval', () => {
+  it('says nothing when no SOP sets plan_approval:', async () => {
+    const { describePlanApproval } = await import('./doctor.js')
+    expect(describePlanApproval(health(), { connected: false, cacheAgeMs: null })).toBeNull()
+  })
+
+  it('fails with no control plane, and with no fresh approved-plans cache', async () => {
+    const { describePlanApproval } = await import('./doctor.js')
+    const offline = describePlanApproval(health({ planApproval: true }), { connected: false, cacheAgeMs: null })
+    expect(offline?.passed).toBe(false)
+    expect(offline?.detail).toMatch(/PLAN_NOT_APPROVED/)
+    const noCache = describePlanApproval(health({ planApproval: true }), { connected: true, cacheAgeMs: null })
+    expect(noCache?.passed).toBe(false)
+    expect(noCache?.remediation).toMatch(/traces:read/)
+    expect(describePlanApproval(health({ planApproval: true }), { connected: true, cacheAgeMs: 4000 })?.passed).toBe(true)
+  })
+})
 
 describe('describePolicySnapshot', () => {
   it('passes only on ok, and reports the digest and count', () => {

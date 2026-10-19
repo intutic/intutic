@@ -30,6 +30,7 @@ import type { ConfigEditApplyOutcome } from './configWriter.js'
 import { parseSopConstraints } from './harness/claudeCodeHooks.js'
 import { refreshPolicySnapshot } from './lib/policySnapshot.js'
 import { refreshApprovedBypasses } from './lib/approvedBypasses.js'
+import { refreshApprovedPlans } from './lib/approvedPlans.js'
 import { refreshEgressPolicy } from './lib/egressPolicy.js'
 import type { GovernanceCoverageInputs } from './configReader.js'
 import { collectAgentReport, reportAgent, type AgentReport } from './agentReporter.js'
@@ -119,6 +120,20 @@ export interface GateCacheRefreshOptions {
   workspaceId: string
   /** See {@link PolicySnapshotOptions.localHoldTokens}. */
   localHoldTokens?: readonly string[]
+  /** See {@link PolicySnapshotOptions.localSops}: {@link localGateSopsFor}. */
+  localSops?: readonly SyncSopEntry[]
+  /** The sync interval, which the approved-plans cache must outlive (three of them). */
+  syncIntervalMs?: number
+}
+
+/**
+ * The local SOPs whose `@rule` records and lane holds the snapshot carries:
+ * every one in `.intutic/sops`, whatever the session selected, as
+ * for the review holds. The synced SOPs are not among them: the control
+ * plane compiles theirs (`gateRecords`, `holdRules`).
+ */
+export async function localGateSopsFor(workspaceRoot: string, harnesses: HarnessType[] = []): Promise<SyncSopEntry[]> {
+  return loadLocalSopEntries(workspaceRoot, harnesses, { ignoreSelection: true })
 }
 
 /**
@@ -139,9 +154,10 @@ export async function localHoldTokensFor(
 }
 
 /**
- * Refresh the three gate-side caches every hook reads: the policy snapshot
+ * Refresh the gate-side caches every hook reads: the policy snapshot
  * (`~/.intutic/hooks/policy-snapshot.rules`), the approved review-hold
- * bypasses and the central egress policy. Called on EVERY sync cycle, never
+ * bypasses, the approved plans (`plan_approval:`) and the central egress
+ * policy. Called on EVERY sync cycle, never
  * only when the config version moved: policy changes without the version
  * changing, and before this helper existed `connect` refreshed once at
  * startup and never again, so a guardrail promoted mid-session reached a
@@ -150,11 +166,12 @@ export async function localHoldTokensFor(
  */
 export async function refreshGateCaches(
   opts: GateCacheRefreshOptions,
-): Promise<{ snapshot: boolean; bypasses: boolean; egress: boolean }> {
+): Promise<{ snapshot: boolean; bypasses: boolean; plans: boolean; egress: boolean }> {
   const snapshot = (await refreshPolicySnapshot(opts)) !== null
   const bypasses = (await refreshApprovedBypasses(opts)) !== null
+  const plans = (await refreshApprovedPlans(opts)) !== null
   const egress = (await refreshEgressPolicy(opts)) !== null
-  return { snapshot, bypasses, egress }
+  return { snapshot, bypasses, plans, egress }
 }
 
 /** Where the ids of SkillOpt suggestions that fully landed are remembered. */

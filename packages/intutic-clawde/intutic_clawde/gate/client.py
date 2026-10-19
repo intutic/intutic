@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.parse
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -447,6 +448,20 @@ class GateClient:
             return None
         bypasses = d.get("bypasses")
         return bypasses if isinstance(bypasses, list) else None
+
+    def session_plan(self, session_id: str):
+        """The session's plan (`GET /api/v1/plans/session/:sessionId`) as Tier
+        R reads it: (status, body), status None when the control plane could
+        not be reached. A local-only client has no plans to read: 404. Never
+        raises."""
+        if self.local_only:
+            return 404, None
+        headers = {"Authorization": f"Bearer {self.api_key}", "X-Workspace-Id": self.workspace_id}
+        try:
+            return self.get_transport(
+                self.base_url + "/api/v1/plans/session/" + urllib.parse.quote(session_id, safe=""), headers, self.timeout)
+        except Exception:
+            return None, None
 
     # ------------------------------------------------------------- factory
 

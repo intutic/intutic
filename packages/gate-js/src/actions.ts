@@ -108,6 +108,78 @@ export const DB_WRITE_PATTERNS: readonly string[] = [
   'alter table',
 ]
 
+/** Commands that change a database schema (`action:migrate`, reversible_wide). */
+export const MIGRATE_PATTERNS: readonly string[] = [
+  'prisma migrate deploy',
+  'prisma db push',
+  'alembic upgrade',
+  'alembic downgrade',
+  'rails db:migrate',
+  'rake db:migrate',
+  'manage.py migrate',
+  'flyway migrate',
+  'liquibase update',
+  'knex migrate:latest',
+  'sequelize db:migrate',
+]
+
+/**
+ * Flags and settings that point a command at production (`action:prod_write`,
+ * reversible_wide). A one-word needle is a substring, so `--prod` also
+ * matches `--production`.
+ */
+export const PROD_WRITE_PATTERNS: readonly string[] = [
+  '--prod',
+  'rails_env=production',
+  'node_env=production',
+  '--context prod',
+  '--namespace production',
+  '-n production',
+  '--environment production',
+  '--stage prod',
+]
+
+/**
+ * Commands that destroy infrastructure or data (`action:destroy`,
+ * irreversible). `DROP` and `TRUNCATE` are also `db_write`. A recursive,
+ * forced `rm` whose target is outside the working tree is `destroy` too
+ * ({@link removesOutsideTree}).
+ */
+export const DESTROY_PATTERNS: readonly string[] = [
+  'terraform destroy',
+  'kubectl delete',
+  'helm uninstall',
+  'helm delete',
+  'drop table',
+  'drop database',
+  'drop schema',
+  'truncate ',
+  'aws s3 rb',
+  'aws s3 rm',
+]
+
+/** Calls that move money (`action:payment`, irreversible). */
+export const PAYMENT_PATTERNS: readonly string[] = [
+  'api.stripe.com/v1/charges',
+  'api.stripe.com/v1/payment_intents',
+  'api.stripe.com/v1/transfers',
+  'api.stripe.com/v1/payouts',
+  'api.stripe.com/v1/refunds',
+  'stripe charges create',
+  'stripe payment_intents create',
+  'stripe transfers create',
+  'stripe payouts create',
+  'api-m.paypal.com/v2/payments',
+  'api.paypal.com/v1/payments',
+]
+
+/**
+ * The whole-word flags that make a `git push` a force push
+ * (`action:force_push`, irreversible), looked for in the space-padded,
+ * whitespace-collapsed command. `--force-with-lease` is not one.
+ */
+export const FORCE_PUSH_FLAGS: readonly string[] = [' --force ', ' -f ']
+
 /**
  * Path fragments that indicate credential material.
  *
@@ -223,6 +295,56 @@ export function toolIs(name: string, group: readonly string[]): boolean {
 }
 
 /**
+ * A force push: the `git push` phrase, and `--force` or `-f` as a whole word
+ * anywhere in the command, whitespace collapsed and padded with a space at
+ * each end.
+ */
+export function isForcePush(words: PhraseText, args: string): boolean {
+  if (!hasPhrase(words, 'git push')) return false
+  const padded = ' ' + args.replace(/[ \t\n\r\f\v]+/g, ' ') + ' '
+  return FORCE_PUSH_FLAGS.some((f) => padded.includes(f))
+}
+
+/**
+ * A recursive, forced `rm` (`-rf`, `-fr`, `-r -f`, `--recursive --force`, in
+ * any case) with a target outside the working tree: absolute, under `~`, or
+ * containing `..`. `rm -rf build/` is not one. The command is cut into
+ * segments at `;`, `&`, `|`, `(`, `)` and newlines; in each, the first word
+ * that is `rm` (or ends `/rm`) starts it, and every later word is a flag
+ * (before `--`) or a target, quotes stripped. Linear in the command.
+ */
+export function removesOutsideTree(args: string): boolean {
+  for (const segment of args.split(/[;&|()\n]/)) {
+    const words = segment.split(/[ \t\r\f\v]+/).filter((w) => w !== '')
+    const at = words.findIndex((w) => w === 'rm' || w.endsWith('/rm'))
+    if (at === -1) continue
+    let recursive = false
+    let force = false
+    let flags = true
+    const targets: string[] = []
+    for (const w of words.slice(at + 1)) {
+      if (flags && w === '--') flags = false
+      else if (flags && w.startsWith('--')) {
+        if (w === '--recursive') recursive = true
+        if (w === '--force') force = true
+      } else if (flags && w.startsWith('-') && w.length > 1) {
+        const lower = w.toLowerCase()
+        if (lower.includes('r')) recursive = true
+        if (lower.includes('f')) force = true
+      } else {
+        let a = 0
+        let b = w.length
+        while (a < b && (w[a] === '"' || w[a] === "'")) a++
+        while (b > a && (w[b - 1] === '"' || w[b - 1] === "'")) b--
+        targets.push(w.slice(a, b))
+      }
+    }
+    if (recursive && force && targets.some((t) => t.startsWith('/') || t.startsWith('~') || t.includes('..'))) return true
+  }
+  return false
+}
+
+/**
  * Classify one tool call into the abstract actions it performs.
  *
  * Returns prefixed tokens (`action:deploy`, ...) in the order the Rust/Python
@@ -248,6 +370,13 @@ export function classify(toolName: string, toolInput: unknown): string[] {
     if (matchesAny(args, PII_PATH_FRAGMENTS)) actions.push('pii_export')
     if (matchesPhrase(words, HTTP_POST_PATTERNS)) actions.push('http_post')
     if (matchesPhrase(words, DB_WRITE_PATTERNS)) actions.push('db_write')
+    // The newer tokens, after the eight, in this order in every
+    // classifier: each is a lane (lanes.ts), not an ordering step.
+    if (matchesPhrase(words, MIGRATE_PATTERNS)) actions.push('migrate')
+    if (matchesPhrase(words, PROD_WRITE_PATTERNS)) actions.push('prod_write')
+    if (matchesPhrase(words, DESTROY_PATTERNS) || removesOutsideTree(args)) actions.push('destroy')
+    if (isForcePush(words, args)) actions.push('force_push')
+    if (matchesPhrase(words, PAYMENT_PATTERNS)) actions.push('payment')
   }
 
   return actions.map((a) => ACTION_PREFIX + a)

@@ -163,6 +163,7 @@ The engine the proxy asks its SOPs' [decide rules](/guide/decide#at-the-gateway)
 | `INTUTIC_GRAPH_ID` | unset (a new graph) | Set by `intutic exec` on the agent it starts, and read by a nested `intutic exec`: the [agent graph](/guide/graph-guardrails) the agent belongs to |
 | `INTUTIC_NODE_ID` | unset | Likewise: the agent that ran the nested `intutic exec`, which becomes its parent |
 | `INTUTIC_DEPTH` | `0` | Likewise: how deep in the graph that agent is |
+| `INTUTIC_LOOP_BASE_COMMIT` | the commit `intutic loop start` recorded, else `HEAD` | The ref `intutic loop verify` diffs the run's changes against when `--base` is not given |
 | `INTUTIC_DECIDE_ENGINE_URL` | `url` in `~/.intutic/decide/engine.json`, else `http://127.0.0.1:11434` | The self-hosted engine `intutic decide` asks (and the gates that call `intutic decide check`). Overrides `engine.json` |
 | `INTUTIC_DECIDE_ADAPTER` | `adapter` in `engine.json`, else `logprobs` | `logprobs`, `systemone` or `decisions` |
 | `INTUTIC_DECIDE_MODEL` | `model` in `engine.json`; none otherwise | The model the engine serves. With none, the engine is not configured and enforcing decide rules refuse their tools |
@@ -204,6 +205,11 @@ Read when Intutic writes harness files: by `intutic gates install`, and by the s
 | `INTUTIC_SKIP_GLOBAL_HOOKS` | unset | Any value: do not write Intutic's hooks and deny rules into `~/.claude/settings.json`; the project's `.claude/settings.json` is still written |
 
 The hook gates it writes read `INTUTIC_SNAPSHOT_RULES`, `INTUTIC_APPROVED_BYPASSES`, `INTUTIC_GUARD_DISABLE` and, under `intutic chaos run`, `INTUTIC_CHAOS_PLAN` and `INTUTIC_CHAOS_EVENTS`, as the CLI and the gate SDK do.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INTUTIC_APPROVED_PLANS` | `~/.intutic/hooks/approved-plans.jsonl` | The approved-plans cache the hook gates read for `plan_approval:` ([scope and plan](/reference/harness-security-matrix#scope-and-plan)) |
+| `INTUTIC_OUTCOME_STATE_DIR` | `~/.intutic/hooks/state/outcomes` | Where the hook gates keep each session's test outcomes for `requires_before: action:run_tests[ok]` ([post-tool outcome](/reference/harness-security-matrix#post-tool-outcome)) |
 
 ### MCP proxy / MCP daemon
 

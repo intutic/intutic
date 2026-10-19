@@ -229,7 +229,10 @@ function restoreDeny(doc: JsonObject, ctx: ReverseContext, replaced: boolean): b
 
 function claudeSettings(plan: DisconnectPlan, file: string, workspaceRoot: string, replacedDeny: boolean): Promise<void> {
   return json(plan, file, workspaceRoot, (doc, ctx) => {
-    const hooks = removeFromArray(doc, ['hooks', 'PreToolUse'], isClaudeGateEntry, ctx.original)
+    // PreToolUse, and the post-tool events gate body v23 registers the same script under.
+    const hooks = allEdits(
+      ...['PreToolUse', 'PostToolUse', 'PostToolUseFailure'].map((event) => removeFromArray(doc, ['hooks', event], isClaudeGateEntry, ctx.original)),
+    )
     return allEdits(hooks, (hooks || ctx.record !== null) && restoreDeny(doc, ctx, replacedDeny))
   })
 }
@@ -744,7 +747,7 @@ const antigravity: HarnessReverser = async (plan, ctx) => {
   })
   await json(plan, geminiSettingsPath(), home(), (doc, c) =>
     allEdits(
-      removeGateEntries(doc, c, ['BeforeTool'], 'antigravity-check.sh'),
+      removeGateEntries(doc, c, ['BeforeTool', 'AfterTool'], 'antigravity-check.sh'),
       unwrapUnmarkedServersAt(doc, ['mcpServers'], c.original, geminiRemoteShape),
     ))
   await json(plan, antigravityHooksPath(), home(), (doc, c) => restoreKey(doc, [ANTIGRAVITY_HOOK_NAME], c, isAntigravityGate), true)

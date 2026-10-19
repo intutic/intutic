@@ -55,11 +55,12 @@ import { validatePredicate } from './rulePredicateDsl.js'
 import { decideHashInput, validateDecideRule, DECIDE_APPROVAL_RE, DECIDE_MAX_ASK_CHARS, DECIDE_MAX_OPTIONS, DECIDE_MAX_WHEN_CHARS, DECIDE_MIN_ASK_CHARS } from './decide.js'
 
 /**
- * The eight `action:` tokens the proxy's classifier synthesises from tool
- * calls. Moved here from `services/control-plane/src/services/learnedHoldService.ts`
+ * The `action:` tokens the proxy's classifier synthesises from tool calls.
+ * Moved here from `services/control-plane/src/services/learnedHoldService.ts`
  * so the IR, the validator and the hold miner read one list; that file
  * re-exports it. A token outside this set and outside the observed tool names
- * compiles into a control that can never fire.
+ * compiles into a control that can never fire. The last five
+ * are lanes: each token's reversibility class is in `./lanes.ts`.
  */
 export const ACTION_TOKENS = [
   'action:deploy',
@@ -70,6 +71,11 @@ export const ACTION_TOKENS = [
   'action:http_post',
   'action:pii_export',
   'action:run_tests',
+  'action:migrate',
+  'action:prod_write',
+  'action:destroy',
+  'action:force_push',
+  'action:payment',
 ] as const
 
 export type ActionToken = (typeof ACTION_TOKENS)[number]
@@ -101,7 +107,23 @@ const Token = z
   .min(1)
   .max(64)
   .refine((v) => isActionToken(v) || TOOL_TOKEN_RE.test(v), {
-    message: 'a token is a tool name (`Bash`, `mcp__github__create_issue`) or one of the eight `action:` tokens — never a command',
+    message: 'a token is a tool name (`Bash`, `mcp__github__create_issue`) or one of the `action:` tokens — never a command',
+  })
+
+/**
+ * The tokens a qualified ordering rule may name on its left
+ * (`requires_before: action:run_tests[ok] -> action:deploy`):
+ * only `action:run_tests[ok]`, met only by the latest test run passing.
+ */
+export const QUALIFIED_TOKENS = ['action:run_tests[ok]'] as const
+
+/** The left side of a `requires_before`: a token, or {@link QUALIFIED_TOKENS}. */
+const RequiresFirst = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine((v) => isActionToken(v) || TOOL_TOKEN_RE.test(v) || (QUALIFIED_TOKENS as readonly string[]).includes(v), {
+    message: 'a token is a tool name (`Bash`, `mcp__github__create_issue`), one of the `action:` tokens, or `action:run_tests[ok]` (requires_before, on the left) — never a command',
   })
 
 /**
@@ -154,7 +176,7 @@ const orderingShape = {
 // Discriminated-union members must be plain objects, so the two cross-field
 // rules (ordering tokens differ; a wasm predicate validates) are applied in
 // `validateGuardrailIr` after the shape parse rather than as refinements here.
-const RequiresBeforeSchema = z.object({ kind: z.literal('requires_before'), ...orderingShape }).strict()
+const RequiresBeforeSchema = z.object({ kind: z.literal('requires_before'), ...orderingShape, first: RequiresFirst }).strict()
 
 const ForbidAfterSchema = z.object({ kind: z.literal('forbid_after'), ...orderingShape }).strict()
 

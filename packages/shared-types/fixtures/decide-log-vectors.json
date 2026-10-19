@@ -1,5 +1,5 @@
 {
-  "$comment": "Decide log vectors: file names, the redacted arguments excerpt and the drift alarm (protection 8). Generated from packages/shared-types/src/decideLog.ts; the TypeScript test (decideLog.test.ts) and the Python port (tests/test_decide_log.py) run every case.",
+  "$comment": "Decide log vectors: file names, the redacted arguments excerpt and the drift alarm (protection 8). Generated from packages/shared-types/src/decideLog.ts; the TypeScript test (decideLog.test.ts) and the Python port (tests/test_decide_log.py) run every case. contextFields: the decide.decision record's lane and revertRate, from the call context; null when the caller gives none.",
   "redactionSources": [
     "(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7][A-Z2-7]",
     "sk-ant-[A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-][A-Za-z0-9_-]*",
@@ -2928,6 +2928,59 @@
         }
       ],
       "kept": 200
+    }
+  ],
+  "contextFields": [
+    {
+      "name": "a lane and a rate",
+      "ctx": {
+        "lane": "irreversible",
+        "revertRate": 0.31
+      },
+      "record": {
+        "lane": "irreversible",
+        "revertRate": 0.31
+      }
+    },
+    {
+      "name": "neither given",
+      "ctx": {},
+      "record": {
+        "lane": null,
+        "revertRate": null
+      }
+    },
+    {
+      "name": "explicit nulls",
+      "ctx": {
+        "lane": null,
+        "revertRate": null
+      },
+      "record": {
+        "lane": null,
+        "revertRate": null
+      }
+    },
+    {
+      "name": "a lane without a rate",
+      "ctx": {
+        "lane": "reversible_wide"
+      },
+      "record": {
+        "lane": "reversible_wide",
+        "revertRate": null
+      }
+    },
+    {
+      "name": "a rate of zero is a rate",
+      "ctx": {
+        "lane": "reversible_contained",
+        "revertRate": 0
+      },
+      "record": {
+        "lane": "reversible_contained",
+        "revertRate": 0
+      }
     }
   ]
 }

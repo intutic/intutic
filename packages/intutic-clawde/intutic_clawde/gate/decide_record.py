@@ -19,7 +19,11 @@ import re
 from . import decide
 
 SNAPSHOT_FORMAT_RECORD_TAG = "@format"
-SNAPSHOT_FORMAT = 2
+# The newest snapshot format this gate reads: 3 adds the @rule records of
+# rule_record.py. A snapshot with decide lines and no @rule record
+# is still written as format 2 (DECIDE_SNAPSHOT_FORMAT).
+SNAPSHOT_FORMAT = 3
+DECIDE_SNAPSHOT_FORMAT = 2
 DECIDE_RECORD_TAG = "@decide"
 DECIDE_FALLBACK_PREFIX = "decide-fallback:"
 DECIDE_RULE_TEXT_MAX_BYTES = 4096

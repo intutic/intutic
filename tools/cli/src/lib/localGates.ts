@@ -17,7 +17,7 @@
 import * as node_fs from 'node:fs/promises'
 import * as node_path from 'node:path'
 import { homedir } from 'node:os'
-import { DECIDE_MAX_RULES_PER_CALL, gateKindForHarness, HarnessType, parseDecideLines, splitFrontMatter } from '@intutic/shared-types'
+import { DECIDE_MAX_RULES_PER_CALL, gateKindForHarness, HarnessType, parseDecideLines, parseFrontMatterEnforcing, splitFrontMatter } from '@intutic/shared-types'
 import type { GateKind, SyncSopEntry } from '@intutic/shared-types'
 import {
   buildSnapshotRules,
@@ -209,11 +209,23 @@ export async function installLocalGates(opts: LocalGatesOptions): Promise<LocalG
   const decideRules = await localDecideRules(allSops, { decideDir: node_path.join(homedir(), '.intutic', 'decide') })
   for (const line of [...unreadableDecideLines(allSops), ...notedDecideRules(allSops), ...crowdedDecideTools(allSops)]) warn(line)
 
+  // Every local SOP's rule records and lane holds: qualified
+  // requires_before, scope_paths_mode: enforce, plan_approval:, closed_lanes:.
+  // With no control plane, plan_approval: refuses every call that is not a
+  // read (no plan can be approved), and a lane hold refuses rather than holds.
+  for (const entry of allSops) {
+    // An enforcing plan_approval record compiles from a SOP with no roles:,
+    // not in mode: shadow (compileSopGateRecords, @intutic/shared-types).
+    const fm = parseFrontMatterEnforcing(splitFrontMatter(entry.content).front)
+    if (fm.planApproval !== null && fm.roles.length === 0 && fm.mode !== 'shadow') {
+      warn(`${entry.sopId} sets plan_approval:, and with no control plane no plan can be approved: every gated call that is not a read is refused (PLAN_NOT_APPROVED). Remove it, or connect a workspace.`)
+    }
+  }
   let snapshot: { digest: string; ruleCount: number }
   if (dryRun) {
-    snapshot = { digest: '', ruleCount: buildSnapshotRules({ ...localResolvedPolicy(), decideRules }, holdTokens, 'block').length }
+    snapshot = { digest: '', ruleCount: buildSnapshotRules({ ...localResolvedPolicy(), decideRules }, holdTokens, 'block', allSops).length }
   } else {
-    snapshot = await writeLocalPolicySnapshot({ localHoldTokens: holdTokens, snapshotDir: snapshotDir(), decideRules })
+    snapshot = await writeLocalPolicySnapshot({ localHoldTokens: holdTokens, snapshotDir: snapshotDir(), decideRules, localSops: allSops })
   }
   files.push(node_path.join(snapshotDir(), SNAPSHOT_RULES), node_path.join(snapshotDir(), SNAPSHOT_JSON))
 

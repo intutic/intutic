@@ -37,7 +37,7 @@ const STATUS: Record<string, number> = {
 function proxyErrors(): Array<[number, string]> {
   const source = readFileSync(join(__dirname, '../../proxy/src/proxy.rs'), 'utf-8')
   const found: Array<[number, string]> = []
-  for (const m of source.matchAll(/json_error\(\s*StatusCode::([A-Z_]+),\s*"([A-Za-z_]+)"/g)) {
+  for (const m of source.matchAll(/json_error(?:_detailed)?\(\s*StatusCode::([A-Z_]+),\s*"([A-Za-z_]+)"/g)) {
     expect(STATUS[m[1]], `unmapped StatusCode::${m[1]}`).toBeDefined()
     found.push([STATUS[m[1]], m[2]])
   }

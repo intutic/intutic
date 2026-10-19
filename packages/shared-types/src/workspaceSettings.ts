@@ -341,6 +341,46 @@ export interface WorkspaceSettings {
    */
   loop_review?: {
     requireDistinctApprover?: boolean
+    /**
+     * Completing a loop run as `SUCCEEDED` needs a passing verification of
+     * its latest state: with no verification, a failed or
+     * unverifiable one, or traces newer than it, `POST /loops/:id/complete`
+     * answers 409 (`E_LOOP_NOT_VERIFIED`, `E_LOOP_UNVERIFIABLE`,
+     * `E_LOOP_VERIFY_STALE`), and 503 `GOVERNANCE_UNAVAILABLE` when the
+     * lookup fails. `FAILED` is never gated. Off by default: `intutic loop
+     * exec` from before this setting completes without verifying, and those
+     * runs would otherwise stay ACTIVE.
+     */
+    requireVerifiedCompletion?: boolean
+  }
+
+  /**
+   * Reversibility lanes closed for every agent role: each
+   * listed class's action tokens are held for a person's approval, through
+   * the hold, decision and bypass path. `irreversible` is `publish`,
+   * `destroy`, `force_push` and `payment`; `reversible_wide` is `deploy`,
+   * `release`, `db_write`, `http_post`, `migrate` and `prod_write`. A SOP's
+   * `open_actions:` cannot reopen a token this closes. Unset closes nothing.
+   */
+  closedLanes?: Array<'irreversible' | 'reversible_wide'>
+
+  /**
+   * The learning edge: hold a `reversible_wide` action whose
+   * revert or rejection rate, over `windowDays`, is at least `threshold`, once
+   * it has `minExecutions` executions and `minReversals` reversals. `off`
+   * (the default) computes and shows the rates and holds nothing; `shadow`
+   * records what would be held; `enforce` holds.
+   */
+  revertLane?: {
+    mode: 'off' | 'shadow' | 'enforce'
+    /** Default 0.25. */
+    threshold?: number
+    /** Default 20. */
+    minExecutions?: number
+    /** Default 3. */
+    minReversals?: number
+    /** Default 30. */
+    windowDays?: number
   }
 
   /**
@@ -823,7 +863,9 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   // what "enabled but unset" resolves to.
   reviewHoldBypassTtlMinutes: 10,
   // Off by default, as the reader's fallback is: see the field doc.
-  loop_review: { requireDistinctApprover: false },
+  loop_review: { requireDistinctApprover: false, requireVerifiedCompletion: false },
+  // Off: the rates are computed and shown, nothing is held. See the field doc.
+  revertLane: { mode: 'off' },
   // Off by default — see the field doc for why a growing auto-written
   // context file must be opt-in.
   decisionsLogEnabled: false,
@@ -873,6 +915,55 @@ export function resolveWorkspaceSettings(
   return {
     ...DEFAULT_WORKSPACE_SETTINGS,
     ...(stored ?? {}),
+  }
+}
+
+// ─── Loop, lane and revert-lane settings readers ─────────────────────────────────────────
+
+/** `revertLane` with every field filled in. */
+export interface RevertLaneSettings {
+  mode: 'off' | 'shadow' | 'enforce'
+  threshold: number
+  minExecutions: number
+  minReversals: number
+  windowDays: number
+}
+
+/** What an unset `revertLane`, and each unset or invalid field, resolves to. */
+export const REVERT_LANE_DEFAULTS: RevertLaneSettings = { mode: 'off', threshold: 0.25, minExecutions: 20, minReversals: 3, windowDays: 30 }
+
+function settingsRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** `loop_review.requireVerifiedCompletion` off stored (or resolved) settings: false unless it is literally true. */
+export function readRequireVerifiedCompletion(settings: unknown): boolean {
+  const lr = settingsRecord(settings) ? settings.loop_review : undefined
+  return settingsRecord(lr) && lr.requireVerifiedCompletion === true
+}
+
+/** `closedLanes`, its closable classes only, in `irreversible`, `reversible_wide` order; undefined when unset. */
+export function readClosedLanes(settings: unknown): Array<'irreversible' | 'reversible_wide'> | undefined {
+  const raw = settingsRecord(settings) ? settings.closedLanes : undefined
+  if (!Array.isArray(raw)) return undefined
+  return (['irreversible', 'reversible_wide'] as const).filter((c) => raw.includes(c))
+}
+
+/**
+ * `revertLane` with its defaults filled in. An unknown mode is `off`; a field
+ * out of range takes its default (threshold in (0, 1], counts whole and at
+ * least 1, the window 1 to 180 days, the reversals' retention).
+ */
+export function readRevertLane(settings: unknown): RevertLaneSettings {
+  const raw = settingsRecord(settings) ? settings.revertLane : undefined
+  if (!settingsRecord(raw)) return { ...REVERT_LANE_DEFAULTS }
+  const num = (v: unknown, d: number, ok: (n: number) => boolean) => (typeof v === 'number' && Number.isFinite(v) && ok(v) ? v : d)
+  return {
+    mode: raw.mode === 'shadow' || raw.mode === 'enforce' ? raw.mode : 'off',
+    threshold: num(raw.threshold, REVERT_LANE_DEFAULTS.threshold, (n) => n > 0 && n <= 1),
+    minExecutions: num(raw.minExecutions, REVERT_LANE_DEFAULTS.minExecutions, (n) => Number.isInteger(n) && n >= 1),
+    minReversals: num(raw.minReversals, REVERT_LANE_DEFAULTS.minReversals, (n) => Number.isInteger(n) && n >= 1),
+    windowDays: num(raw.windowDays, REVERT_LANE_DEFAULTS.windowDays, (n) => Number.isInteger(n) && n >= 1 && n <= 180),
   }
 }
 

@@ -262,6 +262,30 @@ describe('agreement with the sync daemon', () => {
     expect(snap.ruleCount).toBe(written.ruleCount)
   })
 
+  it('counts the rule records the daemon wrote, and leaves their fallback lines out of the rule count', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'intutic-rule-records-'))
+    try {
+      const policy = { workspaceId: 'wk_alpha', interventionMode: 'TRANSPARENT', sopRules: [], mcpAllowedServers: [], sqlDropStrictBlock: false }
+      await writePolicySnapshot(policy, join(dir, 'plain'))
+      const plain = parsePolicySnapshot(readFileSync(join(dir, 'plain', 'policy-snapshot.rules'), 'utf8'), { expectedWorkspaceId: 'wk_alpha' })
+      const sop = (sopId: string, front: string) => ({ sopId, title: 'T', content: `---\n${front}\n---\n# T\n`, contentHash: '', harnessTargets: [] })
+      await writePolicySnapshot(policy, join(dir, 'rules'), [], 'hold', [
+        sop('local:a.md', 'requires_before: action:run_tests[ok] -> action:deploy'),
+        sop('local:b.md', 'plan_approval: required'),
+      ])
+      const h = parsePolicySnapshot(readFileSync(join(dir, 'rules', 'policy-snapshot.rules'), 'utf8'), { expectedWorkspaceId: 'wk_alpha' })
+      expect(h.state).toBe('ok')
+      expect(h.formatVersion).toBe(3)
+      expect(h.gateRules).toBe(2)
+      expect(h.planApproval).toBe(true)
+      expect(h.ruleCount).toBe(plain.ruleCount)
+      expect(plain.gateRules).toBe(0)
+      expect(plain.planApproval).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('keeps SNAPSHOT_STALE_AFTER_DAYS equal to the gate the daemon emits', () => {
     // The constant cannot be imported: gateBody is neither in the daemon's index
     // nor in its exports map. Read the declaration instead, so a change there

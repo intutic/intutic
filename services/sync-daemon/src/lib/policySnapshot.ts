@@ -72,7 +72,7 @@ import {
   decideRuleRef,
   decideRuleText,
   encodeDecideRecord,
-  encodeSnapshotFormatRecord,
+  SNAPSHOT_FORMAT_RECORD_TAG,
   parseDecideLine,
   parseDecideLines,
   parseDecidePin,
@@ -90,6 +90,22 @@ import {
   parseSsoGroupPolicy,
   type McpRegistryRecord,
   type SsoGroupPolicy,
+} from '@intutic/shared-types'
+import {
+  RULE_SNAPSHOT_FORMAT,
+  compileSopGateRecords,
+  encodeGateRuleRecord,
+  fromServedGateRecord,
+  gateRuleFallback,
+  laneHoldPatterns as laneHoldPatternSpecs,
+  laneHoldRuleId,
+  laneHoldTokens,
+  toServedGateRecord,
+  tokenLane,
+  type GateRuleFallback,
+  type GateRuleRecord,
+  type ParsedFrontMatter,
+  type ServedGateRecord,
 } from '@intutic/shared-types'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
 import { writeFileAtomic } from './atomicWrite.js'
@@ -289,6 +305,47 @@ export interface ResolvedPolicy {
    * written, and the snapshot is byte-identical to a format 1 one.
    */
   decideRules?: ServedDecideRule[]
+  /**
+   * The `@rule` records of the workspace's SOPs, as resolve
+   * serves them (`gateRecords`, compiled by `compileSopGateRecords`), or the
+   * local SOPs' ({@link PolicySnapshotOptions.localSops}). Each is written as
+   * an `@rule` line, and one stamped `enforce` also as a `<kind>-fallback:`
+   * line that every older gate enforces. Absent or empty: no `@rule` line is
+   * written, and the snapshot is byte-identical to one written before them.
+   */
+  gateRecords?: ServedGateRecord[]
+  /**
+   * The workspace's lane holds (3.1: `sop.lane.<class>.<token>`,
+   * from its SOPs' `closed_lanes:` and its `closedLanes` setting) and revert
+   * holds (§7.3: `revert.<token>`), compiled by resolve (`holdRules`,
+   * `laneHoldPatterns` in `@intutic/shared-types`) in the snapshot's rule
+   * shape: the token's phrases on the `phrase` subject, which every gate
+   * since v12 reads, and for force_push and destroy also the `action`
+   * subject a v23 classifier matches (the compound, the out-of-tree
+   * `rm -rf`). Every rule of one token has the same id, so one approval
+   * releases the call whichever of them held it.
+   */
+  holdRules?: ServedHoldRule[]
+  /** What the revert holds were compiled from (`revertHolds`): shown, not compiled again. */
+  revertHolds?: ServedRevertHold[]
+}
+
+/** One hold rule as resolve serves it. */
+export interface ServedHoldRule {
+  id: string
+  source: string
+  subject: 'phrase' | 'action'
+  ignoreCase?: boolean
+  severity: 'hold' | 'shadow'
+  reason: string
+  rationale?: string
+}
+
+/** One revert hold's rates as resolve serves them. */
+export interface ServedRevertHold {
+  subject: string
+  revertRate: number | null
+  rejectionRate: number | null
 }
 
 /**
@@ -330,6 +387,13 @@ export interface PolicySnapshotOptions {
    * the Claude Code hook that used to bake them in.
    */
   localHoldTokens?: readonly string[]
+  /**
+   * The workspace's local SOPs (`.intutic/sops`), whose `@rule` records
+   * (`compileSopGateRecords`) and lane holds (`closed_lanes:`) the snapshot
+   * carries beside what resolve served. A SOP with `roles:` compiles nothing:
+   * a gate knows no agent role.
+   */
+  localSops?: readonly SyncSopEntry[]
 }
 
 /**
@@ -558,6 +622,68 @@ function parseServedDecideRules(value: unknown): ServedDecideRule[] {
       ...(r.rollout === 'shadow' || r.rollout === 'enforce' ? { rollout: r.rollout } : {}),
       ...(typeof r.ruleHash === 'string' ? { ruleHash: r.ruleHash } : {}),
       pins: Array.isArray(r.pins) ? r.pins.filter((p): p is DecidePin => parseDecidePin(p) !== null) : [],
+    }))
+}
+
+/**
+ * The `gateRecords` of a resolve response, or of a snapshot's JSON, in the
+ * served shape (`ServedGateRecord`, `@intutic/shared-types`). A record is
+ * kept when it has that shape; one that then does not decode is not written
+ * as an `@rule` line, and its fallback line refuses in its place
+ * ({@link compileGateRecords}). A record without a `sopId` takes its ref's.
+ */
+export function parseServedGateRecords(value: unknown): ServedGateRecord[] {
+  if (!Array.isArray(value)) return []
+  const out: ServedGateRecord[] = []
+  for (const r of value) {
+    if (typeof r !== 'object' || r === null) continue
+    const x = r as Record<string, unknown>
+    if (
+      (x.kind === 'requires_outcome' || x.kind === 'scope_paths' || x.kind === 'plan_approval') &&
+      (x.rollout === 'shadow' || x.rollout === 'enforce') &&
+      (x.fallbackId === null || typeof x.fallbackId === 'string') &&
+      typeof x.payload === 'object' && x.payload !== null && !Array.isArray(x.payload)
+    ) {
+      const payload = x.payload as ServedGateRecord['payload']
+      const ref = typeof payload.ref === 'string' ? payload.ref : ''
+      const sopId = typeof x.sopId === 'string' ? x.sopId : ref.slice(0, Math.max(0, ref.lastIndexOf('#')))
+      out.push({ sopId, kind: x.kind, rollout: x.rollout, fallbackId: x.fallbackId, payload })
+    }
+  }
+  return out
+}
+
+/**
+ * The `holdRules` of a resolve response: only hold ids this batch defines
+ * (`sop.lane.*`, `revert.*`), on the `phrase` or `action` subject, at `hold`
+ * or `shadow`. Anything else is dropped with a log line: a served rule is
+ * never a way to put another kind of rule on the blocking path.
+ */
+function parseServedHoldRules(value: unknown): ServedHoldRule[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((r): r is ServedHoldRule => {
+    if (typeof r !== 'object' || r === null) return false
+    const x = r as Record<string, unknown>
+    const ok =
+      typeof x.id === 'string' && /^(sop\.lane\.(irreversible|reversible_wide)\.|revert\.)action:[a-z_]+$/.test(x.id) &&
+      typeof x.source === 'string' && x.source !== '' && !/[\t\n\r]/.test(x.source) &&
+      (x.subject === 'phrase' || x.subject === 'action') &&
+      (x.severity === 'hold' || x.severity === 'shadow') &&
+      typeof x.reason === 'string'
+    if (!ok) log.warn({ action: 'served_hold_rule_rejected', id: x.id }, 'A served hold rule is not one a gate takes — not shipped')
+    return ok
+  })
+}
+
+function parseServedRevertHolds(value: unknown): ServedRevertHold[] {
+  if (!Array.isArray(value)) return []
+  const rate = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : null)
+  return value
+    .filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null && typeof (r as Record<string, unknown>).subject === 'string')
+    .map((r) => ({
+      subject: r.subject as string,
+      revertRate: rate(r.revertRate),
+      rejectionRate: rate(r.rejectionRate),
     }))
 }
 
@@ -815,6 +941,9 @@ async function requestResolvedPolicy(
       principal: parsePrincipal(rec.principal),
       mcpRegistry: parseMcpRegistryRecord(rec.mcpRegistry),
       decideRules: parseServedDecideRules((body as { decideRules?: unknown }).decideRules),
+      gateRecords: parseServedGateRecords((body as { gateRecords?: unknown }).gateRecords),
+      holdRules: parseServedHoldRules((body as { holdRules?: unknown }).holdRules),
+      revertHolds: parseServedRevertHolds((body as { revertHolds?: unknown }).revertHolds),
     }
   } catch (err) {
     log.warn({ action: 'policy_fetch_failed', err }, 'Policy resolve unreachable')
@@ -882,8 +1011,167 @@ export function buildSnapshotRules(
   policy: ResolvedPolicy,
   localHoldTokens: readonly string[] = [],
   localHoldMode: LocalHoldMode = 'hold',
+  localSops: readonly SyncSopEntry[] = [],
 ): GuardPattern[] {
-  return snapshotRules(policy, localHoldTokens, localHoldMode, compileDecideRules(policy).fallbacks)
+  const rules = compileGateRecords(policy, localSops)
+  return snapshotRules(policy, localHoldTokens, localHoldMode, compileDecideRules(policy).fallbacks, {
+    ruleFallbacks: rules.fallbacks,
+    holds: laneHoldPatterns(policy, localSops, localHoldMode),
+  })
+}
+
+/** What the snapshot carries for its rule records: the records, and the fallback lines of the enforcing ones. */
+export interface CompiledGateRecords {
+  records: GateRuleRecord[]
+  fallbacks: GuardPattern[]
+}
+
+/** One local SOP's front matter, parsed once for its records and its lanes; parse errors are logged. */
+function localSopFrontMatter(entry: SyncSopEntry): ParsedFrontMatter {
+  const fm = parseFrontMatterEnforcing(splitFrontMatter(entry.content).front)
+  for (const error of fm.errors) {
+    log.warn({ action: 'sop_rule_error', sopId: entry.sopId, error }, 'A local SOP rule does not read; it is enforced as written, which refuses')
+  }
+  return fm
+}
+
+/** A shared fallback line (`gateRuleFallback`) as a snapshot rule. */
+function fallbackPattern(f: GateRuleFallback): GuardPattern {
+  let match: { subject: GuardPattern['subject']; source: string; ignoreCase: boolean } = { subject: f.subject, source: f.source, ignoreCase: f.ignoreCase }
+  try {
+    assertPortableEre(match.subject === 'phrase' ? ' x ' : match.source, f.id)
+  } catch {
+    match = { subject: 'tool', source: ' [^ ]+ ', ignoreCase: false }
+  }
+  return {
+    id: f.id,
+    source: match.source,
+    subject: match.subject,
+    ...(match.ignoreCase ? { ignoreCase: true } : {}),
+    severity: 'block',
+    reason: boundedText(f.reason, 300),
+    rationale: 'A rule record a gate that cannot evaluate it refuses: it covers these calls.',
+    matches: [],
+    notMatches: [],
+  }
+}
+
+/**
+ * The fallback line of a served, enforcing record that does not decode: no
+ * `@rule` line is written for it, so nothing stands in for its line, which
+ * refuses every call until the record is fixed. A record that cannot be read
+ * is no reason to let what it covers through.
+ */
+function unreadableRecordFallback(r: ServedGateRecord): GuardPattern | null {
+  if (r.rollout !== 'enforce') return null
+  const id =
+    r.fallbackId && /^[a-z_]+-fallback:[1-9][0-9]{0,5}@[0-9a-f]{12}$/.test(r.fallbackId)
+      ? r.fallbackId
+      : `${r.kind}-fallback:1@${sha256Hex(r.sopId).slice(0, 12)}`
+  const title = boundedText(typeof r.payload.sopTitle === 'string' ? r.payload.sopTitle : r.sopId, 80)
+  return {
+    id,
+    source: ' [^ ]+ ',
+    subject: 'tool',
+    severity: 'block',
+    reason: boundedText(`A ${r.kind} rule of ${title} could not be read, so every call is refused until the SOP is fixed`, 300),
+    rationale: 'A rule record a gate that cannot evaluate it refuses: it covers these calls.',
+    matches: [],
+    notMatches: [],
+  }
+}
+
+/**
+ * The policy's `@rule` records, served ones first and then the local SOPs'
+ * (`compileSopGateRecords`, `@intutic/shared-types`), and the fallback line
+ * of each enforcing one (`gateRuleFallback`). Under SILENT_LOG every record
+ * is stamped shadow and has no fallback line, as decide rules are.
+ */
+export function compileGateRecords(policy: ResolvedPolicy, localSops: readonly SyncSopEntry[] = []): CompiledGateRecords {
+  const silentLog = isSilentLogMode(policy)
+  const records: GateRuleRecord[] = []
+  const fallbacks: GuardPattern[] = []
+  const seen = new Set<string>()
+  const addFallback = (f: GuardPattern | null) => {
+    if (!f || seen.has(f.id)) return
+    seen.add(f.id)
+    fallbacks.push(f)
+  }
+  for (const served of parseServedGateRecords(policy.gateRecords ?? [])) {
+    const stamped = silentLog ? { ...served, rollout: 'shadow' as const, fallbackId: null } : served
+    const r = fromServedGateRecord(stamped)
+    if (r === null) {
+      log.warn({ action: 'served_gate_record_unreadable', sopId: served.sopId, kind: served.kind }, 'A served rule record does not decode; its fallback line refuses in its place')
+      addFallback(unreadableRecordFallback(stamped))
+      continue
+    }
+    records.push(r)
+  }
+  for (const entry of localSops) {
+    records.push(...compileSopGateRecords({ sopId: entry.sopId, sopTitle: entry.title, shadow: silentLog }, localSopFrontMatter(entry), sha256Hex).records)
+  }
+  for (const r of records) {
+    const f = gateRuleFallback(r)
+    if (f) addFallback(fallbackPattern(f))
+  }
+  return { records, fallbacks }
+}
+
+/**
+ * The hold rules of a local SOP's closed lanes, in the shape
+ * resolve serves the workspace's (`laneHoldPatterns`, `@intutic/shared-types`):
+ * per token, a `sop.lane.<class>.<token>` rule on the `phrase` subject,
+ * which a gate whose classifier predates the token still holds, and for
+ * force_push and destroy also one on the `action` subject, under the same
+ * id, so one approval releases the call whichever rule held it. Only SOPs
+ * with no `roles:` (a gate knows no role). With no control plane (`block`) a
+ * lane hold refuses.
+ */
+export function localLaneHoldRules(localSops: readonly SyncSopEntry[], mode: LocalHoldMode): ServedHoldRule[] {
+  const sops = localSops.map(localSopFrontMatter).filter((fm) => fm.roles.length === 0)
+  const out: ServedHoldRule[] = []
+  for (const token of laneHoldTokens({ sops })) {
+    const laneClass = tokenLane(token)
+    const offline = mode === 'block'
+    const base = {
+      id: laneHoldRuleId(token),
+      severity: 'hold' as const,
+      reason: offline
+        ? `Refused: ${token} is in the closed ${laneClass} lane, and holding it for approval needs a control plane — run it yourself, or open the lane.`
+        : `Held for human review: ${token} is in the closed ${laneClass} lane`,
+      rationale: 'A SOP closed this reversibility lane: a person signs off each call in it.',
+    }
+    for (const p of laneHoldPatternSpecs(token)) out.push({ ...base, source: p.source, subject: p.subject, ...(p.ignoreCase ? { ignoreCase: true } : {}) })
+  }
+  return out
+}
+
+/**
+ * The lane and revert hold rules: resolve's (`holdRules`), then the local
+ * SOPs' lanes for an id resolve did not serve. Shadow under SILENT_LOG; a
+ * local hold refuses (`block`) with no control plane.
+ */
+function laneHoldPatterns(policy: ResolvedPolicy, localSops: readonly SyncSopEntry[], mode: LocalHoldMode): GuardPattern[] {
+  const shadow = isSilentLogMode(policy)
+  // Validated here as well as at the fetch: a policy rebuilt from a
+  // snapshot's JSON, or built by a caller, takes the same check.
+  const served = parseServedHoldRules(policy.holdRules ?? [])
+  const ids = new Set(served.map((r) => r.id))
+  const local = localLaneHoldRules(localSops, mode).filter((r) => !ids.has(r.id))
+  return [
+    ...served.map((r) => ({ r, offline: false })),
+    ...local.map((r) => ({ r, offline: mode === 'block' })),
+  ].map(({ r, offline }) => ({
+    id: r.id,
+    source: r.source,
+    subject: r.subject,
+    ...(r.ignoreCase ? { ignoreCase: true } : {}),
+    severity: (shadow || r.severity === 'shadow' ? 'shadow' : offline ? 'block' : 'hold') as GuardPattern['severity'],
+    reason: boundedText(r.reason, 300),
+    rationale: r.rationale ?? 'A closed reversibility lane or the revert lane holds this action.',
+    matches: [],
+    notMatches: [],
+  }))
 }
 
 function snapshotRules(
@@ -891,6 +1179,7 @@ function snapshotRules(
   localHoldTokens: readonly string[],
   localHoldMode: LocalHoldMode,
   decideFallbacks: readonly GuardPattern[],
+  extra: { ruleFallbacks: readonly GuardPattern[]; holds: readonly GuardPattern[] } = { ruleFallbacks: [], holds: [] },
 ): GuardPattern[] {
   // `shadow` names the advisory GuardPattern severity these rules are demoted
   // to; the workspace-level trigger is intervention mode SILENT_LOG.
@@ -961,7 +1250,19 @@ function snapshotRules(
   // fallback lines next, ahead of every shadow and warn rule: a 2.9.0 SDK
   // gate returns at the first of those that matches, and would never reach a
   // fallback line after one.
-  return [...ssoGroupPatterns(policy), ...decideFallbacks, ...sopRules, ...localHolds, ...destructive, ...skillSurface, ...skillContent]
+  // The rule records' fallback lines right after the decide ones, for the
+  // same reason; the lane and revert holds after the local review holds.
+  return [
+    ...ssoGroupPatterns(policy),
+    ...decideFallbacks,
+    ...extra.ruleFallbacks,
+    ...sopRules,
+    ...localHolds,
+    ...extra.holds,
+    ...destructive,
+    ...skillSurface,
+    ...skillContent,
+  ]
 }
 
 /**
@@ -1096,21 +1397,32 @@ export async function writePolicySnapshot(
   snapshotDir: string = DEFAULT_SNAPSHOT_DIR,
   localHoldTokens: readonly string[] = [],
   localHolds: LocalHoldMode = 'hold',
+  localSops: readonly SyncSopEntry[] = [],
 ): Promise<{ digest: string; ruleCount: number }> {
-  return oneAtATime(() => writeSnapshotFiles(policy, snapshotDir, localHoldTokens, { localHolds }))
+  return oneAtATime(() => writeSnapshotFiles(policy, snapshotDir, localHoldTokens, { localHolds, localSops }))
 }
 
 async function writeSnapshotFiles(
   policy: ResolvedPolicy,
   snapshotDir: string,
   localHoldTokens: readonly string[],
-  opts: { localHolds?: LocalHoldMode; source?: 'local' } = {},
+  opts: { localHolds?: LocalHoldMode; source?: 'local'; localSops?: readonly SyncSopEntry[] } = {},
 ): Promise<{ digest: string; ruleCount: number }> {
   const decide = compileDecideRules(policy)
-  const rules = snapshotRules(policy, localHoldTokens, opts.localHolds ?? 'hold', decide.fallbacks)
+  const gateRules = compileGateRecords(policy, opts.localSops ?? [])
+  const rules = snapshotRules(policy, localHoldTokens, opts.localHolds ?? 'hold', decide.fallbacks, {
+    ruleFallbacks: gateRules.fallbacks,
+    holds: laneHoldPatterns(policy, opts.localSops ?? [], opts.localHolds ?? 'hold'),
+  })
   // Format 2 once any decide line is written: an `@decide` record, or a
   // fallback line. Without one the snapshot stays byte-identical to format 1.
+  // Format 3 once any `@rule` record is; a snapshot with
+  // decide lines and no rule record stays format 2, byte for byte. The
+  // record is written here rather than by `encodeSnapshotFormatRecord`, whose
+  // format moves with the newest one.
   const decideFormat = decide.records.length > 0 || decide.fallbacks.length > 0
+  const ruleFormat = gateRules.records.length > 0
+  const format = ruleFormat ? RULE_SNAPSHOT_FORMAT : decideFormat ? 2 : 1
   // One timestamp shared by both artifacts. Two `new Date()` calls would put
   // different values in the JSON and the .rules, so a reader comparing them
   // would see drift that is not there.
@@ -1149,12 +1461,14 @@ async function writeSnapshotFiles(
   // edited record fails the check, and an invalid snapshot drops the records
   // with the fallback lines, as it drops the rest of the dynamic tier.
   const lines = [
-    ...(decideFormat ? [encodeSnapshotFormatRecord()] : []),
+    ...(format > 1 ? [`${SNAPSHOT_FORMAT_RECORD_TAG}\t${format}`] : []),
     ...(opaque ? [encodeInterventionModeRecord()] : []),
     ...(ssoGroups ? [encodeSsoGroupRecord(ssoGroups)] : []),
     ...(mcpRegistry ? [encodeMcpRegistryRecord(mcpRegistry)] : []),
     ...(mcpServers.length > 0 ? [encodeMcpAllowlistRecord({ severity: mcpSeverity, servers: mcpServers })] : []),
     ...decide.records.map(encodeDecideRecord),
+    // Each rule record rides inside the digest too, after the decide records.
+    ...gateRules.records.map(encodeGateRuleRecord),
     ...rules.map(toRulesLine),
   ]
   const digest = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 32)
@@ -1164,7 +1478,7 @@ async function writeSnapshotFiles(
   const json = JSON.stringify(
     {
       _comment: 'Intutic policy snapshot — auto-generated. DO NOT EDIT.',
-      version: decideFormat ? 2 : 1,
+      version: format,
       /**
        * Which emitted evaluator these rules were compiled for.
        *
@@ -1197,6 +1511,11 @@ async function writeSnapshotFiles(
       // them), which the `@decide` records and fallback lines were compiled
       // from: readable, and enough to compile them again.
       ...(policy.decideRules && policy.decideRules.length > 0 ? { decideRules: policy.decideRules } : {}),
+      // The rule records as written (served and local), and the lane and
+      // revert holds resolve served: enough to compile them again.
+      ...(gateRules.records.length > 0 ? { gateRecords: gateRules.records.map((r) => toServedGateRecord(r, r.ref.slice(0, r.ref.lastIndexOf('#')))) } : {}),
+      ...(policy.holdRules && policy.holdRules.length > 0 ? { holdRules: policy.holdRules } : {}),
+      ...(policy.revertHolds && policy.revertHolds.length > 0 ? { revertHolds: policy.revertHolds } : {}),
       // With `sopRules`, `interventionMode`, `mcpAllowedServers`,
       // `mcpRegistry` and `decideRules`, enough to rebuild this snapshot
       // without the control plane (`forgetSnapshotMember`).
@@ -1317,12 +1636,18 @@ export function localResolvedPolicy(): ResolvedPolicy {
  * nothing could approve them. Never fetches.
  */
 export async function writeLocalPolicySnapshot(
-  opts: { localHoldTokens?: readonly string[]; snapshotDir?: string; decideRules?: ServedDecideRule[] } = {},
+  opts: {
+    localHoldTokens?: readonly string[]
+    snapshotDir?: string
+    decideRules?: ServedDecideRule[]
+    /** See {@link PolicySnapshotOptions.localSops}. */
+    localSops?: readonly SyncSopEntry[]
+  } = {},
 ): Promise<{ digest: string; ruleCount: number }> {
   const dir = opts.snapshotDir ?? DEFAULT_SNAPSHOT_DIR
   const policy = { ...localResolvedPolicy(), ...(opts.decideRules ? { decideRules: opts.decideRules } : {}) }
   return oneAtATime(() =>
-    writeSnapshotFiles(policy, dir, opts.localHoldTokens ?? [], { localHolds: 'block', source: 'local' }),
+    writeSnapshotFiles(policy, dir, opts.localHoldTokens ?? [], { localHolds: 'block', source: 'local', localSops: opts.localSops ?? [] }),
   )
 }
 
@@ -1390,7 +1715,7 @@ export async function refreshPolicySnapshot(
   }
   if (!result) return null
   try {
-    return await writePolicySnapshot(result, dir, opts.localHoldTokens ?? [])
+    return await writePolicySnapshot(result, dir, opts.localHoldTokens ?? [], 'hold', opts.localSops ?? [])
   } catch (err) {
     log.warn({ action: 'policy_snapshot_write_failed', err }, 'Could not write policy snapshot')
     return null
@@ -1433,6 +1758,10 @@ async function forgetSnapshotMember(dir: string, localHoldTokens: readonly strin
         principal: null,
         mcpRegistry: parseMcpRegistryRecord(doc.mcpRegistry),
         decideRules: parseServedDecideRules(doc.decideRules),
+        // The records as the last write compiled them, local ones included.
+        gateRecords: parseServedGateRecords(doc.gateRecords),
+        holdRules: parseServedHoldRules(doc.holdRules),
+        revertHolds: parseServedRevertHolds(doc.revertHolds),
       },
       dir,
       localHoldTokens,

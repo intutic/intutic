@@ -310,7 +310,7 @@ it ended — nobody decided, so it audits as `tool_flagged`, not a veto.
 | Property | Modifier | Type |
 | ------ | ------ | ------ |
 | <a id="property-kind-1"></a> `kind` | `readonly` | `"question"` \| `"session-limit"` \| `"tool-approval"` |
-| <a id="property-outcome"></a> `outcome` | `readonly` | `"invalid"` \| `"approved"` \| `"denied"` \| `"cancelled"` \| `"answered"` \| `"ignored"` |
+| <a id="property-outcome"></a> `outcome` | `readonly` | `"approved"` \| `"invalid"` \| `"denied"` \| `"cancelled"` \| `"answered"` \| `"ignored"` |
 | <a id="property-requestid-1"></a> `requestId` | `readonly` | `string` |
 | <a id="property-response"></a> `response?` | `readonly` | `object` |
 | `response.optionId?` | `readonly` | `string` |

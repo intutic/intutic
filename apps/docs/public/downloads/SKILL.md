@@ -85,6 +85,12 @@ A hold rule wants a person to see this call before it runs. Codes: `HELD` (with 
 ### Revise: change the approach
 `policy_reask` (proxy) and `REASK` (MCP proxy) refuse this attempt with a reason. Do something different; repeating it becomes a block (`policy_denied`, `REASK_EXHAUSTED`).
 
+A refusal that says where it applies carries `scope` (paths, tools, a step) and, at a hook gate that reads exit codes, a `[Intutic] Retry scope:` line; retry outside it.
+- `PREREQUISITE_UNMET`: the call needs a passing test run first (`requires_before: action:run_tests[ok]`), and the session has none, the last one failed or could not be read, or files changed since. Run the tests, make them pass, then retry. Where the reason says the harness reports no tool results, no run can count here: tell the user.
+- `OUT_OF_SCOPE`: the change targets a path outside the SOP's `scope_paths`. Change only files inside the scope, or tell the user the task needs a wider one.
+- `PLAN_NOT_APPROVED`: the session's plan is not approved yet. Write the plan and wait for its approval; reads are still allowed. `OFF_PLAN`: the tool is not a step of the approved plan; use a planned step, or get the plan changed.
+- `NODE_KIND_DENIED`: this agent's graph node may not do this (a `code` node made a model call, or a child of a `worker` or `gate` node did). Hand the work to a node allowed to do it.
+
 ### Blocked: do not retry the same call
 Continue without it, or tell the user what would have to change and who can change it.
 - **Policy:** `policy_denied`, `TOOL_DENIED`, `SOP_RULE`, `SNAPSHOT`, `HOOK_GATE`, `ANOMALY`, `WASM_RULE`, `REASK_EXHAUSTED`, `LOOP_RUN_TERMINATED`, `model_not_allowed`.

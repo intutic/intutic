@@ -34,8 +34,19 @@ import type { DecideRule } from './decide.js'
 
 /** First column of the snapshot format record: `@format<TAB><integer>`. */
 export const SNAPSHOT_FORMAT_RECORD_TAG = '@format'
-/** The format a snapshot carrying decide lines is written in. */
-export const SNAPSHOT_FORMAT = 2
+/**
+ * The newest snapshot format a gate of this generation reads: 3, which adds
+ * the `@rule` records of the loops, graphs and gates release (`./gateRuleRecord.ts`). A gate reading a
+ * newer one reports `snapshot_format_newer` and enforces the fallback lines
+ * of the records it does not know.
+ */
+export const SNAPSHOT_FORMAT = 3
+/**
+ * The format a snapshot carrying decide lines and no `@rule` record is
+ * written in, so such a snapshot stays byte-identical to what 3.0 wrote. One
+ * with any `@rule` record is format 3 (`RULE_SNAPSHOT_FORMAT`).
+ */
+export const DECIDE_SNAPSHOT_FORMAT = 2
 /** First column of a decide rule's record. */
 export const DECIDE_RECORD_TAG = '@decide'
 /** The id prefix of a decide rule's fallback line. */
@@ -86,9 +97,9 @@ const DECIDE_STAMPS = ['rule', 'local-disable', 'server-shadow', 'silent-log', '
 const DECIDE_RECORD_FIELDS = ['fallbackId', 'ir', 'pins', 'ref', 'rollout', 'ruleHash', 'ruleText', 'sopTitle', 'stampedBy', 'v']
 const DECIDE_PIN_FIELDS = ['band', 'combiner', 'evalRunId', 'modelDigest', 'source', 'temperature']
 
-/** `@format<TAB>2`. */
-export function encodeSnapshotFormatRecord(): string {
-  return `${SNAPSHOT_FORMAT_RECORD_TAG}\t${SNAPSHOT_FORMAT}`
+/** `@format<TAB><format>`: 2 ({@link DECIDE_SNAPSHOT_FORMAT}) unless the writer passes 3 for a snapshot with `@rule` records. */
+export function encodeSnapshotFormatRecord(format: number = DECIDE_SNAPSHOT_FORMAT): string {
+  return `${SNAPSHOT_FORMAT_RECORD_TAG}\t${format}`
 }
 
 /** The format a `@format` line names: a positive integer, or null for any other line or a damaged one. */

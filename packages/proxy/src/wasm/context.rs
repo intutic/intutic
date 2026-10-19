@@ -179,6 +179,16 @@ pub struct NodeIdentity {
     pub graph_node_count: Option<u32>,
 }
 
+/// The 3.1 switches that turn an advisory check into an enforcing one,
+/// resolved from the SOPs in force for the node's role.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EnforceModes {
+    /// `scope_paths_mode: enforce`: an out-of-scope write kills.
+    pub scope_paths: bool,
+    /// `plan_steps_mode: enforce`: an off-plan step in this turn re-asks.
+    pub plan_steps: bool,
+}
+
 /// Context passed to WASM plugins on each request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestContext {
@@ -400,6 +410,33 @@ pub struct RequestContext {
     /// index fields by name keep working and simply gain new keys.
     #[serde(flatten)]
     pub node: NodeIdentity,
+
+    // ── 3.1 inputs ───────────────────────────────────────────────────
+    //
+    // All `#[serde(skip)]`: not exposed to WASM rules in this batch (Q4), and
+    // absent from a stored snapshot, so a replayed context reads them empty.
+    /// The session's recorded test outcomes (`intutic:outcome:{scope}`),
+    /// read only while a qualified `requires_before:` rule is in force.
+    /// `None` when not read, or when the read failed — a qualified rule is
+    /// then unmet (rule failures fail closed).
+    #[serde(skip)]
+    pub action_outcomes: Option<Vec<(String, crate::plugins::anomaly::outcome::OutcomeEntry)>>,
+    /// Reversible-wide tokens the workspace's revert history holds for this
+    /// role (`v2:revert:{workspace}`). Under `revertLane:
+    /// enforce` they are also merged into `review_before`.
+    #[serde(skip)]
+    pub revert_hold_tokens: Vec<String>,
+    /// The best-matching sibling's context overlap, when this node is a
+    /// worker in a real graph and its brief is large enough to compare.
+    #[serde(skip)]
+    pub sibling_overlap: Option<crate::context_sig::SiblingOverlap>,
+    /// `context_isolation:` for this role: whether a sibling overlap steers
+    /// or re-asks (`graph_detectors::ContextOverlapDetector`).
+    #[serde(skip)]
+    pub context_isolation: crate::plugins::anomaly::graph_detectors::IsolationMode,
+    /// Which advisory checks enforce.
+    #[serde(skip)]
+    pub modes: EnforceModes,
 }
 
 /// `tool_arguments` on a stored snapshot whose calls carry argument keys and
@@ -473,6 +510,11 @@ mod tests {
 
     fn ctx() -> RequestContext {
         RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             session_id: "ses_1".into(),
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),

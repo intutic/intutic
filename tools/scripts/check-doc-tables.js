@@ -53,6 +53,7 @@ const ENUMS_TS = 'packages/shared-types/src/enums.ts'
 const SOP_TS = 'packages/shared-types/src/sop.ts'
 const ANOMALY_MOD = 'packages/proxy/src/plugins/anomaly/mod.rs'
 const ANOMALY_DETECTORS = 'packages/proxy/src/plugins/anomaly/detectors.rs'
+const GRAPH_DETECTORS = 'packages/proxy/src/plugins/anomaly/graph_detectors.rs'
 const OPERATIONS = 'packages/shared-types/fixtures/control-plane-operations.json'
 const PLAN_SKU_MAP = 'services/control-plane/src/lib/planSkuMap.ts'
 const PLANS_JSON = 'apps/docs/data/plans.json'
@@ -394,21 +395,26 @@ const DETECTOR_ROWS = {
   'Cross-harness': 'cross_harness_violation',
   'Prompt injection': 'prompt_injection',
   'Tool poisoning': 'tool_poisoning',
+  'Sibling context overlap': 'context_overlap',
 }
 
 run('detector table', () => {
   const mod = read(ANOMALY_MOD)
-  const detectorsSrc = read(ANOMALY_DETECTORS)
+  // The graph detectors live in a file of their own and are
+  // registered by path (`graph_detectors::ContextOverlapDetector`).
+  const detectorsSrc = read(ANOMALY_DETECTORS) + '\n' + read(GRAPH_DETECTORS)
   const defaults = mod.match(/pub fn with_defaults\(\)[\s\S]*?detectors: vec!\[([\s\S]*?)\]/)?.[1]
   if (!defaults) throw new Error(`could not find DetectorRegistry::with_defaults() in ${ANOMALY_MOD}`)
-  const registered = [...defaults.matchAll(/Box::new\((\w+)/g)].map((m) => m[1])
+  const registered = [...defaults.matchAll(/Box::new\((?:[a-z_]\w*::)*([A-Z]\w*)/g)].map((m) => m[1])
+  // An id written as a `const` (`CONTEXT_OVERLAP_ID`) resolves to its value.
+  const consts = Object.fromEntries([...detectorsSrc.matchAll(/pub const (\w+): &str = "([a-z_]+)";/g)].map((m) => [m[1], m[2]]))
   const wire = Object.fromEntries([...mod.matchAll(/Self::(\w+) => "([A-Z_]+)"/g)].map((m) => [m[1], m[2]]))
   const allKinds = mod.match(/pub const ALL_KINDS: \[AnomalyKind; (\d+)\]/)?.[1]
   const impls = new Map()
   for (const part of detectorsSrc.split(/\nimpl AnomalyDetector for /).slice(1)) {
     const struct = part.match(/^(\w+)/)[1]
     const body = part.split(/\n\}\n/)[0]
-    const id = body.match(/fn id\(&self\)[^{]*\{\s*"([a-z_]+)"/)?.[1]
+    const id = body.match(/fn id\(&self\)[^{]*\{\s*"([a-z_]+)"/)?.[1] ?? consts[body.match(/fn id\(&self\)[^{]*\{\s*([A-Z_]+)\s*\}/)?.[1]]
     const kinds = [...new Set([...body.matchAll(/AnomalyKind::(\w+)/g)].map((m) => wire[m[1]] ?? m[1]))].sort()
     impls.set(struct, { id, kinds })
   }

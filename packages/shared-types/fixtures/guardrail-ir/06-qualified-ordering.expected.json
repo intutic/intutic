@@ -1,0 +1,17 @@
+{
+  "generatedBy": "packages/shared-types/scripts/generate-guardrail-fixtures.ts",
+  "deny_tools": [],
+  "review_before": [],
+  "requires_before": [
+    {
+      "first": "action:run_tests[ok]",
+      "then": "action:deploy",
+      "adjacent": false
+    }
+  ],
+  "forbid_after": [],
+  "max_calls": [],
+  "forbid_with": [],
+  "roles": [],
+  "mode": "enforce"
+}

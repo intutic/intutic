@@ -42,10 +42,15 @@ export {
   resolveWorkspaceSettings,
   resolveSecurityProbeSampleRate,
   MCP_ANOMALY_DETECTOR_IDS,
+  REVERT_LANE_DEFAULTS,
+  readRequireVerifiedCompletion,
+  readClosedLanes,
+  readRevertLane,
 } from './workspaceSettings.js'
 
 export type {
   WorkspaceSettings,
+  RevertLaneSettings,
   McpAnomalyDetectorId,
   McpProxyFailBehavior as McpProxyFailBehaviorType,
   McpProxyMode as McpProxyModeType,
@@ -246,6 +251,7 @@ export {
 export {
   SNAPSHOT_FORMAT_RECORD_TAG,
   SNAPSHOT_FORMAT,
+  DECIDE_SNAPSHOT_FORMAT,
   DECIDE_RECORD_TAG,
   DECIDE_FALLBACK_PREFIX,
   DECIDE_SOP_TITLE_MAX_CHARS,
@@ -648,6 +654,9 @@ export { scanToolDescription } from './toolPoison.js'
 export {
   E_ATTENUATION_CAP_VIOLATION,
   E_OVERAGE_HARD_CAP_EXCEEDED,
+  E_LOOP_NOT_VERIFIED,
+  E_LOOP_UNVERIFIABLE,
+  E_LOOP_VERIFY_STALE,
 } from './errors.js'
 
 // Phase 7: Intelligence Engine types (LLDs #45, #47, #48, #49, #50, #51)
@@ -1103,3 +1112,12 @@ export type {
   DecideStatsDecision,
 } from './decideLog.js'
 export { decideLogRedactionSources } from './decideLogRedaction.js'
+
+// ─── Loops, graphs and gates ───────────────────────────────
+export * from './testOutcome.js'
+export * from './scopeMatch.js'
+export * from './lanes.js'
+export * from './refusalDetail.js'
+export * from './gateRuleRecord.js'
+export * from './loopVerify.js'
+export * from './sopKeySince.js'

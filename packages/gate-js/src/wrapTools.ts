@@ -29,7 +29,7 @@
  * rather than silently skipping enforcement.
  */
 
-import type { Gate } from './gate.js'
+import type { Gate, ToolOutcome } from './gate.js'
 import { active as activeGate } from './registry.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,6 +75,20 @@ function renderToolInput(args: unknown[]): Record<string, unknown> {
   return { args }
 }
 
+/**
+ * What a tool's return value says about how it went: a string is its
+ * output; an object's numeric `exitCode`, `exit_code` or `returncode` is its
+ * exit code, and its string `output`, `stdout` or `stderr` its output.
+ */
+export function toolOutcomeOf(result: unknown): ToolOutcome {
+  if (typeof result === 'string') return { output: result }
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return {}
+  const r = result as Record<string, unknown>
+  const code = [r.exitCode, r.exit_code, r.returncode].find((v) => typeof v === 'number')
+  const text = [r.output, r.stdout, r.stderr].filter((v): v is string => typeof v === 'string').join('\n')
+  return { ...(typeof code === 'number' ? { exitCode: code } : {}), ...(text ? { output: text } : {}) }
+}
+
 function wrapFn(fn: AnyFn, toolName: string, gate: Gate | undefined): AnyFn {
   if (isGuarded(fn)) return fn
 
@@ -87,8 +101,20 @@ function wrapFn(fn: AnyFn, toolName: string, gate: Gate | undefined): AnyFn {
           '{ gate } to wrapTool()/wrapTools(). Refusing to run the tool unguarded.',
       )
     }
-    await g.guard(toolName, renderToolInput(args))
-    return fn(...args)
+    const input = renderToolInput(args)
+    await g.guard(toolName, input)
+    // How the call went feeds Tier R (a qualified requires_before):
+    // a throw is a failure; a returned exit code or text is read by the
+    // test-outcome rules. Recording never changes what the tool returns.
+    let result: unknown
+    try {
+      result = await fn(...args)
+    } catch (err) {
+      g.recordOutcome(toolName, input, { isError: true, output: err instanceof Error ? err.message : String(err) })
+      throw err
+    }
+    g.recordOutcome(toolName, input, toolOutcomeOf(result))
+    return result
   }
 
   Object.defineProperty(wrapped, GUARDED, { value: true, enumerable: false })

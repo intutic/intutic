@@ -250,7 +250,9 @@ process.stdin.on('end', async () => {
     const targetPath = input.path || input.file_path || input.filePath ||
       input.target || input.source || input.notebook_path || firstFile || '';
     const command = input.command || input.cmd || input.script || commands || '';
-    await intuticGateWithDecide(rawToolName, targetPath, command, logEvent, _intuticWsId, input);
+    // Cline's session is its task (taskId), which requires_before [ok] and
+    // plan_approval key their state on (gate body v23).
+    await intuticGateWithDecide(rawToolName, targetPath, command, logEvent, _intuticWsId, input, String(ctx.taskId || ''));
 
     // Allow all other tool calls
     logEvent('tool_allowed', tool || 'unknown', '');

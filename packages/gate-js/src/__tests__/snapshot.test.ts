@@ -339,3 +339,26 @@ describe('decide records (snapshot format 2)', () => {
     expect(evaluate('Bash', '', 'ls', s)).toMatchObject({ severity: SEV_BLOCK, ruleId: FB })
   })
 })
+
+describe('a hold token with an action rule', () => {
+  // laneHoldPatterns: force_push's action rule, then the partial phrase rule
+  // a gate older than v23 holds by, under one id.
+  const FP = 'sop.lane.irreversible.action:force_push'
+  const rules = () =>
+    loadSnapshot(WS, rulesFile([
+      line(FP, 'hold', 'i', 'action', 'Held for human review', ' (action:force_push) '),
+      line(FP, 'hold', 'i', 'phrase', 'Held for human review', 'git push --force|git push -f'),
+    ]))
+
+  it('drops the phrase rule that shares the action rule\'s id: this classifier knows the token', () => {
+    expect(rules().rules.map((r) => r.subject)).toEqual(['action'])
+  })
+
+  it('holds a force push once, under the one id, and not --force-with-lease', () => {
+    const s = rules()
+    const d = evaluate('Bash', '', 'git push --force origin main', s)
+    expect([d.severity, d.ruleId]).toEqual(['hold', FP])
+    expect(evaluate('Bash', '', 'git push --force origin main', s, false, d.next).severity).toBeNull()
+    expect(evaluate('Bash', '', 'git push --force-with-lease origin main', s).severity).toBeNull()
+  })
+})

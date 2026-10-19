@@ -299,6 +299,24 @@ export async function updatePreToolUseHooks(
       },
     ],
   })
+  // The post-tool registration (gate body v23): the same script with
+  // `--event post` records a Bash test run's outcome for the session, so a
+  // `requires_before: action:run_tests[ok] -> …` rule can be met. Bash only:
+  // the outcome is a shell result. Claude Code fires PostToolUse when the
+  // command exited 0 and PostToolUseFailure, with `error` starting
+  // `Exit code N`, when it did not (captured from Claude Code 2.1.233,
+  // __tests__/fixtures/post-tool/claude-code.json). The handler always exits 0:
+  // an exit 2 from a post-tool hook would be fed back to the model.
+  const postEntry = () => ({
+    matcher: 'Bash',
+    hooks: [
+      {
+        type: 'command',
+        command: `node ${JSON.stringify(node_path.join(workspaceRoot, '.intutic', 'hooks', 'claude-code-check.js'))} --event post`,
+        timeout: HOOK_TIMEOUT_SECONDS,
+      },
+    ],
+  })
 
   const newSettings = {
     permissions: {
@@ -318,6 +336,8 @@ export async function updatePreToolUseHooks(
         // this matcher present to ever see the call.
         hookEntry('mcp__.*'),
       ],
+      PostToolUse: [postEntry()],
+      PostToolUseFailure: [postEntry()],
     },
   }
 
@@ -451,6 +471,20 @@ function logEvent(verdict, toolName, reason, sessionId) {
 let inputData = '';
 process.stdin.on('data', (chunk) => { inputData += chunk; });
 process.stdin.on('end', async () => {
+  // A post-tool invocation (gate body v23): record the result, never refuse.
+  if (_intuticPostMode) {
+    try {
+      const ctx = JSON.parse(inputData);
+      const failed = ctx.hook_event_name === 'PostToolUseFailure';
+      const resp = ctx.tool_response && typeof ctx.tool_response === 'object' ? ctx.tool_response : {};
+      const output = failed
+        ? String(ctx.error || '')
+        : String(resp.stdout || '') + '\\n' + String(resp.stderr || '');
+      intuticRecordOutcome(String(ctx.session_id || ctx.sessionId || ''), ctx.tool_name || ctx.toolName || '',
+        ctx.tool_input || ctx.toolInput || {}, { isError: failed || resp.interrupted === true, output: output });
+    } catch (e) { /* a result that does not read records nothing */ }
+    process.exit(0);
+  }
   try {
     const ctx = JSON.parse(inputData);
     // An envelope carrying none of the tool fields extracts to empty strings,
@@ -543,6 +577,8 @@ process.stdin.on('end', async () => {
       hooks: {
         ...(existingLocal.hooks as Record<string, unknown>),
         PreToolUse: mergePreToolUse((existingLocal.hooks as Record<string, unknown> | undefined)?.['PreToolUse'], newSettings.hooks.PreToolUse),
+        PostToolUse: mergePreToolUse((existingLocal.hooks as Record<string, unknown> | undefined)?.['PostToolUse'], newSettings.hooks.PostToolUse),
+        PostToolUseFailure: mergePreToolUse((existingLocal.hooks as Record<string, unknown> | undefined)?.['PostToolUseFailure'], newSettings.hooks.PostToolUseFailure),
       },
     }
     await writeFileAtomic(localSettingsPath, JSON.stringify(mergedLocal, null, 2) + '\n', { followSymlink: true })
@@ -590,6 +626,8 @@ process.stdin.on('end', async () => {
     hooks: {
       ...(existingGlobal.hooks as Record<string, unknown>),
       PreToolUse: mergePreToolUse((existingGlobal.hooks as Record<string, unknown> | undefined)?.['PreToolUse'], newSettings.hooks.PreToolUse),
+      PostToolUse: mergePreToolUse((existingGlobal.hooks as Record<string, unknown> | undefined)?.['PostToolUse'], newSettings.hooks.PostToolUse),
+      PostToolUseFailure: mergePreToolUse((existingGlobal.hooks as Record<string, unknown> | undefined)?.['PostToolUseFailure'], newSettings.hooks.PostToolUseFailure),
     },
   }
 
@@ -610,7 +648,8 @@ async function noteDenyRules(settingsPath: string, workspaceRoot: string, denyRu
 }
 
 /**
- * The PreToolUse list to write: the user's own entries, then the Intutic
+ * A hook event's list to write (PreToolUse, and the post-tool events since
+ * gate body v23): the user's own entries, then the Intutic
  * ones. An entry is Intutic's when every hook in it runs a gate this module
  * wrote (`claude-code-check.js`, or `pre-tool-check.js` from earlier
  * versions), so re-running replaces those instead of stacking copies, and a

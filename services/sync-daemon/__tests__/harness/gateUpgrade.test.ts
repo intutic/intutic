@@ -169,7 +169,10 @@ describe(`a v${OLD} → current gate upgrade`, () => {
     expect(settings.env).toEqual(mine.env)
     expect(settings.permissions.allow).toEqual(mine.permissions.allow)
     expect(settings.permissions.deny).toEqual(expect.arrayContaining(mine.permissions.deny))
-    expect(settings.hooks.PostToolUse).toEqual(mine.hooks.PostToolUse)
+    // The person's own post-tool hooks first, then the one Intutic entry
+    // (gate body v23 records test outcomes there).
+    expect(settings.hooks.PostToolUse.slice(0, mine.hooks.PostToolUse.length)).toEqual(mine.hooks.PostToolUse)
+    expect(settings.hooks.PostToolUse.slice(mine.hooks.PostToolUse.length).map((e: { matcher: string }) => e.matcher)).toEqual(['Bash'])
     expect(settings.hooks.PreToolUse).toContainEqual(mine.hooks.PreToolUse[0])
     const ours = settings.hooks.PreToolUse.filter((e) => JSON.stringify(e).includes('claude-code-check.js'))
     expect(ours.length).toBeGreaterThan(0)

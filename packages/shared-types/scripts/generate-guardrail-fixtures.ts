@@ -255,6 +255,14 @@ const IR_FIXTURES: IrFixture[] = [
     source: `${WIKI}205`,
     quote: 'SREs and deployers cut at most one release per session, after the test suite.',
   },
+  {
+    name: '06-qualified-ordering',
+    title: 'Passing tests before a deploy',
+    irs: [{ kind: 'requires_before', first: 'action:run_tests[ok]', then: 'action:deploy' }],
+    shadow: false,
+    source: `${WIKI}206`,
+    quote: 'Nothing deploys unless the latest test run passed.',
+  },
 ]
 
 function expectedFromIrs(irs: readonly FrontMatterIr[], shadow: boolean): ExpectedFrontMatter {

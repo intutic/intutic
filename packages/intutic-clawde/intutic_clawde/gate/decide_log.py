@@ -20,6 +20,7 @@ Both ports run packages/shared-types/fixtures/decide-log-vectors.json.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import tempfile
@@ -175,6 +176,10 @@ def _when_value(r: Any) -> Optional[str]:
     return "T" if r.code == "DECIDE_REFUSED" else "U"
 
 
+def _finite_number(v: Any) -> bool:
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+
+
 def build_decide_decision_record(evaluation: Any, rules: Sequence[Dict[str, Any]], ctx: Dict[str, Any], sha256_hex: Callable[[str], str]) -> Dict[str, Any]:
     """The ``decide.decision`` record of one evaluated call; ``ctx`` carries
     atMs, harness, workspaceId, sessionId, tool, toolInput, cwd,
@@ -225,6 +230,10 @@ def build_decide_decision_record(evaluation: Any, rules: Sequence[Dict[str, Any]
         "workspaceId": ctx["workspaceId"],
         "sessionId": ctx["sessionId"],
         "tool": ctx["tool"],
+        # The call's reversibility class and the subject's
+        # revert rate, null when the caller gives none.
+        "lane": ctx.get("lane"),
+        "revertRate": ctx.get("revertRate") if _finite_number(ctx.get("revertRate")) else None,
         "stateHash": logged[0]["stateHash"] if logged else None,
         "argsExcerpt": decide_args_excerpt(ctx["toolInput"], ctx["redact"]),
         "engine": ctx["engine"],

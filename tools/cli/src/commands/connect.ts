@@ -57,6 +57,7 @@ import { SyncWsClient,
   refreshPolicySnapshot,
   refreshGateCaches,
   localHoldTokensFor,
+  localGateSopsFor,
   runComplianceProbes,
   drainHookEvents,
   drainReviewRequests,
@@ -580,7 +581,9 @@ export async function runConnect(opts: {
       lastCachedConfig?.settings as unknown as Record<string, unknown> | undefined,
       safeConfig.harnesses as HarnessType[],
     )
-    const landed = await refreshGateCaches({ controlPlaneUrl, apiKey: safeCreds.apiKey, workspaceId: safeCreds.workspaceId, localHoldTokens })
+    // The local SOPs' rule records and lane holds ride the snapshot too.
+    const localSops = await localGateSopsFor(safeConfig.workspaceRoot, safeConfig.harnesses as HarnessType[])
+    const landed = await refreshGateCaches({ controlPlaneUrl, apiKey: safeCreds.apiKey, workspaceId: safeCreds.workspaceId, localHoldTokens, localSops, syncIntervalMs: pollInterval })
     if (!landed.snapshot) log.dim('Policy snapshot refresh failed (will retry next sync); built-in protections are unaffected.')
   }
 

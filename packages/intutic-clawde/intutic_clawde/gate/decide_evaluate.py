@@ -208,6 +208,17 @@ def decide_stored_q95_ms(file: Any) -> Optional[float]:
     return v
 
 
+def decide_verdict_in_order(before: str, decide_outcome: Optional[Dict[str, Any]]) -> str:
+    """A call's verdict in the order of evidence: what the
+    tiers before decide said (allow, refuse, or hold: a lane or revert hold
+    not released) stands unless it is allow; then the decide rules' outcome,
+    or allow when none was asked. A decide allow never releases a hold, and a
+    decide refusal or escalation still applies inside an open lane."""
+    if before != "allow":
+        return before
+    return "allow" if decide_outcome is None else decide_outcome["outcome"]
+
+
 def evaluate_decide_call(
     *,
     deterministic: str,
@@ -295,8 +306,10 @@ def _evaluate_decide_rules(
 ) -> DecideEvaluation:
     """evaluate_decide_call on every rule it is given, with no budget estimate."""
     if deterministic != "allow":
-        refused = {"outcome": "refuse", "code": None, "ruleRef": None, "via": None,
-                   "reason": "a deterministic rule refused the call"}
+        # A hold before decide: a decide answer never releases it.
+        reason = ("the call is held for a person; a decide answer never releases a hold" if deterministic == "hold"
+                  else "a deterministic rule refused the call")
+        refused = {"outcome": "refuse", "code": None, "ruleRef": None, "via": None, "reason": reason}
         return DecideEvaluation(refused, [], [], None, None)
     matched = [r for r in rules if r["ir"].get("on") == "tool_call" and tool in (r["ir"].get("tools") or [])]
     if not matched:

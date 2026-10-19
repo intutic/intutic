@@ -84,6 +84,8 @@ async fn cycle_coverage_floor_does_not_discriminate_on_coding_agent_traffic() {
                     name: c["name"].as_str()?.to_string(),
                     input: c["input"].clone(),
                     source: InvocationSource::Call,
+                    call_id: None,
+                    is_error: None,
                 })
             })
             .collect();

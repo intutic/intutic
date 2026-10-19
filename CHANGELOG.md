@@ -5,6 +5,68 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - Unreleased
+
+### Added
+
+- **Loops, graphs and gates.** New SOP front-matter keys, every one opt-in:
+  nothing changes until a SOP or the workspace sets one.
+  - **`requires_before: action:run_tests[ok] -> X`:** X needs a passing test
+    run in the session, not just any run. The gateway pairs tool results with
+    their calls and withholds X before it runs; the hook gates read the
+    harness's post-tool hook where its payload carries an exit code or error
+    flag (Claude Code, Gemini CLI), and refuse with a "not observable" reason
+    elsewhere. A later file change, by a write tool or a shell command such as
+    `sed -i` or `git checkout`, makes a pass stale.
+  - **`scope_paths_mode: enforce`** refuses a file change outside
+    `scope_paths` at the gateway (in band) and at every hook gate;
+    **`plan_steps_mode: enforce`** re-asks on any off-plan step at the gateway.
+  - **`plan_approval: required | strict`** refuses calls at the hook gates and
+    SDKs until the session's plan is approved; `strict` also refuses tools the
+    plan does not name.
+  - **Reversibility lanes:** `closed_lanes: irreversible | reversible_wide`
+    holds every action of the lane for a person, at the gateway and every
+    gate; top-level `open_actions:` reopens one action. The workspace setting
+    `closedLanes` closes a lane for everyone. New action tokens:
+    `action:migrate`, `action:prod_write`, `action:destroy` (including a
+    forced recursive `rm` outside the working tree), `action:force_push` and
+    `action:payment`.
+  - **Revert lane:** `revertLane` holds a wide but reversible action whose
+    recent revert or rejection rate reached a threshold.
+  - **`on_reask_exhausted: pause`** pauses a loop run for review when
+    correction is exhausted, instead of refusing the request.
+  - **Graph keys:** `context_isolation:` flags sibling workers given the same
+    brief; `node_kind:` / `node_kind_allow:` limit what a splitter, worker,
+    code or gate node may do.
+- **Loop verify** checks a run's changes against `scope_paths` and its tool
+  sequence against `plan_steps` before any judge is asked, and
+  `loop_review.requireVerifiedCompletion` makes completing a run need a
+  passing, current verify (`E_LOOP_NOT_VERIFIED`, `E_LOOP_UNVERIFIABLE`,
+  `E_LOOP_VERIFY_STALE`).
+- **Structured refusals:** a refusal carries `scope` (paths, tools, step,
+  detector, rule) and `evidence` so an agent can retry outside it; exit-code
+  hook harnesses get a `[Intutic] Retry scope:` line. OPAQUE workspaces get
+  only the code.
+- **New refusal codes:** `PREREQUISITE_UNMET`, `OUT_OF_SCOPE` (gateway, gates
+  and hooks), `OFF_PLAN`, `PLAN_NOT_APPROVED` (gates and hooks),
+  `NODE_KIND_DENIED` (gateway, 403) and `LOOP_RUN_PENDING_REVIEW` for a
+  paused run.
+
+### Changed
+
+- **Hook gate body v23.** A policy snapshot that carries any of the new rule
+  records is written in format 3; one without them is byte-identical to
+  3.0's.
+- **Older gates fail closed.** A gate older than v23 (and the 3.0 SDKs) cannot
+  evaluate the new rules, so it refuses what each covers through a
+  `<kind>-fallback:` line in the snapshot: the gated call for a qualified
+  `requires_before`, every file change for `scope_paths_mode: enforce`, every
+  call for `plan_approval:`. Lane holds use phrase rules every gate since v12
+  reads, so older gates hold them too (a force push by the partial phrase
+  `git push --force`); one approval releases a held call at every gate. A
+  gateway older than 3.1.0 ignores the new keys; the control plane warns when
+  a SOP uses a key the workspace's gateway is too old to read.
+
 ## [Unreleased]
 
 ### Added

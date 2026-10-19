@@ -97,6 +97,8 @@ Never commit secrets, API keys, or credentials to version control...
 
 There is one PreToolUse entry each for `Bash`, `Edit`, `Write`, `MultiEdit` and `mcp__.*`. Your own PreToolUse hooks and every other setting are kept; only the Intutic entries are replaced each time they are written. `permissions.deny` gets the entries derived from your SOPs' blocked tools and patterns, added to your own: in the project file the entries an earlier install wrote give way to the current set, and in the user file they accumulate until `intutic disconnect` removes them. A settings file that is not plain JSON (for example one with comments) is left untouched and reported.
 
+It also registers the same script with `--event post` under `PostToolUse` and `PostToolUseFailure`, matcher `Bash`. That post-tool call records whether a test run passed, for a [`requires_before: action:run_tests[ok] -> …`](/reference/harness-security-matrix#post-tool-outcome) rule, and always allows: the tool has already run. Claude Code fires `PostToolUseFailure` when a command exits non-zero, with an `error` starting `Exit code N`; a passing run is recognised by its runner's summary. `PostToolUseFailure` needs a Claude Code version that has the event (2.1 or later).
+
 The gate fails closed: if it cannot read the tool call or crashes, the call is refused. Every decision is appended to `.intutic/events/hook-events.jsonl`<!-- ENTERPRISE_ONLY_START --> and, under `intutic connect`, forwarded to the control plane<!-- ENTERPRISE_ONLY_END -->.
 
 The rules file is Intutic's own and is replaced each time it is written; keep your own instructions in `CLAUDE.md` or in other files in `.claude/rules/`. See [Where rule sets go](/guide/how-it-works#where-rule-sets-go).

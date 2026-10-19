@@ -116,6 +116,7 @@ the shared anomaly taxonomy:
 | DLP escalation | 3+ distinct sensitive patterns in one request | `DATA_EXFILTRATION` |
 | Diversity collapse | last 10 calls used one tool | `TOKEN_WASTE` |
 | Context growth | large context after several hops | `TOKEN_WASTE` |
+| Sibling context overlap | a sibling node was handed nearly the same context (below) | `TOKEN_WASTE` |
 | Budget exhaustion | no headroom left | `BUDGET_BREACH` |
 | Spend trajectory | today's local spend projected past the daily cap | `BUDGET_BREACH` |
 | Fan-out overspend | graph cost past 1.5× the per-node budget | `SPAWN_BUDGET_BREACH` |
@@ -207,10 +208,12 @@ tool content — reask: the request is refused with 409 `policy_reask`, and the
 third trip of the same detector becomes a 403 `policy_denied`. The heuristic
 ones — landmark cycle, transition plausibility, contract drift, tool
 poisoning, diversity collapse, context growth, spend trajectory, orphaned
-execution, plan adherence, scope path, a single injection technique — advise:
+execution, plan adherence, scope path, a single injection technique, sibling
+context overlap — advise:
 they are logged, broadcast to siblings and traced, and the request proceeds —
 unless two distinct detectors corroborate, which escalates the finding one
-level.
+level. Sibling context overlap never counts toward corroboration: it is a
+cost signal, and it must not turn another detector's advice into a refusal.
 
 ### 2. Tool definitions, pinned on first use
 
@@ -368,6 +371,131 @@ out regardless.
 Findings also arrive in the rule context as `dlp_findings`, so they can be
 combined with the sequence: *this* tool call is only a problem because of what
 an earlier node already exposed.
+
+### 6. Workers handed the same brief
+
+A splitter is meant to hand each worker its slice of the task. When it hands
+every worker the whole thing instead, you pay for the same context once per
+worker, and the workers tend to repeat each other's work. The proxy compares
+what sibling nodes were handed and says so.
+
+**What is compared.** The user-role text of the request: what the node was
+asked to do. The system prompt and tool schemas are left out, because every
+node of one harness shares them. Assistant turns are left out, and so are tool
+results, because siblings legitimately read the same files.
+
+**How.** The text is lowercased with whitespace collapsed, and only the first
+512 KiB is read. It is cut into eight-word shingles and reduced to a 64-value
+MinHash signature, from which the overlap between two nodes is estimated. A
+request under 8 KiB gets no signature: a short brief costs little, and short
+texts match each other by accident. This is linear in the length of the text,
+with no model call.
+
+**Who is compared.** Siblings: nodes in the same graph with the same parent
+and a different `node_id`, below the root. A retry of the same node is never
+compared with itself. A node's signature is stored once, from its first
+request over the floor — the handed-in context is in that request. At most 32
+nodes per graph are stored (later ones are still compared), and a graph's
+signatures expire an hour after the last one was written. No text is stored,
+only the signature.
+
+**What happens.** At an estimated overlap of 85% or more, the `context_overlap`
+detector reports `TOKEN_WASTE`, naming the sibling. By default it advises: the
+request goes through and the node is told. An SOP can make it a re-ask:
+
+```markdown
+---
+roles: worker
+context_isolation: enforce
+---
+- Each worker gets only its own slice of the task.
+```
+
+Under `enforce` the request is refused with 409 `policy_reask`, and the third
+trip is handled like any other re-ask. An unrecognised value
+(`context_isolation: enforcing`) enforces and is reported as a rule error: a
+typo never switches a guard off. When several SOPs set it, `enforce` wins.
+
+| You see it when | Is it right? |
+|---|---|
+| A splitter pastes the full task into every worker | Yes. Hand each worker its slice. |
+| Workers are re-spawned with the same task | Yes. They do overlap. |
+| A long shared specification is handed to every worker on purpose | It is accurate, but you meant it. Leave the mode at `advise`, or hand each worker only the sections it needs. |
+| A short brief | Never: under 8 KiB nothing is compared. |
+
+This needs graph identity with a stable parent: the parent id must be the
+same for every child of one parent. The `/_i/` path prefix that
+`intutic exec` writes, and `X-Intutic-Parent-Session`, carry the parent's
+node id. A `traceparent` carries the parent *span*, which differs per child if
+the parent opens a span for each one, and then no two children count as
+siblings. It applies at the gateway only; hook gates have no graph identity.
+
+### 7. Node kinds
+
+A node can say what it is for, and each kind comes with limits:
+
+| Kind | Model calls | Write and shell tools | Spawn children |
+|---|---|---|---|
+| `splitter` | allowed | allowed | allowed |
+| `worker` | allowed | allowed | **refused** |
+| `code` | **refused** | — | — |
+| `gate` | allowed | **refused** | **refused** |
+
+- A `code` node is deterministic code with no business calling a model. Every
+  gateway request it makes is refused with 403 `NODE_KIND_DENIED`.
+- A `gate` node checks work. A tool call that changes files (write, edit,
+  delete, move) or runs a shell command is withheld from the response with
+  `TOOL_DENIED`, rule `node_kind.gate`. Reads are not withheld, including a
+  `str_replace_editor` `view`.
+- Spawning is refused two ways. In the response, a call to `Task`, `agent`,
+  `spawn_agent`, `subagent` or `dispatch_agent` (the exact name, any case) is
+  withheld with `TOOL_DENIED`, rule `node_kind.<kind>`. On the request side,
+  each node's kind is recorded for an hour, and a request whose parent is
+  recorded as a `worker` or `gate` is refused with 403 `NODE_KIND_DENIED`,
+  naming the parent: *w1 is a worker node and may not spawn*.
+
+**Declaring a kind.**
+
+| Source | Carrier |
+|---|---|
+| SOP | `node_kind:` (scoped by `roles:` like any other key) |
+| Header | `X-Intutic-Node-Kind` |
+| Baggage | `intutic.node.kind`, beside `intutic.graph.depth` |
+
+```markdown
+---
+roles: reviewer
+node_kind: gate
+---
+- Reviewers read and report. They do not change anything.
+```
+
+The limits that apply are the union of every kind declared for the node: all
+the SOP kinds for its role, plus the header's. A header is client-supplied, so
+it can only add limits, never remove one an SOP declared — a node that claims
+`splitter` is still a `worker` if an SOP says so. Two SOPs declaring different
+kinds for one role are logged once, and the union applies.
+
+`node_kind_allow:` takes limits away again. It lists capabilities — `model`,
+`write`, `shell`, `spawn` — and is read only at the top level of the front
+matter, because it weakens a rule:
+
+```markdown
+---
+roles: worker
+node_kind: worker
+node_kind_allow: spawn
+---
+```
+
+A worker allowed to spawn is not recorded as one, so its children are not
+refused. An unknown kind or capability is dropped and reported as a rule error.
+
+**Default:** no kind, no limits. Nothing changes until a kind is declared.
+
+Child refusal reads the parent's recorded kind by the parent id the child
+sends, so it needs the same stable parent id as sibling comparison (above).
+Node kinds apply at the gateway only.
 
 ## Telling the rest of the graph
 
@@ -675,6 +803,19 @@ node *reported*, so a false role claim dodges a role-scoped denylist. Put
 security-critical `deny_tools` in unscoped SOPs, which bind every node
 regardless of what it claims to be.
 :::
+
+### Reversibility lanes
+
+<!-- 3.1: the review-hold text for closed_lanes: / open_actions: and the
+reversibility class of each action token goes here (sent by WS1, added by the
+integrator). -->
+
+### Learning from reverts
+
+<!-- 3.1: the learning-edge text for revert and rejection rates and the
+revertLane setting goes here (sent by WS5, added by the integrator). It needs a
+connected workspace: add the Cloud badge to this heading and update the intro's
+count of Cloud-badged sections with it. -->
 
 ## Seeing the trajectory
 

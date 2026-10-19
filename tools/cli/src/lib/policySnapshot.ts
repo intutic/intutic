@@ -41,6 +41,8 @@ import {
   decodeDecideRecord,
   decodeSnapshotFormatRecord,
   validateDecideRule,
+  RULE_RECORD_TAG,
+  decodeGateRuleRecord,
 } from '@intutic/shared-types'
 
 /**
@@ -82,6 +84,17 @@ export interface PolicySnapshotHealth {
    * evaluate decide rules ({@link CAN_EVALUATE_DECIDE}). 0 on `invalid`.
    */
   decideRules: number
+  /**
+   * Rule records (`@rule`) that decode, as the gates read them. The
+   * fallback line each enforcing one names is left out of {@link ruleCount}:
+   * every v23 hook gate evaluates the record instead. 0 on `invalid`.
+   */
+  gateRules: number
+  /**
+   * Whether a `plan_approval:` record is in force: every call waits for an
+   * approved plan, which only a control plane can hold.
+   */
+  planApproval: boolean
   /** Where the snapshot was looked for. */
   path: string
 }
@@ -136,6 +149,8 @@ export function parsePolicySnapshot(
     droppedRules: 0,
     formatVersion: 1,
     decideRules: 0,
+    gateRules: 0,
+    planApproval: false,
     path: opts.path ?? resolveSnapshotRulesPath(),
   }
 
@@ -166,6 +181,15 @@ export function parsePolicySnapshot(
       out.formatVersion = decodeSnapshotFormatRecord(line) ?? out.formatVersion
       continue
     }
+    if (line.startsWith(`${RULE_RECORD_TAG}\t`)) {
+      const record = decodeGateRuleRecord(line)
+      if (record) {
+        out.gateRules += 1
+        if (record.fallbackId) fallbacks.add(record.fallbackId)
+        if (record.kind === 'plan_approval' && record.rollout === 'enforce') out.planApproval = true
+      }
+      continue
+    }
     if (line.startsWith(`${DECIDE_RECORD_TAG}\t`)) {
       const record = decodeDecideRecord(line, checkDecideRule)
       if (record) {
@@ -193,7 +217,11 @@ export function parsePolicySnapshot(
     ruleIds.push(f[0]!)
     if (f[0]!.startsWith('sso_group.') && f[1] === 'block') ssoGroupRefusals += 1
   }
-  out.ruleCount = ruleIds.filter((id) => !CAN_EVALUATE_DECIDE || !id.startsWith(DECIDE_FALLBACK_PREFIX) || !fallbacks.has(id)).length
+  out.ruleCount = ruleIds.filter((id) => {
+    if (id.endsWith('.legacy')) return false
+    if (id.startsWith(DECIDE_FALLBACK_PREFIX)) return !CAN_EVALUATE_DECIDE || !fallbacks.has(id)
+    return !fallbacks.has(id)
+  }).length
 
   // Integrity, cheapest failure first. A digest nobody recomputes is a comment;
   // a workspace id nobody compares means workspace A's rules get enforced on B's
@@ -222,6 +250,8 @@ export function parsePolicySnapshot(
   if (out.state === 'invalid') {
     out.ruleCount = ssoGroupRefusals
     out.decideRules = 0
+    out.gateRules = 0
+    out.planApproval = false
   }
 
   if (out.state === 'ok' && out.generatedAt) {
@@ -263,6 +293,8 @@ export function readPolicySnapshot(
       droppedRules: 0,
       formatVersion: 1,
       decideRules: 0,
+      gateRules: 0,
+      planApproval: false,
       path,
     }
   }

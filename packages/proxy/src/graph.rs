@@ -51,6 +51,8 @@ const BAGGAGE_AGENT_NAME: &str = "gen_ai.agent.name";
 const BAGGAGE_CONVERSATION_ID: &str = "gen_ai.conversation.id";
 /// Depth has no standard carrier, so it stays in our own namespace.
 const BAGGAGE_DEPTH: &str = "intutic.graph.depth";
+/// A node's kind. No standard names this either.
+const BAGGAGE_NODE_KIND: &str = "intutic.node.kind";
 
 /// Guard against a hostile or accidentally huge `baggage` header. The W3C spec
 /// suggests implementations may cap total baggage around 8KB; we only ever read
@@ -300,6 +302,19 @@ pub fn identity_from_request(
     }
 }
 
+/// The node kind a client declared for itself, raw: `baggage:
+/// intutic.node.kind` or, failing that, `X-Intutic-Node-Kind`.
+/// The caller parses it with `node_kind::NodeKind::parse`.
+///
+/// Like every other header here it is unverifiable, which is why a declared
+/// kind only ever *adds* limits (`graph_detectors::effective_node_kind`). An
+/// unknown value parses to nothing and is ignored rather than guessed at:
+/// there is no stricter kind to fall back to that the client did not ask for.
+pub fn declared_node_kind(headers: &HeaderMap) -> Option<String> {
+    let baggage = header_str(headers, "baggage");
+    resolve(headers, baggage, BAGGAGE_NODE_KIND, "x-intutic-node-kind")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,5 +551,32 @@ mod tests {
         assert_eq!(node.graph_id, "sess-abc");
         assert_eq!(node.node_id, "sess-abc");
         assert_eq!(node.depth, 0);
+    }
+
+    // ── Node kind ───────────────────────────────────────
+
+    #[test]
+    fn node_kind_is_read_from_baggage_then_header() {
+        assert_eq!(declared_node_kind(&HeaderMap::new()), None);
+        let h = headers(&[("x-intutic-node-kind", "Worker")]);
+        assert_eq!(declared_node_kind(&h).as_deref(), Some("Worker"));
+        let h = headers(&[("baggage", "gen_ai.agent.id=a,intutic.node.kind=gate")]);
+        assert_eq!(declared_node_kind(&h).as_deref(), Some("gate"));
+        // Baggage wins, as it does for every other field.
+        let h = headers(&[
+            ("baggage", "intutic.node.kind=code"),
+            ("x-intutic-node-kind", "splitter"),
+        ]);
+        assert_eq!(declared_node_kind(&h).as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn node_kind_header_is_bounded_like_every_other_value() {
+        let h = headers(&[("baggage", "intutic.node.kind=%20worker%20")]);
+        assert_eq!(declared_node_kind(&h).as_deref(), Some(" worker "));
+        let h = headers(&[("x-intutic-node-kind", "k".repeat(500).as_str())]);
+        assert_eq!(declared_node_kind(&h).unwrap().len(), MAX_VALUE_LEN);
+        let h = headers(&[("x-intutic-node-kind", "")]);
+        assert_eq!(declared_node_kind(&h), None);
     }
 }

@@ -187,8 +187,13 @@ export function createDecideCanaryFileStore(file: string, fs: DecideCanaryFs): D
 export type DecideRuleEntry = Pick<DecideRecord, 'ref' | 'ruleHash' | 'rollout' | 'stampedBy' | 'ir' | 'sopTitle' | 'ruleText' | 'pins'>
 
 export interface DecideEvaluateInput {
-  /** The deterministic tiers' verdict. Anything but `allow` returns at once, asking nothing. */
-  deterministic: 'allow' | 'refuse'
+  /**
+   * The verdict of every tier before decide (the order of
+   * evidence): deterministic refusals, then consequence (a lane or revert
+   * hold not released by an approved bypass). Anything but `allow` returns
+   * at once, asking nothing: a decide `allow` never releases a hold.
+   */
+  deterministic: 'allow' | 'refuse' | 'hold'
   tool: string
   toolInput: unknown
   cwd: string
@@ -259,6 +264,19 @@ function errorCode(err: unknown): DecideEngineErrorCode {
   return err instanceof DecideEngineError ? err.code : 'bad_response'
 }
 
+/**
+ * A call's verdict in the order of evidence: deterministic
+ * refusals, then consequence (holds), then trajectory, then model judgement
+ * last. `before` is the verdict of everything before decide; `decide` is
+ * what the decide rules answered, or null when none was asked. A hold or a
+ * refusal before decide stands whatever decide says; inside an open lane a
+ * decide refusal or escalation still applies.
+ */
+export function decideVerdictInOrder(before: 'allow' | 'refuse' | 'hold', decide: Pick<DecideCallOutcome, 'outcome'> | null): 'allow' | 'refuse' | 'hold' | 'escalate' {
+  if (before !== 'allow') return before
+  return decide === null ? 'allow' : decide.outcome
+}
+
 // ---------------------------------------------------------------------------
 // The latency budget
 // ---------------------------------------------------------------------------
@@ -327,8 +345,9 @@ export async function evaluateDecideCall(input: DecideEvaluateInput, deps: Decid
 async function evaluateDecideRules(input: DecideEvaluateInput, deps: DecideEvaluateDeps): Promise<DecideEvaluation> {
   const now = deps.now ?? Date.now
   if (input.deterministic !== 'allow') {
+    const reason = input.deterministic === 'hold' ? 'the call is held for a person; a decide answer never releases a hold' : 'a deterministic rule refused the call'
     return {
-      call: { outcome: 'refuse', code: null, ruleRef: null, via: null, reason: 'a deterministic rule refused the call' },
+      call: { outcome: 'refuse', code: null, ruleRef: null, via: null, reason },
       rules: [],
       skipped: [],
       engine: null,
@@ -571,6 +590,7 @@ export const DECIDE_EVALUATE_JS_SOURCE = decideModuleSource([
   decideRuleCalls,
   decideRuleEstimateMs,
   decideStoredQ95Ms,
+  decideVerdictInOrder,
   evaluateDecideCall,
   evaluateDecideRules,
   unknownQuestions,
@@ -586,7 +606,8 @@ export const DECIDE_EVALUATE_JS_SOURCE = decideModuleSource([
  * snapshot decoders (`format`, `record`), the engine (`resolveConfig`,
  * `createEngine`, `EngineError`), the canary cache (`canaryStore(file, fs)`),
  * the tier (`evaluate`, `decision`, `shadowFindings`, `unavailable`,
- * and `storedQ95`, the p95 an engine.json holds), and the decide log
+ * `storedQ95`, the p95 an engine.json holds, and `verdictInOrder`, the order
+ * of evidence of the loops, graphs and gates release), and the decide log
  * (`writeLog`, `logEngine`, `logDeps`).
  * Each module has a scope of its own, since their private helpers share
  * names, and receives what it imports as parameters.
@@ -611,7 +632,8 @@ ${DECIDE_ENGINE_JS_SOURCE}
 const evaluate = (function (DECIDE_DEFAULT_BAND, decideAtoms, decideCallOutcome, decideOptions, decideRuleHash, decideRuleOutcome,
     selectDecideRules, validateDecideRule, buildDecideToolCallState, DecideEngineError, decideEngineErrorOutcome, runDecideCanary) {
 ${DECIDE_EVALUATE_JS_SOURCE}
-  return { createDecideCanaryFileStore, evaluateDecideCall, decideDecision, decideShadowFindings, decideUnavailableDecision, decideStoredQ95Ms };
+  return { createDecideCanaryFileStore, evaluateDecideCall, decideDecision, decideShadowFindings, decideUnavailableDecision, decideStoredQ95Ms,
+    decideVerdictInOrder };
 })(decide.DECIDE_DEFAULT_BAND, decide.decideAtoms, decide.decideCallOutcome, decide.decideOptions, decide.decideRuleHash,
   decide.decideRuleOutcome, decide.selectDecideRules, decide.validateDecideRule, engine.buildDecideToolCallState,
   engine.DecideEngineError, engine.decideEngineErrorOutcome, engine.runDecideCanary);
@@ -637,6 +659,7 @@ return {
   shadowFindings: evaluate.decideShadowFindings,
   unavailable: evaluate.decideUnavailableDecision,
   storedQ95: evaluate.decideStoredQ95Ms,
+  verdictInOrder: evaluate.decideVerdictInOrder,
   writeLog: log.writeDecideCallLog,
   logEngine: log.decideLogEngine,
   logDeps: log.decideLogDeps,
