@@ -9,7 +9,15 @@ import { mkdtempSync } from 'node:fs'
 import { RULE_LOAD_FAILURE_REASONS } from '@intutic/shared-types'
 import { WasmRunner } from '../wasm/runner.js'
 
-const runner = new WasmRunner(mkdtempSync(node_path.join(node_os.tmpdir(), 'intutic-load-failure-')))
+// The production compile deadline is 3 s, and a compile that misses it is a
+// `load_error`. On a loaded CI runner even these few bytes can wait that long
+// for the compile worker, so the reason under test became `load_error`; the
+// deadline is not what this file checks (wasmCompileDeadline.test.ts does).
+const SLOW_RUNNER_COMPILE_MS = 60_000
+
+const runner = new WasmRunner(mkdtempSync(node_path.join(node_os.tmpdir(), 'intutic-load-failure-')), undefined, {
+  compileTimeoutMs: SLOW_RUNNER_COMPILE_MS,
+})
 
 afterAll(async () => {
   await runner.shutdown()
