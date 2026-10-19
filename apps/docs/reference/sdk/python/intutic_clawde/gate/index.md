@@ -79,6 +79,28 @@ which is the safe direction; a policy we cannot read at all raises, and
 the caller turns that into a block.
 
 
+##### Gate.record_outcome()
+
+```python
+def record_outcome(
+    tool_name: str,
+    tool_input: dict,
+    exit_code: Optional[int] = None,
+    is_error: Optional[bool] = None,
+    output: Optional[str] = None,
+) -> None
+```
+
+Records how a call that ran went, for Tier R. A test run
+(action:run_tests) records its outcome (test_outcome.py: the exit code,
+else one read from `output`, the error flag and the runner summaries);
+any other call marks earlier outcomes as no longer adjacent, and a call
+that changed files makes an earlier pass stale. Kept in memory per
+client session id; with no session id nothing is kept, and a qualified
+rule stays unmet. @guard and guard_tools call this after every call
+they ran.
+
+
 ##### Gate.snapshot()
 
 ```python
@@ -286,6 +308,18 @@ control plane did not accept it, so the refusal can say there is
 nothing to approve yet.
 
 
+##### GateClient.session_plan()
+
+```python
+def session_plan(session_id: str)
+```
+
+The session's plan (`GET /api/v1/plans/session/:sessionId`) as Tier
+R reads it: (status, body), status None when the control plane could
+not be reached. A local-only client has no plans to read: 404. Never
+raises.
+
+
 ### GateConfig
 
 ```python
@@ -409,7 +443,13 @@ can approve it and when a retry passes. See hold.py.
 ### IntuticGateRefusal
 
 ```python
-class IntuticGateRefusal(reason: str, code: str, incident_id: Optional[str] = None)
+class IntuticGateRefusal(
+    reason: str,
+    code: str,
+    incident_id: Optional[str] = None,
+    scope: Optional[dict] = None,
+    evidence: Optional[list] = None,
+)
 ```
 
 Bases: `ClawdeError`
@@ -442,6 +482,7 @@ class Snapshot(
     opaque: bool = False,
     format_version: int = 1,
     decide_rules: list = list(),
+    rule_records: list = list(),
 )
 ```
 
@@ -459,6 +500,7 @@ class Snapshot(
 | `mcp_allowlist` | `Optional[dict]` | `None` |  |
 | `mcp_registry` | `Optional[dict]` | `None` |  |
 | `opaque` | `bool` | `False` |  |
+| `rule_records` | `list` | `field(default_factory=list)` |  |
 | `rules` | `list[Rule]` | `field(default_factory=list)` |  |
 | `sso_groups` | `Optional[sso.SsoGroupRecord]` | `None` |  |
 | `state` | `str` | `'absent'` |  |
@@ -725,6 +767,7 @@ def load_snapshot(
     workspace_id: str = '',
     path: str | None = None,
     evaluates_decide: bool = False,
+    evaluates_rules: bool = False,
 ) -> Snapshot
 ```
 
@@ -735,6 +778,8 @@ A missing file gives an empty snapshot whose `state` is "absent". A
 snapshot whose digest does not match its rules, or that was compiled for a
 workspace other than a non-empty `workspace_id`, is "invalid": its rules
 and MCP records are dropped.
+
+`evaluates_rules`: the same for the @rule records (Tier R).
 
 `evaluates_decide`: the caller evaluates the decide rules the records
 carry. Only then is a decoded record's fallback line skipped; otherwise the

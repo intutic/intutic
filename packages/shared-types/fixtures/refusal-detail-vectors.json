@@ -1,0 +1,570 @@
+{
+ "_doc": "A refusal's scope and evidence, bounded and redacted the same way by shared-types refusalDetail.ts (and its @intutic/gate copy and the JavaScript hook gates), intutic_clawde/gate/refusal_detail.py, and the proxy's refusal.rs. scope: boundRefusalScope(input) (null when nothing is left). evidence: boundRefusalEvidence(input). forMode: refusalDetailForMode(mode, scope, evidence), where OPAQUE carries neither and SILENT_LOG behaves as TRANSPARENT. retryLine: retryScopeLine(mode, scope), the stderr line an exit-code harness prints. Bounds: 8 items per list, 256 code points per string after C0 control characters (U+0000 to U+001F) are removed; a string empty after that is dropped, an empty list left out.",
+ "scope": [
+  {
+   "name": "paths",
+   "input": {
+    "paths": [
+     "infra/main.tf"
+    ]
+   },
+   "output": {
+    "paths": [
+     "infra/main.tf"
+    ]
+   }
+  },
+  {
+   "name": "every field, in a fixed order",
+   "input": {
+    "rule": "scope_paths.Infra",
+    "detector": "scope_path",
+    "step": "action:run_tests",
+    "tools": [
+     "Write"
+    ],
+    "paths": [
+     "a"
+    ]
+   },
+   "output": {
+    "paths": [
+     "a"
+    ],
+    "tools": [
+     "Write"
+    ],
+    "step": "action:run_tests",
+    "detector": "scope_path",
+    "rule": "scope_paths.Infra"
+   }
+  },
+  {
+   "name": "eight items per list",
+   "input": {
+    "tools": [
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7",
+     "t8",
+     "t9",
+     "t10"
+    ]
+   },
+   "output": {
+    "tools": [
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7",
+     "t8"
+    ]
+   }
+  },
+  {
+   "name": "256 characters per string",
+   "input": {
+    "paths": [
+     "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+    ],
+    "step": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "output": {
+    "paths": [
+     "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+    ],
+    "step": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   }
+  },
+  {
+   "name": "code points, not code units",
+   "input": {
+    "step": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+   },
+   "output": {
+    "step": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "name": "control characters removed before the cut",
+   "input": {
+    "paths": [
+     "a\tb\nc\u0000d\u001fe"
+    ],
+    "rule": "x\r\ny"
+   },
+   "output": {
+    "paths": [
+     "abcde"
+    ],
+    "rule": "xy"
+   }
+  },
+  {
+   "name": "DEL and C1 are kept",
+   "input": {
+    "step": "abc"
+   },
+   "output": {
+    "step": "abc"
+   }
+  },
+  {
+   "name": "a string empty after removal is dropped",
+   "input": {
+    "paths": [
+     "\n",
+     "ok",
+     ""
+    ],
+    "step": "\t"
+   },
+   "output": {
+    "paths": [
+     "ok"
+    ]
+   }
+  },
+  {
+   "name": "dropped items do not count toward eight",
+   "input": {
+    "tools": [
+     "",
+     "",
+     "a",
+     "b",
+     "c",
+     "d",
+     "e",
+     "f",
+     "g",
+     "h",
+     "i"
+    ]
+   },
+   "output": {
+    "tools": [
+     "a",
+     "b",
+     "c",
+     "d",
+     "e",
+     "f",
+     "g",
+     "h"
+    ]
+   }
+  },
+  {
+   "name": "an empty list is left out",
+   "input": {
+    "paths": [],
+    "tools": [
+     "Bash"
+    ]
+   },
+   "output": {
+    "tools": [
+     "Bash"
+    ]
+   }
+  },
+  {
+   "name": "nothing left is null",
+   "input": {
+    "paths": [
+     ""
+    ],
+    "step": ""
+   },
+   "output": null
+  },
+  {
+   "name": "non-strings are dropped",
+   "input": {
+    "paths": [
+     1,
+     null,
+     "a"
+    ],
+    "step": 5,
+    "tools": "Bash"
+   },
+   "output": {
+    "paths": [
+     "a"
+    ]
+   }
+  },
+  {
+   "name": "unknown fields are dropped",
+   "input": {
+    "secret": "x",
+    "rule": "r"
+   },
+   "output": {
+    "rule": "r"
+   }
+  },
+  {
+   "name": "not an object",
+   "input": [
+    "a"
+   ],
+   "output": null
+  },
+  {
+   "name": "null",
+   "input": null,
+   "output": null
+  }
+ ],
+ "evidence": [
+  {
+   "name": "one item",
+   "input": [
+    {
+     "kind": "test_output",
+     "detail": "1 failed"
+    }
+   ],
+   "output": [
+    {
+     "kind": "test_output",
+     "detail": "1 failed"
+    }
+   ]
+  },
+  {
+   "name": "eight items",
+   "input": [
+    {
+     "kind": "k",
+     "detail": "0"
+    },
+    {
+     "kind": "k",
+     "detail": "1"
+    },
+    {
+     "kind": "k",
+     "detail": "2"
+    },
+    {
+     "kind": "k",
+     "detail": "3"
+    },
+    {
+     "kind": "k",
+     "detail": "4"
+    },
+    {
+     "kind": "k",
+     "detail": "5"
+    },
+    {
+     "kind": "k",
+     "detail": "6"
+    },
+    {
+     "kind": "k",
+     "detail": "7"
+    },
+    {
+     "kind": "k",
+     "detail": "8"
+    },
+    {
+     "kind": "k",
+     "detail": "9"
+    },
+    {
+     "kind": "k",
+     "detail": "10"
+    },
+    {
+     "kind": "k",
+     "detail": "11"
+    }
+   ],
+   "output": [
+    {
+     "kind": "k",
+     "detail": "0"
+    },
+    {
+     "kind": "k",
+     "detail": "1"
+    },
+    {
+     "kind": "k",
+     "detail": "2"
+    },
+    {
+     "kind": "k",
+     "detail": "3"
+    },
+    {
+     "kind": "k",
+     "detail": "4"
+    },
+    {
+     "kind": "k",
+     "detail": "5"
+    },
+    {
+     "kind": "k",
+     "detail": "6"
+    },
+    {
+     "kind": "k",
+     "detail": "7"
+    }
+   ]
+  },
+  {
+   "name": "bounded and cleaned",
+   "input": [
+    {
+     "kind": "k\n",
+     "detail": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+   ],
+   "output": [
+    {
+     "kind": "k",
+     "detail": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+   ]
+  },
+  {
+   "name": "an item missing a field is dropped",
+   "input": [
+    {
+     "kind": "k"
+    },
+    {
+     "detail": "d"
+    },
+    {
+     "kind": "",
+     "detail": "d"
+    },
+    {
+     "kind": "k",
+     "detail": "ok"
+    }
+   ],
+   "output": [
+    {
+     "kind": "k",
+     "detail": "ok"
+    }
+   ]
+  },
+  {
+   "name": "extra fields are dropped",
+   "input": [
+    {
+     "kind": "k",
+     "detail": "d",
+     "raw": "x"
+    }
+   ],
+   "output": [
+    {
+     "kind": "k",
+     "detail": "d"
+    }
+   ]
+  },
+  {
+   "name": "not a list",
+   "input": {
+    "kind": "k",
+    "detail": "d"
+   },
+   "output": []
+  },
+  {
+   "name": "non-objects skipped",
+   "input": [
+    "x",
+    null,
+    [
+     1
+    ],
+    {
+     "kind": "k",
+     "detail": "d"
+    }
+   ],
+   "output": [
+    {
+     "kind": "k",
+     "detail": "d"
+    }
+   ]
+  }
+ ],
+ "forMode": [
+  {
+   "name": "transparent",
+   "mode": "TRANSPARENT",
+   "scope": {
+    "paths": [
+     "a"
+    ]
+   },
+   "evidence": [
+    {
+     "kind": "k",
+     "detail": "d"
+    }
+   ],
+   "output": {
+    "scope": {
+     "paths": [
+      "a"
+     ]
+    },
+    "evidence": [
+     {
+      "kind": "k",
+      "detail": "d"
+     }
+    ]
+   }
+  },
+  {
+   "name": "silent log is transparent",
+   "mode": "SILENT_LOG",
+   "scope": {
+    "tools": [
+     "Bash"
+    ]
+   },
+   "evidence": [],
+   "output": {
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    }
+   }
+  },
+  {
+   "name": "opaque carries neither",
+   "mode": "OPAQUE",
+   "scope": {
+    "paths": [
+     "a"
+    ]
+   },
+   "evidence": [
+    {
+     "kind": "k",
+     "detail": "d"
+    }
+   ],
+   "output": {}
+  },
+  {
+   "name": "no mode is transparent",
+   "mode": null,
+   "scope": null,
+   "evidence": [
+    {
+     "kind": "k",
+     "detail": "d"
+    }
+   ],
+   "output": {
+    "evidence": [
+     {
+      "kind": "k",
+      "detail": "d"
+     }
+    ]
+   }
+  },
+  {
+   "name": "nothing to carry",
+   "mode": "TRANSPARENT",
+   "scope": {
+    "paths": []
+   },
+   "evidence": [],
+   "output": {}
+  }
+ ],
+ "retryLine": [
+  {
+   "name": "paths",
+   "mode": "TRANSPARENT",
+   "scope": {
+    "paths": [
+     "infra/a.tf",
+     "infra/b.tf"
+    ],
+    "tools": [
+     "Write"
+    ]
+   },
+   "line": "[Intutic] Retry scope: infra/a.tf, infra/b.tf"
+  },
+  {
+   "name": "tools when no paths",
+   "mode": "SILENT_LOG",
+   "scope": {
+    "tools": [
+     "action:deploy"
+    ],
+    "step": "action:run_tests"
+   },
+   "line": "[Intutic] Retry scope: action:deploy"
+  },
+  {
+   "name": "neither",
+   "mode": "TRANSPARENT",
+   "scope": {
+    "step": "x",
+    "rule": "r"
+   },
+   "line": null
+  },
+  {
+   "name": "opaque",
+   "mode": "OPAQUE",
+   "scope": {
+    "paths": [
+     "a"
+    ]
+   },
+   "line": null
+  },
+  {
+   "name": "bounded like the scope",
+   "mode": "TRANSPARENT",
+   "scope": {
+    "paths": [
+     "a\nb"
+    ]
+   },
+   "line": "[Intutic] Retry scope: ab"
+  },
+  {
+   "name": "no scope",
+   "mode": "TRANSPARENT",
+   "scope": null,
+   "line": null
+  }
+ ]
+}

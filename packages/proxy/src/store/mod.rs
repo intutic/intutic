@@ -941,6 +941,60 @@ pub trait LocalStore: Send + Sync + 'static {
     /// ladder was one budget shared by every tenant.
     async fn incr_reask_attempt(&self, scope: &str, detector_id: &str) -> u32;
 
+    /// Forget a session's reask count for one detector or rule.
+    ///
+    /// Called when an exhausted correction pauses a loop run for review:
+    /// once a person approves the run, the agent gets three
+    /// fresh attempts rather than re-pausing on its next trip.
+    async fn reset_reask_attempt(&self, scope: &str, detector_id: &str);
+
+    // ── Test outcomes ─────────────────────────────────────
+
+    /// The session's recorded outcomes, token → `RecordedOutcome::encode`
+    /// value (`intutic:outcome:{scope}`). `None` when the store could not
+    /// answer in time: a qualified prerequisite is then unmet.
+    ///
+    /// `scope` is `proxy::tool_history_scope`'s output.
+    async fn action_outcomes(&self, scope: &str) -> Option<HashMap<String, String>>;
+
+    /// Record one token's latest outcome for the session, with the
+    /// tool-sequence TTL. `false` when the write failed.
+    async fn record_action_outcome(&self, scope: &str, token: &str, value: &str) -> bool;
+
+    // ── Graph state ───────────────────────────────────
+
+    /// Every stored context signature in a graph, `node_id → value`
+    /// (`context_sig::encode_field`). `None` when the store could not answer.
+    async fn context_signatures(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+    ) -> Option<Vec<(String, String)>>;
+
+    /// Store a node's context signature once (`HSETNX`), while the graph holds
+    /// fewer than `context_sig::CTXSIG_MAX_FIELDS`, refreshing the graph's
+    /// TTL on a write. Returns whether this call wrote it.
+    async fn store_context_signature(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+        value: &str,
+    ) -> bool;
+
+    /// The kind recorded for `node_id` in its graph (`graph_detectors::
+    /// EffectiveNodeKind::recorded_kind`), if any.
+    async fn recorded_node_kind(
+        &self,
+        workspace_id: &str,
+        graph_id: &str,
+        node_id: &str,
+    ) -> Option<String>;
+
+    /// Record a node's kind for its children to be judged by, with
+    /// `node_kind::NODE_KIND_TTL_SECS`.
+    async fn record_node_kind(&self, workspace_id: &str, graph_id: &str, node_id: &str, kind: &str);
+
     /// A loop run's cost so far, and the ceiling it was started with.
     ///
     /// The ceiling is written by whoever started the run, so `None` means no
@@ -1138,6 +1192,15 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     /// (too little history, or the sweep has not run), and the detector falls back
     /// to its built-in table rather than treating an absent model as a permissive one.
     async fn transition_baseline(&self, workspace_id: &str) -> Option<String>;
+
+    /// The workspace's revert and rejection rates (`v2:revert:{workspace}`,
+    /// 3.0): a JSON object `{"<role>|<subject>": {"r": revert_rate,
+    /// "j": rejection_rate}}` the control plane's daily sweep publishes.
+    /// `None` when there is none — a local deployment, or no sweep yet —
+    /// which holds nothing.
+    async fn revert_rates(&self, _workspace_id: &str) -> Option<String> {
+        None
+    }
 
     /// Plugin descriptors for a workspace, as a raw JSON array.
     async fn wasm_plugins(&self, workspace_id: &str) -> anyhow::Result<Option<String>>;

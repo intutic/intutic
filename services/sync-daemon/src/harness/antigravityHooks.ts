@@ -151,6 +151,25 @@ function geminiGateCommand(hookScriptPath: string): string {
   return `bash ${JSON.stringify(hookScriptPath)}`
 }
 
+/**
+ * The `AfterTool` entry (gate body v23): the same script with `--event post`
+ * records a shell test run's outcome, read from `tool_response.llmContent`,
+ * which carries `Exit Code: N` when the command failed (captured from Gemini
+ * CLI 0.36.0, `__tests__/fixtures/post-tool/gemini-cli.json`). Only the
+ * shell tool, and it always allows.
+ */
+export function buildGeminiAfterToolEntry(hookScriptPath: string): Record<string, unknown> {
+  return {
+    matcher: 'run_shell_command',
+    hooks: [{
+      name: 'intutic-governance-outcome',
+      type: 'command',
+      command: `${geminiGateCommand(hookScriptPath)} --event post`,
+      timeout: HOOK_TIMEOUT_SECONDS * 1000,
+    }],
+  }
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
@@ -207,20 +226,24 @@ export async function writeAntigravityHooks(
   // De-duplicated by command, so repeated syncs replace this entry rather than
   // stacking copies, and every hook the user registered is kept.
   const intuticCmd = geminiGateCommand(hookScriptPath)
-  const filtered = existingBeforeTool.filter((entry: unknown) => {
-    if (typeof entry !== 'object' || entry === null) return true
+  const ours = (cmds: string[]) => (entry: unknown): boolean => {
+    if (typeof entry !== 'object' || entry === null) return false
     const inner = ((entry as Record<string, unknown>).hooks as unknown[]) ?? []
-    return !(
+    return (
       inner.length > 0 &&
-      inner.every((h: unknown) => typeof h === 'object' && h !== null && (h as Record<string, unknown>).command === intuticCmd)
+      inner.every((h: unknown) => typeof h === 'object' && h !== null && cmds.includes((h as Record<string, unknown>).command as string))
     )
-  })
+  }
+  const filtered = existingBeforeTool.filter((entry) => !ours([intuticCmd])(entry))
+  const existingAfterTool = Array.isArray(keptHooks.AfterTool) ? (keptHooks.AfterTool as unknown[]) : []
+  const filteredAfter = existingAfterTool.filter((entry) => !ours([`${intuticCmd} --event post`])(entry))
 
   const mergedSettings = {
     ...existingSettings,
     hooks: {
       ...keptHooks,
       BeforeTool: [...filtered, buildGeminiBeforeToolEntry(hookScriptPath)],
+      AfterTool: [...filteredAfter, buildGeminiAfterToolEntry(hookScriptPath)],
     },
   }
 

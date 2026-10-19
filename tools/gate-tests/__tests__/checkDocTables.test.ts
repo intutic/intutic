@@ -168,6 +168,8 @@ beforeEach(async () => {
   await put('packages/shared-types/src/sop.ts', SOP)
   await put('packages/proxy/src/plugins/anomaly/mod.rs', MOD_RS)
   await put('packages/proxy/src/plugins/anomaly/detectors.rs', DETECTORS_RS)
+  // The graph detectors' own file, which the gate reads beside detectors.rs.
+  await put('packages/proxy/src/plugins/anomaly/graph_detectors.rs', '// No graph detectors in this fixture.\n')
   await put('packages/shared-types/fixtures/control-plane-operations.json', JSON.stringify(OPERATIONS))
   for (const p of ['concepts/enforcement-actions.md', 'guide/concepts.md', 'guide/policies.md']) {
     await put(`apps/docs/${p}`, `# Page\n\nEvery call gets one of three verdicts:\n\n${ACTION_TABLE}`)

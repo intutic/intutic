@@ -375,6 +375,12 @@ pub struct FindingWire {
     /// The tool call the rule refused, alongside `rule_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// What the finding was about, bounded. Traces keep it
+    /// under every intervention mode: only what the agent sees is redacted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<crate::refusal::RefusalScope>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<crate::refusal::RefusalEvidence>,
 }
 
 impl FindingWire {
@@ -389,6 +395,12 @@ impl FindingWire {
             shadowed: false,
             rule_id: None,
             tool_name: None,
+            scope: f
+                .scope
+                .as_ref()
+                .map(crate::refusal::RefusalScope::bounded)
+                .filter(|s| !s.is_empty()),
+            evidence: crate::refusal::bound_evidence(&f.evidence),
         }
     }
 
@@ -418,6 +430,45 @@ impl FindingWire {
             let mut wire = Self::from_finding(&finding);
             wire.rule_id = Some(d.rule_id.clone());
             wire.tool_name = Some(d.tool.clone());
+            return Some(wire);
+        }
+        // 3.0's argument checks, each under its own detector id.
+        let lld75 = match &denial.reason {
+            crate::plugins::response_gate::DenialReason::Prerequisite(p) => Some((
+                "requires_before",
+                crate::plugins::anomaly::AnomalyKind::ScopeViolation,
+                format!("{} [{}]", p.reason, p.rule),
+                p.rule.clone(),
+                p.tool.clone(),
+            )),
+            crate::plugins::response_gate::DenialReason::OutOfScope { tool, paths, rule } => {
+                Some((
+                    "scope_paths",
+                    crate::plugins::anomaly::AnomalyKind::ScopeViolation,
+                    format!(
+                        "changes {} outside the declared scope [{rule}]",
+                        paths.join(", ")
+                    ),
+                    rule.clone(),
+                    tool.clone(),
+                ))
+            }
+            crate::plugins::response_gate::DenialReason::NodeKind { tool, denial } => Some((
+                "node_kind",
+                crate::plugins::anomaly::AnomalyKind::UnauthorizedTool,
+                format!("{} [{}]", denial.reason, denial.rule),
+                denial.rule.clone(),
+                tool.clone(),
+            )),
+            _ => None,
+        };
+        if let Some((detector_id, kind, reason, rule, tool)) = lld75 {
+            let mut finding = crate::plugins::anomaly::AnomalyFinding::kill(kind, reason);
+            finding.detector_id = detector_id;
+            finding.scope = denial.scope();
+            let mut wire = Self::from_finding(&finding);
+            wire.rule_id = Some(rule);
+            wire.tool_name = Some(tool);
             return Some(wire);
         }
         let crate::plugins::response_gate::DenialReason::SsoGroup { tool, decision } =

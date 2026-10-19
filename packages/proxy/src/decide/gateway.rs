@@ -220,6 +220,48 @@ pub struct GatewayRules {
     mode: InterventionMode,
     /// Where each evaluation is written, and whether it is uploaded.
     log: Option<Arc<GatewayLog>>,
+    /// The node's role and the workspace's revert history, for the `lane`
+    /// and `revertRate` a decision line records.
+    lane_context: Option<Arc<LaneContext>>,
+}
+
+/// What a decision line needs to say how consequential its subject was.
+#[derive(Debug, Clone, Default)]
+pub struct LaneContext {
+    pub role: String,
+    /// The raw `v2:revert:{workspace}` value, when the sweep has published one.
+    pub revert_rates: Option<String>,
+}
+
+/// The strongest reversibility class among a tool call's action tokens, and
+/// the highest role-level revert rate recorded for any of them.
+///
+/// Recorded only. A decide `allow` never releases a hold: lane and revert
+/// holds are `review_before:` entries the request path's review gate holds
+/// on whatever the decide outcome, and are released only by a person.
+/// Nothing here, and no decide outcome, adds or removes one.
+pub fn lane_of_call(
+    tool: &str,
+    args: &Value,
+    context: Option<&LaneContext>,
+) -> (Option<&'static str>, Option<f64>) {
+    let tokens = crate::plugins::anomaly::actions::classify(tool, args);
+    let lane = tokens
+        .iter()
+        .filter_map(|t| crate::plugins::anomaly::actions::token_class(t))
+        .max()
+        .map(crate::plugins::anomaly::actions::LaneClass::as_str);
+    let rate = context
+        .and_then(|c| c.revert_rates.as_deref().map(|r| (c.role.as_str(), r)))
+        .and_then(|(role, rates)| {
+            tokens
+                .iter()
+                .filter_map(|t| crate::key_context::revert_rate_of(rates, role, t))
+                .fold(None, |acc: Option<f64>, r| {
+                    Some(acc.map_or(r, |a| a.max(r)))
+                })
+        });
+    (lane, rate)
 }
 
 /// The request a gateway's decide log lines are about, and where they go.
@@ -670,6 +712,12 @@ impl GatewayRules {
         self
     }
 
+    /// Records each tool-call decision's `lane` and `revertRate` from `context`.
+    pub fn with_lane_context(mut self, context: LaneContext) -> Self {
+        self.lane_context = Some(Arc::new(context));
+        self
+    }
+
     /// The rules, with their stamps and pins.
     pub fn entries(&self) -> &[RuleEntry] {
         &self.rules
@@ -876,7 +924,15 @@ impl GatewayRules {
         };
         let cfg = engine.engine().ok().map(DecideEngine::config);
         let identity = eval.engine.as_ref();
+        let (lane, revert_rate) = match &subject {
+            LogSubject::ToolCall {
+                tool, tool_input, ..
+            } => lane_of_call(tool, tool_input, self.lane_context.as_deref()),
+            LogSubject::Response { .. } => (None, None),
+        };
         let ctx = LogContext {
+            lane,
+            revert_rate,
             at_ms,
             harness: &log.harness,
             workspace_id: &log.workspace_id,
@@ -1248,5 +1304,72 @@ mod tests {
             "the copy in this SOP names it; a rule nothing serves keeps the title"
         );
         assert_eq!(refs(None), ["Data handling#r", "Data handling#o"]);
+    }
+}
+
+#[cfg(test)]
+mod lld75_lane_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_tool_call_s_lane_is_its_strongest_token_s_class() {
+        let ctx = LaneContext {
+            role: "deployer".into(),
+            revert_rates: Some(
+                r#"{"|action:deploy": {"r": 0.3}, "deployer|action:destroy": {"j": 0.6}}"#.into(),
+            ),
+        };
+        assert_eq!(
+            lane_of_call("Bash", &json!({"command": "terraform destroy"}), Some(&ctx)),
+            (Some("irreversible"), Some(0.6))
+        );
+        assert_eq!(
+            lane_of_call("Bash", &json!({"command": "git push"}), Some(&ctx)),
+            (Some("reversible_wide"), Some(0.3))
+        );
+        assert_eq!(
+            lane_of_call("Bash", &json!({"command": "ls"}), Some(&ctx)),
+            (None, None)
+        );
+        assert_eq!(
+            lane_of_call("Bash", &json!({"command": "npm test"}), None),
+            (Some("reversible_contained"), None)
+        );
+    }
+
+    /// 3.0: a decide `allow` never releases a hold. Lane holds are
+    /// `review_before:` entries the request path holds on before and whatever
+    /// any decide rule says — `GatewayRules` has no input from, or output to,
+    /// the hold set — so a rule pinned to allow everything leaves a closed
+    /// lane's call held.
+    #[test]
+    fn a_decide_allow_never_releases_a_lane_hold() {
+        use crate::plugins::anomaly::detectors::ReviewGateDetector;
+        use crate::plugins::anomaly::AnomalyDetector;
+        let raw = "---\nclosed_lanes: irreversible\ndecide: {\"id\":\"allow-all\",\"on\":\"tool_call\",\"tools\":[\"Bash\"],\"rollout\":\"enforce\",\"ask\":{\"q\":{\"type\":\"boolean\",\"prompt\":\"ok?\"}},\"when\":\"q == false\"}\n---\n";
+        let sop = crate::sops::parse_sop_content(
+            "lanes".into(),
+            raw,
+            "test",
+            crate::sops::SopScope::Workspace,
+        )
+        .expect("sop");
+        let gov = crate::sops::governance_fields_from(&[sop], "");
+        assert!(gov.review_before.contains(&"action:destroy".to_string()));
+        let mut ctx = crate::plugins::anomaly::detectors::test_support::base_ctx();
+        ctx.review_before = gov.review_before;
+        ctx.new_tool_calls =
+            crate::manifest::expand_tool_actions(&[crate::manifest::ToolInvocation {
+                name: "Bash".into(),
+                input: json!({"command": "terraform destroy -auto-approve"}),
+                source: crate::manifest::InvocationSource::Call,
+                call_id: None,
+                is_error: None,
+            }]);
+        let hold = ReviewGateDetector
+            .detect(&ctx)
+            .expect("held whatever decide says");
+        assert_eq!(hold.disposition, crate::plugins::anomaly::Disposition::Ask);
     }
 }

@@ -1,0 +1,41 @@
+{
+  "harness": "gemini-cli",
+  "product": "Gemini CLI (the bash gate the antigravity writer installs)",
+  "version": "0.36.0",
+  "capturedAt": "2026-10-19",
+  "how": "gemini --yolo -m gemini-2.5-flash --fake-responses <file> in a scratch project whose .gemini/settings.json registered an AfterTool command hook that wrote stdin to a file. The CLI, its shell tool and its hook runner are real; only the model's replies are scripted (two run_shell_command calls: printf of a cargo summary, exit 0; sh -c with a pytest summary and exit 1). transcript_path and cwd are redacted; nothing else is edited.",
+  "events": [
+    {
+      "session_id": "eee1421a-49ea-41a0-9a83-f9ce056d43a4",
+      "transcript_path": "<redacted:transcript_path>",
+      "cwd": "<redacted:cwd>",
+      "hook_event_name": "AfterTool",
+      "timestamp": "2026-10-19T02:31:19.774Z",
+      "tool_name": "run_shell_command",
+      "tool_input": {
+        "command": "printf 'test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured\\n'",
+        "description": "test"
+      },
+      "tool_response": {
+        "llmContent": "Output: test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured\nProcess Group PGID: 19287",
+        "returnDisplay": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured"
+      }
+    },
+    {
+      "session_id": "eee1421a-49ea-41a0-9a83-f9ce056d43a4",
+      "transcript_path": "<redacted:transcript_path>",
+      "cwd": "<redacted:cwd>",
+      "hook_event_name": "AfterTool",
+      "timestamp": "2026-10-19T02:31:20.215Z",
+      "tool_name": "run_shell_command",
+      "tool_input": {
+        "command": "sh -c 'echo \"=== 1 failed, 2 passed in 0.12s ===\"; exit 1'",
+        "description": "test"
+      },
+      "tool_response": {
+        "llmContent": "Output: === 1 failed, 2 passed in 0.12s ===\nExit Code: 1\nProcess Group PGID: 19360",
+        "returnDisplay": "=== 1 failed, 2 passed in 0.12s ==="
+      }
+    }
+  ]
+}

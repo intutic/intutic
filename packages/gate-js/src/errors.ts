@@ -18,6 +18,8 @@
  * that already recognise that prefix recognise this refusal too.
  */
 
+import type { RefusalEvidence, RefusalScope } from './refusalDetail.js'
+
 /** Base class for every error this package throws. */
 export class GateError extends Error {
   constructor(message: string) {
@@ -44,6 +46,12 @@ export const GATE_REFUSAL_CODES = [
   'SSO_GROUP',
   'SNAPSHOT',
   'HELD',
+  // Tier R, the snapshot's rule records (gateRuleRecord.ts): a qualified
+  // requires_before, scope_paths_mode: enforce, plan_approval.
+  'PREREQUISITE_UNMET',
+  'OUT_OF_SCOPE',
+  'OFF_PLAN',
+  'PLAN_NOT_APPROVED',
   // The MCP server registry and allowlist, from the policy snapshot or the
   // control plane's hook gate.
   'SERVER_BLOCKED',
@@ -91,13 +99,23 @@ export class IntuticGateRefusal extends GateError {
   public readonly reason: string
   public readonly code: GateRefusalCode
   public readonly incidentId: string | undefined
+  /**
+   * Where the refusal applies, so a retry can stay out of it (paths, tools,
+   * step, detector, rule), bounded as refusalDetail.ts says. Undefined when
+   * the refusal names none, and always in an OPAQUE workspace.
+   */
+  public readonly scope: RefusalScope | undefined
+  /** What the refuser saw, bounded; undefined when nothing, and in OPAQUE. */
+  public readonly evidence: RefusalEvidence[] | undefined
 
-  constructor(reason: string, code: GateRefusalCode, incidentId?: string) {
+  constructor(reason: string, code: GateRefusalCode, incidentId?: string, detail?: { scope?: RefusalScope; evidence?: RefusalEvidence[] }) {
     super(`[Intutic Governance] BLOCKED: ${reason}`)
     this.name = 'IntuticGateRefusal'
     this.reason = reason
     this.code = code
     this.incidentId = incidentId
+    this.scope = detail?.scope
+    this.evidence = detail?.evidence
   }
 }
 

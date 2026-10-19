@@ -48,6 +48,14 @@ function readManifest(): PreImageEntry[] {
   }
 }
 
+/** A captured entry's action tokens (gate body v23 writes them), at most 16. */
+function actionsOf(entry: PreImageEntry): { actions?: string[] } {
+  const raw = (entry as PreImageEntry & { actions?: unknown }).actions
+  if (!Array.isArray(raw)) return {}
+  const actions = raw.filter((t): t is string => typeof t === 'string' && t.startsWith('action:') && t.length <= 64).slice(0, 16)
+  return actions.length > 0 ? { actions } : {}
+}
+
 /** Appends to the same log the gate writes, so the undo is in the same trail. */
 function recordRestore(entry: PreImageEntry, note: string): void {
   try {
@@ -66,6 +74,9 @@ function recordRestore(entry: PreImageEntry, note: string): void {
         incidentId: crypto.createHash('sha1').update(ts + entry.id).digest('hex').slice(0, 16),
         // Made once and resent with this line: processed once however often the drain retries.
         eventId: crypto.randomBytes(16).toString('hex'),
+        // The action tokens the gate classified the call to at capture (LLD
+        // #75 §7.1): the control plane records the revert against each one.
+        ...actionsOf(entry),
       }) + '\n',
       { flag: 'a' },
     )

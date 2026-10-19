@@ -73,6 +73,8 @@ use crate::wasm::context::{RequestContext, Verdict};
 pub mod actions;
 pub mod broadcast;
 pub mod detectors;
+pub mod graph_detectors;
+pub mod outcome;
 
 /// The 12-value runtime anomaly taxonomy.
 ///
@@ -235,6 +237,14 @@ impl Disposition {
 /// genuine runaway loop cannot spend a budget behind it.
 pub const REASK_MAX_ATTEMPTS: u32 = 3;
 
+/// Detectors whose findings never count toward corroboration.
+///
+/// `context_overlap` reports `TokenWaste`, a Medium kind, so it
+/// would otherwise count toward the two-detector escalation: an advisory
+/// signal about how a worker was briefed must not push another detector's
+/// steer to a re-ask.
+pub const NON_CORROBORATING_DETECTORS: &[&str] = &[graph_detectors::CONTEXT_OVERLAP_ID];
+
 /// A single detector's output.
 #[derive(Debug, Clone)]
 pub struct AnomalyFinding {
@@ -260,6 +270,12 @@ pub struct AnomalyFinding {
     /// this. Callers keying on it must treat empty as "unattributed" rather than
     /// as a valid group.
     pub detector_id: &'static str,
+    /// What the finding was about — the paths outside a scope, the tools off
+    /// a plan — so a refusal can tell the agent where to retry
+    /// (`error.scope`). Set with [`AnomalyFinding::with_scope`].
+    pub scope: Option<crate::refusal::RefusalScope>,
+    /// What the finding rests on, `{kind, detail}`, bounded when shown.
+    pub evidence: Vec<crate::refusal::RefusalEvidence>,
 }
 
 impl AnomalyFinding {
@@ -270,6 +286,8 @@ impl AnomalyFinding {
             confidence: 1.0,
             disposition: Disposition::Kill,
             detector_id: "",
+            scope: None,
+            evidence: Vec::new(),
         }
     }
 
@@ -288,6 +306,8 @@ impl AnomalyFinding {
             confidence: 1.0,
             disposition: Disposition::Ask,
             detector_id: "",
+            scope: None,
+            evidence: Vec::new(),
         }
     }
 
@@ -302,6 +322,8 @@ impl AnomalyFinding {
             confidence: confidence.clamp(0.0, 1.0),
             disposition: Disposition::Reask,
             detector_id: "",
+            scope: None,
+            evidence: Vec::new(),
         }
     }
 
@@ -312,7 +334,22 @@ impl AnomalyFinding {
             confidence: confidence.clamp(0.0, 1.0),
             disposition: Disposition::Steer,
             detector_id: "",
+            scope: None,
+            evidence: Vec::new(),
         }
+    }
+
+    /// The same finding, saying what it was about.
+    pub fn with_scope(mut self, scope: crate::refusal::RefusalScope) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+
+    /// The same finding, with one more piece of evidence.
+    pub fn with_evidence(mut self, kind: impl Into<String>, detail: impl Into<String>) -> Self {
+        self.evidence
+            .push(crate::refusal::RefusalEvidence::new(kind, detail));
+        self
     }
 
     /// True when this finding stops the request outright.
@@ -440,6 +477,7 @@ impl DetectorRegistry {
                 Box::new(ToolPoisoningDetector),
                 Box::new(WorkflowBudgetBreachDetector),
                 Box::new(CrossHarnessViolationDetector),
+                Box::new(graph_detectors::ContextOverlapDetector),
             ],
         }
     }
@@ -560,6 +598,7 @@ impl DetectorRegistry {
         let worst = findings
             .iter()
             .filter(|f| f.kind.severity() >= Severity::Medium)
+            .filter(|f| !NON_CORROBORATING_DETECTORS.contains(&f.detector_id))
             .filter(|f| matches!(f.disposition, Disposition::Steer | Disposition::Reask))
             .max_by_key(|f| f.kind.severity())?;
 
@@ -596,7 +635,7 @@ impl DetectorRegistry {
             .iter()
             .filter(|f| f.kind.severity() >= Severity::Medium)
             .map(|f| f.detector_id)
-            .filter(|id| !id.is_empty())
+            .filter(|id| !id.is_empty() && !NON_CORROBORATING_DETECTORS.contains(id))
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -1037,6 +1076,11 @@ mod coverage_tests {
             (
                 "DATA_EXFILTRATION",
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     // Three distinct patterns is the escalation threshold: one
                     // secret is a mistake, a sweep of them is an exfiltration.
                     dlp_findings: vec![
@@ -1050,6 +1094,11 @@ mod coverage_tests {
             (
                 "PROMPT_INJECTION",
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     injection_findings: vec!["ignore all previous instructions".into()],
                     ..base_ctx()
                 },
@@ -1057,6 +1106,11 @@ mod coverage_tests {
             (
                 "BUDGET_BREACH",
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     budget_remaining_usd: 0.0,
                     ..base_ctx()
                 },
@@ -1066,6 +1120,11 @@ mod coverage_tests {
                 // Both halves are required: a big context is only waste if the
                 // agent has been working long enough for it to have compounded.
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     estimated_input_tokens: 200_000,
                     tool_sequence: vec![
                         "Read".into(),
@@ -1082,6 +1141,11 @@ mod coverage_tests {
                 // The denial has to meet an actual call: a denied tool nobody
                 // invoked is a policy, not an incident.
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     denied_tools: vec!["Bash".into()],
                     tool_calls: vec![crate::wasm::context::ToolCall {
                         id: "tc_1".into(),
@@ -1094,6 +1158,11 @@ mod coverage_tests {
             (
                 "WORKFLOW_BUDGET_BREACH",
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     workflow_spend_usd: Some(50.0),
                     workflow_budget_usd: Some(10.0),
                     ..base_ctx()
@@ -1104,6 +1173,11 @@ mod coverage_tests {
                 // `intutic exec` and the SDK started emitting it.
                 "SPAWN_BUDGET_BREACH",
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     node: NodeIdentity {
                         graph_id: "fleet".into(),
                         node_id: "worker".into(),
@@ -1117,6 +1191,11 @@ mod coverage_tests {
             (
                 "HALLUCINATION",
                 RequestContext {
+                    action_outcomes: None,
+                    revert_hold_tokens: Vec::new(),
+                    sibling_overlap: None,
+                    context_isolation: Default::default(),
+                    modes: Default::default(),
                     node: NodeIdentity {
                         graph_id: "fleet".into(),
                         node_id: "worker".into(),
@@ -1362,9 +1441,10 @@ mod coverage_tests {
         // secrets()+http_post, for the one-REPL-call-bundles-everything shape
         // that per-call gates cannot see into.
         // 27: spend_trajectory — the local daily-cap projection.
+        // 28: context_overlap — sibling workers handed the same brief.
         assert_eq!(
             ids.len(),
-            27,
+            28,
             "registry size changed — update this test deliberately"
         );
 
@@ -1479,6 +1559,28 @@ mod coverage_tests {
         let mut steer = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "advisory", 0.9);
         steer.detector_id = "tool_diversity_collapse";
         assert!(DetectorRegistry::corroborated_finding(&[steer]).is_none());
+    }
+
+    /// 3.0: `context_overlap` is advisory and never corroborates —
+    /// it neither counts toward the two-detector threshold nor is escalated.
+    #[test]
+    fn context_overlap_never_corroborates() {
+        let mut overlap = AnomalyFinding::steer(AnomalyKind::TokenWaste, "shared brief", 0.9);
+        overlap.detector_id = "context_overlap";
+        let mut other = AnomalyFinding::steer(AnomalyKind::ToolAbuse, "wasteful", 0.7);
+        other.detector_id = "tool_diversity_collapse";
+        assert!(
+            DetectorRegistry::corroborated_finding(&[overlap.clone(), other.clone()]).is_none()
+        );
+        assert_eq!(
+            DetectorRegistry::corroborating_detector_ids(&[overlap.clone(), other.clone()]),
+            vec!["tool_diversity_collapse"]
+        );
+        let mut third = AnomalyFinding::steer(AnomalyKind::TokenWaste, "verbose", 0.5);
+        third.detector_id = "context_growth";
+        let escalated = DetectorRegistry::corroborated_finding(&[overlap, other, third])
+            .expect("two others agree");
+        assert_ne!(escalated.detector_id, "context_overlap");
     }
 
     /// Two findings from the SAME detector id are not corroboration either —

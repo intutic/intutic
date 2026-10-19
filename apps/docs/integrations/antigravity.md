@@ -85,6 +85,8 @@ Gemini CLI runs command hooks registered under `hooks.BeforeTool` in `~/.gemini/
 
 Gemini CLI's shell tool is `run_shell_command`; a hold such as `review_before: action:deploy` applies to the commands it runs.
 
+The same script is registered under `hooks.AfterTool` (matcher `run_shell_command`) with `--event post`. It records whether a test run passed, from the result's `llmContent` (which carries `Exit Code: N` when the command failed), for a [`requires_before: action:run_tests[ok] -> …`](/reference/harness-security-matrix#post-tool-outcome) rule, and always allows. Google Antigravity's own hook (`~/.gemini/config/hooks.json`) has no post-tool registration yet, so on it such a rule refuses: no result can be observed there.
+
 ## MCP servers
 
 With the [MCP governance proxy](/guide/mcp-governance) in front of each product's MCP servers, the registry, allowlists, call budgets, DLP on results, prompt-injection scanning and TOFU pinning apply to every MCP call either product makes, in addition to the gates.<!-- ENTERPRISE_ONLY_START --> `intutic connect` puts it in front of them on every sync, so a server you add later is wrapped on the next one.<!-- ENTERPRISE_ONLY_END -->

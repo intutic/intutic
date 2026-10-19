@@ -1303,6 +1303,10 @@ pub struct StreamHold {
     policies: Vec<SqlGuardPolicy>,
     hook_rules: crate::plugins::hook_rules::HookRuleSet,
     decide_tools: std::collections::BTreeSet<String>,
+    /// 3.0's argument checks — qualified prerequisites, the enforced
+    /// path scope and node-kind tool limits — whose blocks are held whole
+    /// like the SQL guard's.
+    arg_gates: crate::plugins::response_gate::ArgGates,
     held: Option<Held>,
     /// A block the decide rules are deciding, and the line that ended it.
     decided: Option<(Vec<String>, Option<String>)>,
@@ -1344,6 +1348,9 @@ pub struct HoldStep {
     /// names: ask the engine, then release it or refuse it. Nothing more may
     /// be pushed until it is released.
     pub decide: Option<DecideCall>,
+    /// Withhold the block: a 3.0 argument check refuses it (only when
+    /// neither a SQL refusal nor a hook rule already does).
+    pub refuse_gate: Option<(crate::plugins::response_gate::DenialReason, u64)>,
 }
 
 /// A held tool call for the decide rules.
@@ -1366,6 +1373,7 @@ impl HoldStep {
         self.refuse = next.refuse;
         self.refuse_hook = next.refuse_hook;
         self.decide = next.decide;
+        self.refuse_gate = next.refuse_gate;
     }
 }
 
@@ -1383,6 +1391,7 @@ impl StreamHold {
             policies,
             hook_rules: crate::plugins::hook_rules::HookRuleSet::default(),
             decide_tools: std::collections::BTreeSet::new(),
+            arg_gates: crate::plugins::response_gate::ArgGates::default(),
             held: None,
             decided: None,
         }
@@ -1410,6 +1419,12 @@ impl StreamHold {
             step.absorb(next);
         }
         step
+    }
+
+    /// Also hold, and decide whole, the blocks `gates` needs the arguments of.
+    pub fn with_arg_gates(mut self, gates: crate::plugins::response_gate::ArgGates) -> Self {
+        self.arg_gates = gates;
+        self
     }
 
     /// Also hold, and decide whole, the blocks the hook rules in `rules`
@@ -1535,11 +1550,21 @@ impl StreamHold {
     }
 
     fn maybe_start(&mut self, line: String) -> HoldStep {
-        let start = crate::protocol::tool_use_parser::parse_sse_chunk(&line).filter(|ev| {
+        let parsed = crate::protocol::tool_use_parser::parse_sse_chunk(&line);
+        let holds = |ev: &crate::protocol::tool_use_parser::ToolUseEvent| {
             (!self.policies.is_empty() && tool_is(&ev.tool_name, SHELL_TOOLS))
                 || self.hook_rules.holds(&ev.tool_name)
                 || self.decide_tools.contains(&ev.tool_name)
-        });
+                || self.arg_gates.holds(&ev.tool_name)
+        };
+        let start = match parsed {
+            Some(ev) if holds(&ev) => Some(ev),
+            Some(ev) => {
+                self.arg_gates.note_unheld_start(&ev.tool_name);
+                None
+            }
+            None => None,
+        };
         let (Some(ev), Some(v)) = (start, data_json(&line)) else {
             return HoldStep {
                 emit: vec![line],
@@ -1637,6 +1662,10 @@ impl StreamHold {
                 step.refuse_hook = Some((hit, held.block_index));
                 return step;
             }
+        }
+        if let Some(reason) = self.arg_gates.check(&held.tool, &args) {
+            step.refuse_gate = Some((reason, held.block_index));
+            return step;
         }
         if self.decide_tools.contains(&held.tool) {
             step.decide = Some(DecideCall {

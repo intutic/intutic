@@ -37,6 +37,12 @@ describe('parity with the proxy', () => {
     'SHELL_TOOLS',
     'READ_TOOLS',
     'FETCH_TOOLS',
+    // Red until the proxy's actions.rs carries them (the proxy).
+    'MIGRATE_PATTERNS',
+    'PROD_WRITE_PATTERNS',
+    'DESTROY_PATTERNS',
+    'PAYMENT_PATTERNS',
+    'FORCE_PUSH_FLAGS',
   ] as const)('%s matches actions.rs', (name) => {
     expect([...actions[name]]).toEqual(rustList(name))
   })

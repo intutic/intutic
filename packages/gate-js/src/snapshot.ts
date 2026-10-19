@@ -73,6 +73,7 @@ import {
   SNAPSHOT_FORMAT_RECORD_TAG,
   type DecideRecord,
 } from './decideRecord.js'
+import { decodeGateRuleRecord, RULE_RECORD_TAG, type GateRuleRecord } from './gateRuleRecord.js'
 import { INTERVENTION_MODE_RECORD_TAG, isOpaqueInterventionModeRecord } from './opaqueRefusal.js'
 import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
 import { classify } from './actions.js'
@@ -163,6 +164,15 @@ export class Snapshot {
    * snapshot that fails its integrity check.
    */
   decideRules: DecideRecord[] = []
+  /**
+   * The rule records (`@rule`) that decoded, in snapshot order:
+   * qualified prerequisites, enforced scopes and plan approval, which Tier R
+   * evaluates. Each one's fallback line is skipped only for a caller that
+   * evaluates rule records ({@link LoadSnapshotOptions}); a record that does
+   * not decode is not here, and its fallback line refuses. Empty on a
+   * snapshot that fails its integrity check.
+   */
+  ruleRecords: GateRuleRecord[] = []
 
   get healthMessage(): string {
     switch (this.state) {
@@ -231,6 +241,12 @@ export interface LoadSnapshotOptions {
    * refuses the rule's tools, exactly as in a gate that reads no records.
    */
   evaluatesDecide?: boolean
+  /**
+   * The caller evaluates the `@rule` records (Tier R). Only then is a decoded
+   * record's fallback line skipped; otherwise the fallback line refuses what
+   * the rule covers, exactly as in a gate that reads no records.
+   */
+  evaluatesRules?: boolean
 }
 
 /**
@@ -291,6 +307,11 @@ export function loadSnapshot(workspaceId = '', path?: string, opts: LoadSnapshot
       if (record) snap.decideRules.push(record)
       continue
     }
+    if (line.startsWith(`${RULE_RECORD_TAG}\t`)) {
+      const record = decodeGateRuleRecord(line)
+      if (record) snap.ruleRecords.push(record)
+      continue
+    }
 
     const f = line.split('\t')
     // Column order: id, severity, flags, subject, reason, source(regex), [argPatternB64].
@@ -318,6 +339,22 @@ export function loadSnapshot(workspaceId = '', path?: string, opts: LoadSnapshot
     const skip = new Set(snap.decideRules.map((r) => r.fallbackId))
     snap.rules = snap.rules.filter((r) => !r.id.startsWith(DECIDE_FALLBACK_PREFIX) || !skip.has(r.id))
   }
+
+  // The same for a rule record's fallback line: skipped only for a caller
+  // that evaluates rule records, and only when a record that decoded names it.
+  if (opts.evaluatesRules === true && snap.ruleRecords.length > 0) {
+    const skip = new Set(snap.ruleRecords.map((r) => r.fallbackId).filter((id): id is string => id !== null))
+    snap.rules = snap.rules.filter((r) => !skip.has(r.id))
+  }
+
+  // A hold token's rules share one id (laneHoldPatterns, lanes.ts): a phrase
+  // rule a gate whose classifier predates the token holds by, and for
+  // force_push and destroy an action rule. This classifier knows every
+  // token, so it holds by the action rule alone: the partial phrase
+  // "git push --force" also matches --force-with-lease, which is no force
+  // push. One id, so one approval releases the call whichever gate held it.
+  const actionIds = new Set(snap.rules.filter((r) => r.subject === 'action').map((r) => r.id))
+  if (actionIds.size > 0) snap.rules = snap.rules.filter((r) => r.subject !== 'phrase' || !actionIds.has(r.id))
 
   // Integrity. A digest nobody recomputes is a comment; a workspace id nobody
   // compares means workspace A's rules get enforced on B's machine and B's
@@ -353,6 +390,7 @@ export function loadSnapshot(workspaceId = '', path?: string, opts: LoadSnapshot
     snap.mcpAllowlist = null
     // The decide records go with the rest of the dynamic tier.
     snap.decideRules = []
+    snap.ruleRecords = []
   }
 
   if (snap.state === 'ok' && snap.generatedAt) {

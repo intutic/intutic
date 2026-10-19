@@ -61,6 +61,11 @@ use intutic_proxy::wasm::context::{NodeIdentity, RequestContext, RiskLevel};
 /// the fastest legitimate path and the right baseline to compare against.
 fn clean_ctx(sequence: Vec<String>) -> RequestContext {
     RequestContext {
+        action_outcomes: None,
+        revert_hold_tokens: Vec::new(),
+        sibling_overlap: None,
+        context_isolation: Default::default(),
+        modes: Default::default(),
         session_id: "ses_bench".into(),
         workspace_id: "ws_bench".into(),
         virtual_key_prefix: "sk-bench".into(),

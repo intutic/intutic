@@ -41,6 +41,7 @@ import {
   SETTING_KIND_KEYS,
 } from './guardrailIr.js'
 import { parseDecideLines, type DecideDecl, type DecideRule } from './decide.js'
+import { orderingQualifierError } from './testOutcome.js'
 
 // ─── Workspace settings ───────────────────────────────────────────────
 
@@ -399,6 +400,26 @@ export interface ParsedFrontMatter {
   mode: 'shadow' | 'enforce'
   /** One per `decide:` line, in order; a line that does not read is kept as `unreadable`, which refuses. */
   decide: DecideDecl[]
+  /** `risk_tier:` at the top level, upper case, or null when unstated or unrecognised (`parse_risk_tier`). */
+  riskTier: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | null
+  /** `scope_paths_mode:`: `enforce` refuses a change outside `scope_paths`. Strongest line wins. */
+  scopePathsMode: 'advise' | 'enforce'
+  /** `plan_steps_mode:` (§4): `enforce` re-asks on any off-plan step, at the gateway only. Strongest line wins. */
+  planStepsMode: 'advise' | 'enforce'
+  /** `plan_approval:` (§4.3): null when absent; `strict` beats `required`. */
+  planApproval: 'required' | 'strict' | null
+  /** `closed_lanes:` (§5), at any indentation: the lanes held for review, each once. */
+  closedLanes: Array<'irreversible' | 'reversible_wide'>
+  /** `open_actions:` (§5), top level only: action tokens this SOP reopens, each once. */
+  openActions: string[]
+  /** `on_reask_exhausted:` (§6): `pause` beats `block`. */
+  onReaskExhausted: 'block' | 'pause'
+  /** `context_isolation:` (§8). Strongest line wins. */
+  contextIsolation: 'advise' | 'enforce'
+  /** `node_kind:` (§9), at any indentation: the kinds declared, each once. */
+  nodeKinds: Array<'splitter' | 'worker' | 'code' | 'gate'>
+  /** `node_kind_allow:` (§9), top level only: the limits lifted, each once. */
+  nodeKindAllow: Array<'model' | 'write' | 'shell' | 'spawn'>
   /** Rules that failed to parse, in the Rust parser's own wording. */
   errors: string[]
 }
@@ -473,7 +494,7 @@ function listKey(front: string, key: string, lower: boolean, topLevel = false): 
   return out
 }
 
-function parseOrdering(raw: string): { ok: true; rule: [string, string, boolean] } | { ok: false; error: string } {
+function parseOrdering(raw: string, qualifiable: boolean): { ok: true; rule: [string, string, boolean] } | { ok: false; error: string } {
   let lhs: string
   let rhs: string
   let adjacent: boolean
@@ -498,6 +519,11 @@ function parseOrdering(raw: string): { ok: true; rule: [string, string, boolean]
       return { ok: false, error: `${JSON.stringify(side)} looks like a shell command. Ordering rules name tools or actions, never commands` }
     }
   }
+  // `[ok]` qualifies only `action:run_tests`, on the left of a
+  // `requires_before:` rule. A rule that says otherwise is an
+  // error, never a rule that quietly compares the literal.
+  const qualifier = orderingQualifierError(lhs, qualifiable) ?? orderingQualifierError(rhs, false)
+  if (qualifier !== null) return { ok: false, error: qualifier }
   return { ok: true, rule: [lhs, rhs, adjacent] }
 }
 
@@ -508,7 +534,7 @@ function parseRules(front: string, key: string): { ok: Array<[string, string, bo
     for (const piece of value.split(',')) {
       const raw = trimQuotesAndBrackets(piece.trim()).trim()
       if (!raw) continue
-      const parsed = parseOrdering(raw)
+      const parsed = parseOrdering(raw, key === 'requires_before:')
       if (parsed.ok) ok.push(parsed.rule)
       else errors.push(`${key} ${parsed.error}`)
     }
@@ -571,6 +597,88 @@ function parseMode(front: string): 'shadow' | 'enforce' {
   return trimChars(first.trim(), QUOTE_CHARS).toLowerCase() === 'shadow' ? 'shadow' : 'enforce'
 }
 
+/** One value as the enum keys read it: trimmed, quotes stripped, lower case. */
+function enumValue(raw: string): string {
+  return trimChars(raw.trim(), QUOTE_CHARS).toLowerCase()
+}
+
+/**
+ * An enum key read at any indentation (it can only strengthen a SOP): the
+ * strongest value any line gives, `strong` when a line gives a value that
+ * is not one of `values` (with an error: a typo must never switch a guard
+ * off, as `parse_sql_guard` does), `fallback` when no line names the key.
+ */
+function strongestEnum<T extends string>(front: string, key: string, values: readonly T[], strong: T, fallback: T | null, error: (v: string) => string, errors: string[]): T | null {
+  let out: T | null = fallback
+  for (const raw of keyValues(front, key)) {
+    const v = enumValue(raw)
+    let got: T
+    if ((values as readonly string[]).includes(v)) got = v as T
+    else {
+      errors.push(`${key} ${error(v)}`)
+      got = strong
+    }
+    if (out === null || values.indexOf(got) > values.indexOf(out)) out = got
+  }
+  return out
+}
+
+/** A list key's entries that are one of `allowed` (lower-cased), each once in order; any other entry is dropped and reported. */
+function knownList<T extends string>(entries: readonly string[], key: string, allowed: readonly T[], error: (v: string) => string, errors: string[]): T[] {
+  const out: T[] = []
+  for (const e of entries) {
+    if (!(allowed as readonly string[]).includes(e)) errors.push(`${key} ${error(e)}`)
+    else if (!out.includes(e as T)) out.push(e as T)
+  }
+  return out
+}
+
+/** `parse_risk_tier`: the first top-level `risk_tier:`, upper-cased, when it is one of the four. */
+function parseRiskTier(front: string): ParsedFrontMatter['riskTier'] {
+  const first = topLevelValues(front, 'risk_tier:')[0]
+  if (first === undefined) return null
+  const v = trimChars(first.trim(), QUOTE_CHARS).toUpperCase()
+  return v === 'LOW' || v === 'MEDIUM' || v === 'HIGH' || v === 'CRITICAL' ? v : null
+}
+
+/** The action tokens `open_actions:` may name: `ACTION_TOKENS` (guardrailIr.ts). */
+const OPEN_ACTION_TOKENS = [
+  'action:deploy',
+  'action:publish',
+  'action:release',
+  'action:db_write',
+  'action:secret_read',
+  'action:http_post',
+  'action:pii_export',
+  'action:run_tests',
+  'action:migrate',
+  'action:prod_write',
+  'action:destroy',
+  'action:force_push',
+  'action:payment',
+] as const
+
+/** The loop, lane, graph and plan keys, each read as sops.rs reads it. */
+function parseLoopGraphGateKeys(front: string, errors: string[]): Pick<
+  ParsedFrontMatter,
+  'riskTier' | 'scopePathsMode' | 'planStepsMode' | 'planApproval' | 'closedLanes' | 'openActions' | 'onReaskExhausted' | 'contextIsolation' | 'nodeKinds' | 'nodeKindAllow'
+> {
+  const mode = (v: string) => `${JSON.stringify(v)} is not advise or enforce, so it enforces`
+  const modes = ['advise', 'enforce'] as const
+  return {
+    riskTier: parseRiskTier(front),
+    scopePathsMode: strongestEnum(front, 'scope_paths_mode:', modes, 'enforce', 'advise', mode, errors)!,
+    planStepsMode: strongestEnum(front, 'plan_steps_mode:', modes, 'enforce', 'advise', mode, errors)!,
+    planApproval: strongestEnum(front, 'plan_approval:', ['required', 'strict'] as const, 'strict', null, (v) => `${JSON.stringify(v)} is not required or strict, so it is strict`, errors),
+    closedLanes: knownList(listKey(front, 'closed_lanes:', true), 'closed_lanes:', ['irreversible', 'reversible_wide'] as const, (v) => `${JSON.stringify(v)} is not a lane (irreversible, reversible_wide)`, errors),
+    openActions: knownList(listKey(front, 'open_actions:', true, true), 'open_actions:', OPEN_ACTION_TOKENS, (v) => `${JSON.stringify(v)} is not an action token`, errors),
+    onReaskExhausted: strongestEnum(front, 'on_reask_exhausted:', ['block', 'pause'] as const, 'pause', 'block', (v) => `${JSON.stringify(v)} is not block or pause, so it pauses`, errors)!,
+    contextIsolation: strongestEnum(front, 'context_isolation:', modes, 'enforce', 'advise', mode, errors)!,
+    nodeKinds: knownList(listKey(front, 'node_kind:', true), 'node_kind:', ['splitter', 'worker', 'code', 'gate'] as const, (v) => `${JSON.stringify(v)} is not a node kind (splitter, worker, code, gate)`, errors),
+    nodeKindAllow: knownList(listKey(front, 'node_kind_allow:', true, true), 'node_kind_allow:', ['model', 'write', 'shell', 'spawn'] as const, (v) => `${JSON.stringify(v)} is not a limit (model, write, shell, spawn)`, errors),
+  }
+}
+
 /**
  * Parse the text between the fences exactly as `parse_front_matter` in
  * sops.rs does: a key is a line prefix (unindented only for `mode:` and
@@ -586,6 +694,8 @@ export function parseFrontMatterEnforcing(front: string): ParsedFrontMatter {
   const forbids = parseRules(front, 'forbid_after:')
   const counts = parseItems(front, 'max_calls:', true, parseCountBound)
   const cooccur = parseItems(front, 'forbid_with:', false, parseCooccurrence)
+  const added: string[] = []
+  const keys = parseLoopGraphGateKeys(front, added)
   return {
     roles: listKey(front, 'roles:', true, true),
     allowHarnesses: listKey(front, 'allow_harnesses:', true),
@@ -599,7 +709,8 @@ export function parseFrontMatterEnforcing(front: string): ParsedFrontMatter {
     forbidWith: cooccur.ok,
     mode: parseMode(front),
     decide: parseDecideLines(keyValues(front, DECIDE_FRONT_MATTER_KEY)),
-    errors: [...requires.errors, ...forbids.errors, ...counts.errors, ...cooccur.errors],
+    ...keys,
+    errors: [...requires.errors, ...forbids.errors, ...counts.errors, ...cooccur.errors, ...added],
   }
 }
 
@@ -615,7 +726,10 @@ export function isEnforceableFrontMatter(fm: ParsedFrontMatter): boolean {
     fm.forbidAfter.length > 0 ||
     fm.maxCalls.length > 0 ||
     fm.forbidWith.length > 0 ||
-    fm.decide.length > 0
+    fm.decide.length > 0 ||
+    fm.closedLanes.length > 0 ||
+    fm.planApproval !== null ||
+    fm.nodeKinds.length > 0
   )
 }
 

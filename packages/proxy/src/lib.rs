@@ -4,6 +4,7 @@ pub mod chaos;
 pub mod cloud;
 pub mod commands;
 pub mod config;
+pub mod context_sig;
 /// The caller's credential, typed by where it may be sent
 pub mod credential;
 /// Envelope encryption for the provider credentials stored in Valkey
@@ -24,6 +25,7 @@ pub mod manifest;
 pub mod memory;
 pub mod metering;
 pub mod metrics;
+pub mod node_kind;
 pub mod otel_propagation;
 /// The single Intutic config/state directory resolution — see this
 /// module's own doc comment for the Windows path-mismatch bug it fixes.

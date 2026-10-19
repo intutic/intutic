@@ -115,6 +115,11 @@ mod tests {
 
     fn base_ctx() -> RequestContext {
         RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             session_id: "sess-budget".into(),
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),

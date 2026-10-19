@@ -117,7 +117,14 @@ export async function writeGooseHooks(
 # Generated: ${newIso()}
 set -euo pipefail
 ${emitShellFailClosed('goose')}
-EVENT="\${1:-pre}"
+# The hook event: PreToolUse invokes this script bare, PostToolUse with
+# "--event post". It used to read EVENT="\${1:-pre}", which is "--event" on the
+# post call, and the post call then ran the pre-tool gate again. The fail-closed
+# prelude above sets INTUTIC_POST_MODE from the same arguments; the gate body
+# returns at once in post mode, and records nothing for goose, whose post-tool
+# payload has not been captured (POST_TOOL_OBSERVABLE).
+EVENT=pre
+if [ "\${1:-}" = "--event" ]; then EVENT="\${2:-pre}"; fi
 INPUT="\$(cat)"
 ${SHELL_EXTRACT}
 

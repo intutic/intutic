@@ -1456,6 +1456,17 @@ loopCmd
   })
 
 loopCmd
+  .command('verify <loopRunId>')
+  .description('Verify a loop run: the local scope check, then the control plane\'s scope, plan and judge checks')
+  .option('--base <ref>', 'Diff against this ref (default: the commit the run started from, INTUTIC_LOOP_BASE_COMMIT)')
+  .option('--task <text>', 'What the run was asked to do, for the judge')
+  .option('--dev', 'Use the local development control plane')
+  .action(async (loopRunId, opts) => {
+    const { runLoopVerify } = await import('./commands/skill.js')
+    await runLoopVerify(loopRunId, opts)
+  })
+
+loopCmd
   .command('complete <loopRunId>')
   .description('Mark a running loop as successfully completed')
   .option('--dev', 'Use local control plane (http://localhost:3001)')

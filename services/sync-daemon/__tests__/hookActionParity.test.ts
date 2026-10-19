@@ -56,12 +56,24 @@ describe('hook and proxy classify the same commands', () => {
     expect(hookNeedles('action:deploy').length).toBeGreaterThan(5)
   })
 
-  it.each([
+  // 3.0: the gate classifies run_tests (for requires_before [ok])
+  // and every reversibility-lane token with phrases, so a lane hold holds
+  // before the call runs. The Rust lists for the new tokens land with the
+  // proxy's half of that batch; until then these rows are red on this branch.
+  const TOKENS: Array<[string, string]> = [
     ['action:deploy', 'DEPLOY_PATTERNS'],
     ['action:publish', 'PUBLISH_PATTERNS'],
     ['action:release', 'RELEASE_PATTERNS'],
     ['action:db_write', 'DB_WRITE_PATTERNS'],
-  ])('%s covers every pattern the proxy recognises', (action, constName) => {
+    ['action:run_tests', 'TEST_PATTERNS'],
+    ['action:http_post', 'HTTP_POST_PATTERNS'],
+    ['action:migrate', 'MIGRATE_PATTERNS'],
+    ['action:prod_write', 'PROD_WRITE_PATTERNS'],
+    ['action:destroy', 'DESTROY_PATTERNS'],
+    ['action:payment', 'PAYMENT_PATTERNS'],
+  ]
+
+  it.each(TOKENS)('%s covers every pattern the proxy recognises', (action, constName) => {
     const proxy = rustPatterns(constName)
     const hook = hookNeedles(action)
     const missing = proxy.filter((p) => !hook.includes(p))
@@ -85,12 +97,7 @@ describe('hook and proxy classify the same commands', () => {
    * A needle only the hook knows would hold a call the proxy then allows,
    * which reads to an operator as the hold being spurious.
    */
-  it.each([
-    ['action:deploy', 'DEPLOY_PATTERNS'],
-    ['action:publish', 'PUBLISH_PATTERNS'],
-    ['action:release', 'RELEASE_PATTERNS'],
-    ['action:db_write', 'DB_WRITE_PATTERNS'],
-  ])('%s recognises nothing the proxy does not', (action, constName) => {
+  it.each(TOKENS)('%s recognises nothing the proxy does not', (action, constName) => {
     const proxy = rustPatterns(constName)
     const extra = hookNeedles(action).filter((h) => !proxy.includes(h))
     expect(extra, `the hook classifies ${extra.join(', ')} as ${action} and the proxy does not`).toEqual([])

@@ -176,6 +176,35 @@ approve yet.
 
 ***
 
+### sessionPlan()
+
+```ts
+sessionPlan(sessionId): Promise<{
+  body: unknown;
+  status: number | null;
+}>;
+```
+
+The session's plan (`GET /api/v1/plans/session/:sessionId`) as Tier R
+reads it: the HTTP status and body, or a null status when the control
+plane could not be reached. A local-only client has no plans to read:
+404. Never throws.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `sessionId` | `string` |
+
+#### Returns
+
+`Promise`\<\{
+  `body`: `unknown`;
+  `status`: `number` \| `null`;
+\}\>
+
+***
+
 ### fromEnv()
 
 ```ts

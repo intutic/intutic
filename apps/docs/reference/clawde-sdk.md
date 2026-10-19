@@ -77,6 +77,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 403 | `model_not_allowed` | `kill` | The model is not on the approved-models list |
 | 403 | `LOOP_RUN_TERMINATED` | `kill` | The loop run this request belongs to has stopped |
 | 403 | `LOOP_RUN_PENDING_REVIEW` | `hold` | The loop run is paused until a reviewer approves or rejects it |
+| 403 | `NODE_KIND_DENIED` | `kill` | The request breaks its graph node's kind: a `code` node made a model call, or a child of a `worker` or `gate` node did (`node_kind:`, `x-intutic-node-kind`) |
 | 403 | `policy_held` | `hold` | A Rego or WASM rule held the request for approval; the error names the hold id |
 | 409 | `policy_reask` | `reask` | Revise the approach and try again; repeated attempts escalate to `policy_denied` |
 | 403 | `GOVERNANCE_UNAVAILABLE` | `kill` | A governance check could not complete. Either a custom WASM or Rego rule reached no verdict (its deadline, its instruction budget, an error, or a result that is not a verdict): refused whatever the proxy's fail setting, and refused again if the same request is retried, the message naming the rule. Or, with the proxy failing closed, the workspace's PII detector setting could not be read |
@@ -88,6 +89,8 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 200 | `TOOL_DENIED` | `kill` | The model called a tool an SOP denies to this agent role; the call was withheld |
 | 200 | `SSO_GROUP` | `kill` | The model called a tool the workspace's SSO group policy does not clear for this member; the call was withheld |
 | 200 | `SQL_GUARD` | `kill` | The model called a shell tool to run destructive SQL against a database the SQL allowlist does not admit; the call was withheld |
+| 200 | `PREREQUISITE_UNMET` | `kill` | The model called a tool a qualified `requires_before` gates (`action:run_tests[ok] -> …`) and its prerequisite is not met: no test run in the session, the last one failed, its result could not be read, or files changed after it; the call was withheld |
+| 200 | `OUT_OF_SCOPE` | `kill` | The model called a file-changing tool on a path outside `scope_paths` under `scope_paths_mode: enforce`; the call was withheld |
 | 200 | `RESPONSE_UNPARSEABLE` | `kill` | The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed |
 | 200 | `OUTPUT_DLP` | `kill` | The model's response held sensitive content that could not be redacted safely, so it was withheld |
 
@@ -99,6 +102,8 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 
 - Non-streaming, in two response headers: `x-intutic-refusal: <code>` and `x-intutic-refusal-rule: <rule id>`, for example `TOOL_DENIED` and `deny_tools.Bash`, or `SSO_GROUP` and `sso_group.high_risk.Bash`.
 - Streaming, in an SSE comment line just before the refusal text, because the headers went out before the refusal happened: `: intutic-refusal {"code": "TOOL_DENIED", "rule": "deny_tools.Bash", "message": "…"}`. Every SSE parser skips comment lines, so clients that do not look for it are unaffected.
+
+**Where to retry.** A refusal can say what it concerns, so an agent can retry outside it: an error body carries `error.scope` and `error.evidence`, and the stream marker's JSON carries `scope` and `evidence`. `scope` holds any of `paths`, `tools`, `step`, `detector` and `rule` (for `OUT_OF_SCOPE`, the paths outside the scope; for `PREREQUISITE_UNMET`, the gated tool and the `step` it needs first); `evidence` is a list of `{kind, detail}`. Each list holds at most 8 items and each string at most 256 characters, with control characters removed. An OPAQUE workspace sends neither: only the code.
 
 `chat()` reads both. It does not stream, so for a stream you read yourself, pass each line (or the whole body) to `streamRefusal()` (`stream_refusal()`), which returns the refusal or `null` (`None`). `PROXY_REFUSALS`, `REFUSAL_HEADER`, `REFUSAL_RULE_HEADER` and `STREAM_REFUSAL_MARKER` are exported alongside it.
 

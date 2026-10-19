@@ -110,3 +110,36 @@ never measured.
 #### Returns
 
 `Promise`\<`void`\>
+
+***
+
+### recordOutcome()
+
+```ts
+recordOutcome(
+   toolName, 
+   toolInput, 
+   result?
+): void;
+```
+
+Records how a call that ran went, for Tier R. A test run
+(`action:run_tests`) records its outcome (testOutcome.ts: the exit code,
+else one read from `output`, the error flag and the runner summaries);
+any other call marks earlier outcomes as no longer adjacent, and a call
+that changed files (`isFileWriteCall`, scopeMatch.ts) makes an earlier pass stale.
+Kept in memory per [GateClient.sessionId](GateClient.md#property-sessionid); with no session id
+nothing is kept, and a qualified rule stays unmet. [wrapTool](../index.md#wraptool) calls
+this after every call it ran.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `toolName` | `string` |
+| `toolInput` | [`ToolInput`](../index.md#toolinput) |
+| `result` | [`ToolOutcome`](../index.md#tooloutcome) |
+
+#### Returns
+
+`void`

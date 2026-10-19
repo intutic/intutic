@@ -61,6 +61,12 @@ def _rust_list(name: str) -> list[str]:
         ("SHELL_TOOLS", actions.SHELL_TOOLS),
         ("READ_TOOLS", actions.READ_TOOLS),
         ("FETCH_TOOLS", actions.FETCH_TOOLS),
+        # Red until the proxy's actions.rs carries them (the proxy).
+        ("MIGRATE_PATTERNS", actions.MIGRATE_PATTERNS),
+        ("PROD_WRITE_PATTERNS", actions.PROD_WRITE_PATTERNS),
+        ("DESTROY_PATTERNS", actions.DESTROY_PATTERNS),
+        ("PAYMENT_PATTERNS", actions.PAYMENT_PATTERNS),
+        ("FORCE_PUSH_FLAGS", actions.FORCE_PUSH_FLAGS),
     ],
 )
 def test_pattern_lists_match_rust(rust_name, py_value):

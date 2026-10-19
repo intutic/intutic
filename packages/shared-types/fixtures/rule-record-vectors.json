@@ -1,0 +1,2604 @@
+{
+ "_doc": "The @rule snapshot record of the loops, graphs and gates release, its fallback line, and Tier R. Run by shared-types gateRuleRecord.ts (and its @intutic/gate copy and the JavaScript hook gates' embedded source) and intutic_clawde/gate/rule_record.py (and the bash gates). valid: encodeGateRuleRecord(record) is line, and decodeGateRuleRecord(line) is record; the line's payload is the record without kind, fallbackId and rollout, which are columns 3, 2 and 4. served: toServedGateRecord(record, sopId) is served (the shape policy resolve serves as gateRecords), and fromServedGateRecord(served) is record. damaged: decodeGateRuleRecord(line) is null, so the fallback line stays in force. format: a snapshot with any @rule record is @format 3. fallbacks: gateRuleFallback(record), the line an older gate refuses with. compile: compileSopGateRecords(entry, parseFrontMatterEnforcing(front), sha256) (TypeScript only: the writers are the daemon, the CLI and the control plane), as records and the ids of the fallback lines. evaluate: evaluateGateRuleRecords(records, call) as {refusal, shadow}. planResponse: gateRulePlanFromResponse(status, body), the session plan read from GET /api/v1/plans/session/:sessionId (status null: unreachable).",
+ "format": 3,
+ "valid": [
+  {
+   "name": "requires_outcome",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:1",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:deploy",
+    "adjacent": false
+   },
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "requires_outcome, adjacent",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:2",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:2@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:publish",
+    "adjacent": true
+   },
+   "line": "@rule\trequires_outcome-fallback:2@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6dHJ1ZSwiZmlyc3QiOiJhY3Rpb246cnVuX3Rlc3RzIiwicXVhbGlmaWVyIjoib2siLCJyZWYiOiJzb3BfMDFIWlgjcmVxdWlyZXNfb3V0Y29tZToyIiwic29wVGl0bGUiOiJSZWxlYXNlIGdhdGUiLCJ0aGVuIjoiYWN0aW9uOnB1Ymxpc2giLCJ2IjoxfQ=="
+  },
+  {
+   "name": "requires_outcome, shadow, no fallback",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:1",
+    "sopTitle": "Release gate",
+    "fallbackId": null,
+    "rollout": "shadow",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:deploy",
+    "adjacent": false
+   },
+   "line": "@rule\t-\trequires_outcome\tshadow\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "requires_outcome on a tool",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:3",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:3@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "mcp__vercel__deploy",
+    "adjacent": false
+   },
+   "line": "@rule\trequires_outcome-fallback:3@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MyIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6Im1jcF9fdmVyY2VsX19kZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "scope_paths",
+   "record": {
+    "v": 1,
+    "kind": "scope_paths",
+    "ref": "sop_01HZX#scope_paths:1",
+    "sopTitle": "Infra only",
+    "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "scopePaths": [
+     "infra",
+     "docs/runbooks"
+    ]
+   },
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOlsiaW5mcmEiLCJkb2NzL3J1bmJvb2tzIl0sInNvcFRpdGxlIjoiSW5mcmEgb25seSIsInYiOjF9"
+  },
+  {
+   "name": "scope_paths with non-ASCII text",
+   "record": {
+    "v": 1,
+    "kind": "scope_paths",
+    "ref": "sop_01HZX#scope_paths:1",
+    "sopTitle": "Équipe infra — scope",
+    "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "scopePaths": [
+     "infra/é"
+    ]
+   },
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOlsiaW5mcmEvw6kiXSwic29wVGl0bGUiOiLDiXF1aXBlIGluZnJhIOKAlCBzY29wZSIsInYiOjF9"
+  },
+  {
+   "name": "plan_approval required",
+   "record": {
+    "v": 1,
+    "kind": "plan_approval",
+    "ref": "sop_01HZX#plan_approval:1",
+    "sopTitle": "Plans first",
+    "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "mode": "required"
+   },
+   "line": "@rule\tplan_approval-fallback:1@f748836cfb40\tplan_approval\tenforce\teyJtb2RlIjoicmVxdWlyZWQiLCJyZWYiOiJzb3BfMDFIWlgjcGxhbl9hcHByb3ZhbDoxIiwic29wVGl0bGUiOiJQbGFucyBmaXJzdCIsInYiOjF9"
+  },
+  {
+   "name": "plan_approval strict",
+   "record": {
+    "v": 1,
+    "kind": "plan_approval",
+    "ref": "sop_01HZX#plan_approval:1",
+    "sopTitle": "Strict plans",
+    "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "mode": "strict"
+   },
+   "line": "@rule\tplan_approval-fallback:1@f748836cfb40\tplan_approval\tenforce\teyJtb2RlIjoic3RyaWN0IiwicmVmIjoic29wXzAxSFpYI3BsYW5fYXBwcm92YWw6MSIsInNvcFRpdGxlIjoiU3RyaWN0IHBsYW5zIiwidiI6MX0="
+  },
+  {
+   "name": "plan_approval shadow",
+   "record": {
+    "v": 1,
+    "kind": "plan_approval",
+    "ref": "sop_01HZX#plan_approval:1",
+    "sopTitle": "Plans first",
+    "fallbackId": null,
+    "rollout": "shadow",
+    "mode": "required"
+   },
+   "line": "@rule\t-\tplan_approval\tshadow\teyJtb2RlIjoicmVxdWlyZWQiLCJyZWYiOiJzb3BfMDFIWlgjcGxhbl9hcHByb3ZhbDoxIiwic29wVGl0bGUiOiJQbGFucyBmaXJzdCIsInYiOjF9"
+  }
+ ],
+ "served": [
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:1",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:deploy",
+    "adjacent": false
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "requires_outcome",
+    "rollout": "enforce",
+    "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:2",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:2@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:publish",
+    "adjacent": true
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "requires_outcome",
+    "rollout": "enforce",
+    "fallbackId": "requires_outcome-fallback:2@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#requires_outcome:2",
+     "sopTitle": "Release gate",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:publish",
+     "adjacent": true
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:1",
+    "sopTitle": "Release gate",
+    "fallbackId": null,
+    "rollout": "shadow",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:deploy",
+    "adjacent": false
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "requires_outcome",
+    "rollout": "shadow",
+    "fallbackId": null,
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:3",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:3@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "mcp__vercel__deploy",
+    "adjacent": false
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "requires_outcome",
+    "rollout": "enforce",
+    "fallbackId": "requires_outcome-fallback:3@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#requires_outcome:3",
+     "sopTitle": "Release gate",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "mcp__vercel__deploy",
+     "adjacent": false
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "scope_paths",
+    "ref": "sop_01HZX#scope_paths:1",
+    "sopTitle": "Infra only",
+    "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "scopePaths": [
+     "infra",
+     "docs/runbooks"
+    ]
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "scope_paths",
+    "rollout": "enforce",
+    "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "scope_paths",
+    "ref": "sop_01HZX#scope_paths:1",
+    "sopTitle": "Équipe infra — scope",
+    "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "scopePaths": [
+     "infra/é"
+    ]
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "scope_paths",
+    "rollout": "enforce",
+    "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Équipe infra — scope",
+     "scopePaths": [
+      "infra/é"
+     ]
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "plan_approval",
+    "ref": "sop_01HZX#plan_approval:1",
+    "sopTitle": "Plans first",
+    "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "mode": "required"
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "plan_approval",
+    "rollout": "enforce",
+    "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "mode": "required"
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "plan_approval",
+    "ref": "sop_01HZX#plan_approval:1",
+    "sopTitle": "Strict plans",
+    "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "mode": "strict"
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "plan_approval",
+    "rollout": "enforce",
+    "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Strict plans",
+     "mode": "strict"
+    }
+   }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "plan_approval",
+    "ref": "sop_01HZX#plan_approval:1",
+    "sopTitle": "Plans first",
+    "fallbackId": null,
+    "rollout": "shadow",
+    "mode": "required"
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "plan_approval",
+    "rollout": "shadow",
+    "fallbackId": null,
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "mode": "required"
+    }
+   }
+  }
+ ],
+ "damaged": [
+  {
+   "name": "four columns",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce"
+  },
+  {
+   "name": "six columns",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ==\textra"
+  },
+  {
+   "name": "wrong tag",
+   "line": "@rules\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "unknown kind",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_tests\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "kind column disagrees with the payload",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "fallback column disagrees",
+   "line": "@rule\trequires_outcome-fallback:9@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "rollout column disagrees",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tshadow\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "not base64",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\t!!!"
+  },
+  {
+   "name": "base64 that is not canonical (a space inside)",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGph Y2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "not JSON",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJ2Ijox"
+  },
+  {
+   "name": "a JSON list",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\tW10="
+  },
+  {
+   "name": "an unknown field",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImV4dHJhIjoxLCJmaXJzdCI6ImFjdGlvbjpydW5fdGVzdHMiLCJxdWFsaWZpZXIiOiJvayIsInJlZiI6InNvcF8wMUhaWCNyZXF1aXJlc19vdXRjb21lOjEiLCJzb3BUaXRsZSI6IlJlbGVhc2UgZ2F0ZSIsInRoZW4iOiJhY3Rpb246ZGVwbG95IiwidiI6MX0="
+  },
+  {
+   "name": "a payload that carries its kind",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsImtpbmQiOiJyZXF1aXJlc19vdXRjb21lIiwicXVhbGlmaWVyIjoib2siLCJyZWYiOiJzb3BfMDFIWlgjcmVxdWlyZXNfb3V0Y29tZToxIiwic29wVGl0bGUiOiJSZWxlYXNlIGdhdGUiLCJ0aGVuIjoiYWN0aW9uOmRlcGxveSIsInYiOjF9"
+  },
+  {
+   "name": "a payload that carries its rollout",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInJvbGxvdXQiOiJlbmZvcmNlIiwic29wVGl0bGUiOiJSZWxlYXNlIGdhdGUiLCJ0aGVuIjoiYWN0aW9uOmRlcGxveSIsInYiOjF9"
+  },
+  {
+   "name": "a missing field",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJmaXJzdCI6ImFjdGlvbjpydW5fdGVzdHMiLCJxdWFsaWZpZXIiOiJvayIsInJlZiI6InNvcF8wMUhaWCNyZXF1aXJlc19vdXRjb21lOjEiLCJzb3BUaXRsZSI6IlJlbGVhc2UgZ2F0ZSIsInRoZW4iOiJhY3Rpb246ZGVwbG95IiwidiI6MX0="
+  },
+  {
+   "name": "a field of another kind",
+   "line": "@rule\tplan_approval-fallback:1@f748836cfb40\tplan_approval\tenforce\teyJtb2RlIjoicmVxdWlyZWQiLCJyZWYiOiJzb3BfMDFIWlgjcGxhbl9hcHByb3ZhbDoxIiwic2NvcGVQYXRocyI6WyJ4Il0sInNvcFRpdGxlIjoiUGxhbnMgZmlyc3QiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "version 2",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoyfQ=="
+  },
+  {
+   "name": "unknown rollout",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\twarn\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "ref of another kind",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3Njb3BlX3BhdGhzOjEiLCJzb3BUaXRsZSI6IlJlbGVhc2UgZ2F0ZSIsInRoZW4iOiJhY3Rpb246ZGVwbG95IiwidiI6MX0="
+  },
+  {
+   "name": "ref without a number",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWUiLCJzb3BUaXRsZSI6IlJlbGVhc2UgZ2F0ZSIsInRoZW4iOiJhY3Rpb246ZGVwbG95IiwidiI6MX0="
+  },
+  {
+   "name": "ref with no sop",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoiI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "enforce without a fallback id",
+   "line": "@rule\t-\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "fallback id of another number",
+   "line": "@rule\trequires_outcome-fallback:2@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "fallback id of another kind",
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "fallback id with a short hash",
+   "line": "@rule\trequires_outcome-fallback:1@abc\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "shadow with a fallback id",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tshadow\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "first is another token",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOmRlcGxveSIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "another qualifier",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6ImZhaWxlZCIsInJlZiI6InNvcF8wMUhaWCNyZXF1aXJlc19vdXRjb21lOjEiLCJzb3BUaXRsZSI6IlJlbGVhc2UgZ2F0ZSIsInRoZW4iOiJhY3Rpb246ZGVwbG95IiwidiI6MX0="
+  },
+  {
+   "name": "then is a command",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImdpdCBwdXNoIiwidiI6MX0="
+  },
+  {
+   "name": "then is run_tests itself",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiUmVsZWFzZSBnYXRlIiwidGhlbiI6ImFjdGlvbjpydW5fdGVzdHMiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "adjacent is not a boolean",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6Im5vIiwiZmlyc3QiOiJhY3Rpb246cnVuX3Rlc3RzIiwicXVhbGlmaWVyIjoib2siLCJyZWYiOiJzb3BfMDFIWlgjcmVxdWlyZXNfb3V0Y29tZToxIiwic29wVGl0bGUiOiJSZWxlYXNlIGdhdGUiLCJ0aGVuIjoiYWN0aW9uOmRlcGxveSIsInYiOjF9"
+  },
+  {
+   "name": "title with a tab",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoiYVx0YiIsInRoZW4iOiJhY3Rpb246ZGVwbG95IiwidiI6MX0="
+  },
+  {
+   "name": "title too long",
+   "line": "@rule\trequires_outcome-fallback:1@f748836cfb40\trequires_outcome\tenforce\teyJhZGphY2VudCI6ZmFsc2UsImZpcnN0IjoiYWN0aW9uOnJ1bl90ZXN0cyIsInF1YWxpZmllciI6Im9rIiwicmVmIjoic29wXzAxSFpYI3JlcXVpcmVzX291dGNvbWU6MSIsInNvcFRpdGxlIjoidHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0IiwidGhlbiI6ImFjdGlvbjpkZXBsb3kiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "no scope paths",
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOltdLCJzb3BUaXRsZSI6IkluZnJhIG9ubHkiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "an empty scope path",
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOlsiIl0sInNvcFRpdGxlIjoiSW5mcmEgb25seSIsInYiOjF9"
+  },
+  {
+   "name": "a scope path with a newline",
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOlsiYVxuYiJdLCJzb3BUaXRsZSI6IkluZnJhIG9ubHkiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "a scope path too long",
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOlsicHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwIl0sInNvcFRpdGxlIjoiSW5mcmEgb25seSIsInYiOjF9"
+  },
+  {
+   "name": "too many scope paths",
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOlsicDAiLCJwMSIsInAyIiwicDMiLCJwNCIsInA1IiwicDYiLCJwNyIsInA4IiwicDkiLCJwMTAiLCJwMTEiLCJwMTIiLCJwMTMiLCJwMTQiLCJwMTUiLCJwMTYiLCJwMTciLCJwMTgiLCJwMTkiLCJwMjAiLCJwMjEiLCJwMjIiLCJwMjMiLCJwMjQiLCJwMjUiLCJwMjYiLCJwMjciLCJwMjgiLCJwMjkiLCJwMzAiLCJwMzEiLCJwMzIiLCJwMzMiLCJwMzQiLCJwMzUiLCJwMzYiLCJwMzciLCJwMzgiLCJwMzkiLCJwNDAiLCJwNDEiLCJwNDIiLCJwNDMiLCJwNDQiLCJwNDUiLCJwNDYiLCJwNDciLCJwNDgiLCJwNDkiLCJwNTAiLCJwNTEiLCJwNTIiLCJwNTMiLCJwNTQiLCJwNTUiLCJwNTYiLCJwNTciLCJwNTgiLCJwNTkiLCJwNjAiLCJwNjEiLCJwNjIiLCJwNjMiLCJwNjQiXSwic29wVGl0bGUiOiJJbmZyYSBvbmx5IiwidiI6MX0="
+  },
+  {
+   "name": "scope paths not a list",
+   "line": "@rule\tscope_paths-fallback:1@f748836cfb40\tscope_paths\tenforce\teyJyZWYiOiJzb3BfMDFIWlgjc2NvcGVfcGF0aHM6MSIsInNjb3BlUGF0aHMiOiJpbmZyYSIsInNvcFRpdGxlIjoiSW5mcmEgb25seSIsInYiOjF9"
+  },
+  {
+   "name": "unknown plan mode",
+   "line": "@rule\tplan_approval-fallback:1@f748836cfb40\tplan_approval\tenforce\teyJtb2RlIjoibG9vc2UiLCJyZWYiOiJzb3BfMDFIWlgjcGxhbl9hcHByb3ZhbDoxIiwic29wVGl0bGUiOiJQbGFucyBmaXJzdCIsInYiOjF9"
+  }
+ ],
+ "fallbacks": [
+  {
+   "name": "a v22 action token: the action subject",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:1",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:deploy",
+    "adjacent": false
+   },
+   "fallback": {
+    "id": "requires_outcome-fallback:1@f748836cfb40",
+    "severity": "block",
+    "reason": "Qualified requires_before (Release gate): this gate cannot read test results, so the call it gates is refused; upgrade the Intutic gate",
+    "subject": "action",
+    "source": " (action:deploy) ",
+    "ignoreCase": true
+   }
+  },
+  {
+   "name": "a newer action token: its phrases",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:4",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:4@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:migrate",
+    "adjacent": false
+   },
+   "fallback": {
+    "id": "requires_outcome-fallback:4@f748836cfb40",
+    "severity": "block",
+    "reason": "Qualified requires_before (Release gate): this gate cannot read test results, so the call it gates is refused; upgrade the Intutic gate",
+    "subject": "phrase",
+    "source": "prisma migrate deploy|prisma db push|alembic upgrade|alembic downgrade|rails db:migrate|rake db:migrate|manage.py migrate|flyway migrate|liquibase update|knex migrate:latest|sequelize db:migrate",
+    "ignoreCase": true
+   }
+  },
+  {
+   "name": "a token with no phrases: every shell call",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:5",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:5@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:secret_read",
+    "adjacent": false
+   },
+   "fallback": {
+    "id": "requires_outcome-fallback:5@f748836cfb40",
+    "severity": "block",
+    "reason": "Qualified requires_before (Release gate): this gate cannot read test results, so the call it gates is refused; upgrade the Intutic gate",
+    "subject": "tool",
+    "source": " [^ ]*(bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ",
+    "ignoreCase": true
+   }
+  },
+  {
+   "name": "a tool: the tool subject",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:3",
+    "sopTitle": "Release gate",
+    "fallbackId": "requires_outcome-fallback:3@f748836cfb40",
+    "rollout": "enforce",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "mcp__vercel__deploy",
+    "adjacent": false
+   },
+   "fallback": {
+    "id": "requires_outcome-fallback:3@f748836cfb40",
+    "severity": "block",
+    "reason": "Qualified requires_before (Release gate): this gate cannot read test results, so the call it gates is refused; upgrade the Intutic gate",
+    "subject": "tool",
+    "source": " (mcp__vercel__deploy) ",
+    "ignoreCase": false
+   }
+  },
+  {
+   "name": "scope_paths: every mutation tool",
+   "record": {
+    "v": 1,
+    "kind": "scope_paths",
+    "ref": "sop_01HZX#scope_paths:1",
+    "sopTitle": "Infra only",
+    "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "scopePaths": [
+     "infra",
+     "docs/runbooks"
+    ]
+   },
+   "fallback": {
+    "id": "scope_paths-fallback:1@f748836cfb40",
+    "severity": "block",
+    "reason": "scope_paths_mode: enforce (Infra only): this gate cannot check a change against the scope, so every file change is refused; upgrade the Intutic gate",
+    "subject": "tool",
+    "source": " [^ ]*(write|write_file|writefile|create_file|createfile|edit|edit_file|editfile|multiedit|apply_patch|str_replace|notebookedit|delete_file|deletefile|remove_file|rm_file|move_file|movefile|rename_file|rename|str_replace_editor|text_editor|texteditor|str_replace_based_edit_tool) ",
+    "ignoreCase": true
+   }
+  },
+  {
+   "name": "plan_approval: every call",
+   "record": {
+    "v": 1,
+    "kind": "plan_approval",
+    "ref": "sop_01HZX#plan_approval:1",
+    "sopTitle": "Plans first",
+    "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "mode": "required"
+   },
+   "fallback": {
+    "id": "plan_approval-fallback:1@f748836cfb40",
+    "severity": "block",
+    "reason": "plan_approval (Plans first): this gate cannot check plan approval, so every call is refused; upgrade the Intutic gate",
+    "subject": "tool",
+    "source": " [^ ]+ ",
+    "ignoreCase": false
+   }
+  },
+  {
+   "name": "a shadow record has none",
+   "record": {
+    "v": 1,
+    "kind": "requires_outcome",
+    "ref": "sop_01HZX#requires_outcome:1",
+    "sopTitle": "Release gate",
+    "fallbackId": null,
+    "rollout": "shadow",
+    "first": "action:run_tests",
+    "qualifier": "ok",
+    "then": "action:deploy",
+    "adjacent": false
+   },
+   "fallback": null
+  }
+ ],
+ "compile": [
+  {
+   "name": "a qualified rule, a scope and plan approval",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Release\tgate"
+   },
+   "front": "\nrequires_before: action:run_tests -> action:deploy\nrequires_before: action:run_tests[ok] -> action:deploy, action:run_tests[ok] ~> Bash\nscope_paths: infra, docs\nscope_paths_mode: enforce\nplan_approval: strict\n",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "local:release.md#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@fff7007bb279",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    },
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "local:release.md#requires_outcome:2",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:2@fff7007bb279",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "Bash",
+     "adjacent": true
+    },
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "local:release.md#scope_paths:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "scope_paths-fallback:1@fff7007bb279",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs"
+     ]
+    },
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "local:release.md#plan_approval:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "plan_approval-fallback:1@fff7007bb279",
+     "rollout": "enforce",
+     "mode": "strict"
+    }
+   ],
+   "fallbackIds": [
+    "requires_outcome-fallback:1@fff7007bb279",
+    "requires_outcome-fallback:2@fff7007bb279",
+    "scope_paths-fallback:1@fff7007bb279",
+    "plan_approval-fallback:1@fff7007bb279"
+   ]
+  },
+  {
+   "name": "a shadow SOP: shadow records, no fallback lines",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Release gate"
+   },
+   "front": "\nmode: shadow\nplan_approval: required\n",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "local:release.md#plan_approval:1",
+     "sopTitle": "Release gate",
+     "fallbackId": null,
+     "rollout": "shadow",
+     "mode": "required"
+    }
+   ],
+   "fallbackIds": []
+  },
+  {
+   "name": "the writer's shadow stamp (SILENT_LOG)",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Release gate",
+    "shadow": true
+   },
+   "front": "\nplan_approval: required\n",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "local:release.md#plan_approval:1",
+     "sopTitle": "Release gate",
+     "fallbackId": null,
+     "rollout": "shadow",
+     "mode": "required"
+    }
+   ],
+   "fallbackIds": []
+  },
+  {
+   "name": "a SOP with roles compiles nothing",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Deployers"
+   },
+   "front": "\nroles: deployer\nrequires_before: action:run_tests[ok] -> action:deploy\nplan_approval: required\n",
+   "records": [],
+   "fallbackIds": []
+  },
+  {
+   "name": "scope paths in advise mode compile nothing",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Scope"
+   },
+   "front": "\nscope_paths: infra\n",
+   "records": [],
+   "fallbackIds": []
+  },
+  {
+   "name": "a typo in the mode enforces",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Scope"
+   },
+   "front": "\nscope_paths: infra\nscope_paths_mode: enforse\n",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "local:release.md#scope_paths:1",
+     "sopTitle": "Scope",
+     "fallbackId": "scope_paths-fallback:1@fff7007bb279",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra"
+     ]
+    }
+   ],
+   "fallbackIds": [
+    "scope_paths-fallback:1@fff7007bb279"
+   ]
+  },
+  {
+   "name": "a qualifier in the wrong place compiles nothing",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Wrong"
+   },
+   "front": "\nrequires_before: action:deploy -> action:run_tests[ok]\n",
+   "records": [],
+   "fallbackIds": []
+  }
+ ],
+ "evaluate": [
+  {
+   "name": "a passing run lets the deploy through",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "no run",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]->action:deploy",
+    "reason": "action:deploy needs a passing action:run_tests first; none ran in this session",
+    "scope": {
+     "tools": [
+      "action:deploy"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a failed run",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "failed",
+       "at": 1000,
+       "why": "summary_failed"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]->action:deploy",
+    "reason": "action:deploy needs a passing action:run_tests first; the last action:run_tests failed (summary_failed)",
+    "scope": {
+     "tools": [
+      "action:deploy"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a pass a write made stale (Q1)",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero",
+       "changed": true,
+       "later": true
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]->action:deploy",
+    "reason": "action:deploy needs a passing action:run_tests first; files changed after the last passing action:run_tests; rerun the tests",
+    "scope": {
+     "tools": [
+      "action:deploy"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a harness whose results cannot be read",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "windsurf",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": false,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]->action:deploy",
+    "reason": "action:deploy needs a passing action:run_tests first; windsurf reports no tool results Intutic can read, so a passing run cannot be observed here",
+    "scope": {
+     "tools": [
+      "action:deploy"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "no session id",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]->action:deploy",
+    "reason": "action:deploy needs a passing action:run_tests first; claude-code sent no session id, so test results cannot be tied to this session",
+    "scope": {
+     "tools": [
+      "action:deploy"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a call the rule does not gate",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "adjacent, with a call between",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:2",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:2@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:publish",
+     "adjacent": true
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "npm publish"
+    },
+    "actions": [
+     "action:publish"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero",
+       "later": true
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]~>action:publish",
+    "reason": "action:publish needs a passing action:run_tests first; action:publish must come directly after it, and another call came between",
+    "scope": {
+     "tools": [
+      "action:publish"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:2"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a tool named by the rule, any case",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:3",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:3@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "mcp__vercel__deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "MCP__Vercel__Deploy",
+    "input": {},
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]->mcp__vercel__deploy",
+    "reason": "mcp__vercel__deploy needs a passing action:run_tests first; none ran in this session",
+    "scope": {
+     "tools": [
+      "mcp__vercel__deploy"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:3"
+   },
+   "shadow": []
+  },
+  {
+   "name": "shadow: reported, not refused",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": null,
+     "rollout": "shadow",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": [
+    {
+     "code": "PREREQUISITE_UNMET",
+     "ruleId": "requires_before.action:run_tests[ok]->action:deploy",
+     "reason": "action:deploy needs a passing action:run_tests first; none ran in this session",
+     "scope": {
+      "tools": [
+       "action:deploy"
+      ],
+      "step": "action:run_tests"
+     },
+     "ref": "sop_01HZX#requires_outcome:1"
+    }
+   ]
+  },
+  {
+   "name": "a write inside the scope",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Write",
+    "input": {
+     "file_path": "infra/main.tf"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "a relative write from a subdirectory, inside",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Edit",
+    "input": {
+     "file_path": "runbooks/a.md"
+    },
+    "actions": [],
+    "cwd": "/repo/docs",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "a write outside the scope",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Write",
+    "input": {
+     "file_path": "src/app.ts"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "OUT_OF_SCOPE",
+    "ruleId": "scope_paths.Infra only",
+    "reason": "Changes outside the declared file scope: src/app.ts (scope: infra, docs/runbooks)",
+    "scope": {
+     "paths": [
+      "src/app.ts"
+     ]
+    },
+    "ref": "sop_01HZX#scope_paths:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "an absolute path outside the workspace",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Write",
+    "input": {
+     "file_path": "/etc/hosts"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "OUT_OF_SCOPE",
+    "ruleId": "scope_paths.Infra only",
+    "reason": "Changes outside the declared file scope: /etc/hosts (scope: infra, docs/runbooks)",
+    "scope": {
+     "paths": [
+      "/etc/hosts"
+     ]
+    },
+    "ref": "sop_01HZX#scope_paths:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a ../ path that stays inside the scope",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Write",
+    "input": {
+     "file_path": "../infra/x"
+    },
+    "actions": [],
+    "cwd": "/repo/infra",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "a ../ path out of the workspace",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Write",
+    "input": {
+     "file_path": "../../x"
+    },
+    "actions": [],
+    "cwd": "/repo/infra",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "OUT_OF_SCOPE",
+    "ruleId": "scope_paths.Infra only",
+    "reason": "Changes outside the declared file scope: ../../x (scope: infra, docs/runbooks)",
+    "scope": {
+     "paths": [
+      "../../x"
+     ]
+    },
+    "ref": "sop_01HZX#scope_paths:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a move with one end outside",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "move_file",
+    "input": {
+     "source": "infra/a",
+     "destination": "tmp/a"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "OUT_OF_SCOPE",
+    "ruleId": "scope_paths.Infra only",
+    "reason": "Changes outside the declared file scope: tmp/a (scope: infra, docs/runbooks)",
+    "scope": {
+     "paths": [
+      "tmp/a"
+     ]
+    },
+    "ref": "sop_01HZX#scope_paths:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a shell command is never a path",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "echo x > /etc/hosts"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "the union of two SOPs' scopes",
+   "records": [
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_01HZX#scope_paths:1",
+     "sopTitle": "Infra only",
+     "fallbackId": "scope_paths-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "scopePaths": [
+      "infra",
+      "docs/runbooks"
+     ]
+    },
+    {
+     "v": 1,
+     "kind": "scope_paths",
+     "ref": "sop_2#scope_paths:1",
+     "sopTitle": "App",
+     "fallbackId": "scope_paths-fallback:1@d60039415aed",
+     "rollout": "enforce",
+     "scopePaths": [
+      "src"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Write",
+    "input": {
+     "file_path": "src/app.ts"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "no approved plan",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "required"
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PLAN_NOT_APPROVED",
+    "ruleId": "plan_approval.Plans first",
+    "reason": "plan_approval: required (Plans first): this session has no approved plan; get the plan approved, then retry",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#plan_approval:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a plan feed that cannot be read",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "required"
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "unavailable"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PLAN_NOT_APPROVED",
+    "ruleId": "plan_approval.Plans first",
+    "reason": "plan_approval: required (Plans first): the approved plans could not be read; get the plan approved, then retry",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#plan_approval:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "plan approval and no session",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "required"
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PLAN_NOT_APPROVED",
+    "ruleId": "plan_approval.Plans first",
+    "reason": "plan_approval: required (Plans first): claude-code sent no session id, so no approved plan can be found for this session",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#plan_approval:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "an exempt tool before approval",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "required"
+    }
+   ],
+   "call": {
+    "tool": "Grep",
+    "input": {
+     "pattern": "x"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "required lets any tool through once approved",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "required"
+    }
+   ],
+   "call": {
+    "tool": "WebFetch",
+    "input": {
+     "url": "https://x"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "strict: a tool off the plan",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Strict plans",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "strict"
+    }
+   ],
+   "call": {
+    "tool": "WebFetch",
+    "input": {
+     "url": "https://x"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "OFF_PLAN",
+    "ruleId": "plan_approval.Strict plans",
+    "reason": "WebFetch is not a step of this session's approved plan (plan_approval: strict, Strict plans)",
+    "scope": {
+     "tools": [
+      "WebFetch"
+     ]
+    },
+    "ref": "sop_01HZX#plan_approval:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "strict: a tool on the plan, any case",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Strict plans",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "strict"
+    }
+   ],
+   "call": {
+    "tool": "bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "strict beats required",
+   "records": [
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "required"
+    },
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Strict plans",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "strict"
+    }
+   ],
+   "call": {
+    "tool": "WebFetch",
+    "input": {
+     "url": "https://x"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": {
+     "v": 1,
+     "outcomes": {
+      "action:run_tests": {
+       "o": "ok",
+       "at": 1000,
+       "why": "exit_zero"
+      }
+     }
+    },
+    "observable": true,
+    "plan": {
+     "status": "approved",
+     "tools": [
+      "Bash",
+      "Edit"
+     ]
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "OFF_PLAN",
+    "ruleId": "plan_approval.Strict plans",
+    "reason": "WebFetch is not a step of this session's approved plan (plan_approval: strict, Strict plans)",
+    "scope": {
+     "tools": [
+      "WebFetch"
+     ]
+    },
+    "ref": "sop_01HZX#plan_approval:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "plan approval is decided before the prerequisite",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    },
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": "plan_approval-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "mode": "required"
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PLAN_NOT_APPROVED",
+    "ruleId": "plan_approval.Plans first",
+    "reason": "plan_approval: required (Plans first): this session has no approved plan; get the plan approved, then retry",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#plan_approval:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "an enforcing refusal with a shadow finding beside it",
+   "records": [
+    {
+     "v": 1,
+     "kind": "requires_outcome",
+     "ref": "sop_01HZX#requires_outcome:1",
+     "sopTitle": "Release gate",
+     "fallbackId": "requires_outcome-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "first": "action:run_tests",
+     "qualifier": "ok",
+     "then": "action:deploy",
+     "adjacent": false
+    },
+    {
+     "v": 1,
+     "kind": "plan_approval",
+     "ref": "sop_01HZX#plan_approval:1",
+     "sopTitle": "Plans first",
+     "fallbackId": null,
+     "rollout": "shadow",
+     "mode": "required"
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "PREREQUISITE_UNMET",
+    "ruleId": "requires_before.action:run_tests[ok]->action:deploy",
+    "reason": "action:deploy needs a passing action:run_tests first; none ran in this session",
+    "scope": {
+     "tools": [
+      "action:deploy"
+     ],
+     "step": "action:run_tests"
+    },
+    "ref": "sop_01HZX#requires_outcome:1"
+   },
+   "shadow": [
+    {
+     "code": "PLAN_NOT_APPROVED",
+     "ruleId": "plan_approval.Plans first",
+     "reason": "plan_approval: required (Plans first): this session has no approved plan; get the plan approved, then retry",
+     "scope": {
+      "tools": [
+       "Bash"
+      ]
+     },
+     "ref": "sop_01HZX#plan_approval:1"
+    }
+   ]
+  },
+  {
+   "name": "no records",
+   "records": [],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push origin main"
+    },
+    "actions": [
+     "action:deploy"
+    ],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  }
+ ],
+ "planResponse": [
+  {
+   "name": "approved, tools from tool and toolName, each once",
+   "status": 200,
+   "body": {
+    "lifecycleState": "APPROVED",
+    "steps": [
+     {
+      "tool": "Read"
+     },
+     {
+      "toolName": "Edit"
+     },
+     {
+      "tool": " Bash "
+     },
+     {
+      "tool": "Read"
+     },
+     {
+      "description": "no tool"
+     },
+     "x"
+    ]
+   },
+   "plan": {
+    "status": "approved",
+    "tools": [
+     "Read",
+     "Edit",
+     "Bash"
+    ]
+   }
+  },
+  {
+   "name": "executing is approved",
+   "status": 200,
+   "body": {
+    "lifecycleState": "EXECUTING",
+    "steps": []
+   },
+   "plan": {
+    "status": "approved",
+    "tools": []
+   }
+  },
+  {
+   "name": "pending is none",
+   "status": 200,
+   "body": {
+    "lifecycleState": "PENDING_APPROVAL",
+    "steps": [
+     {
+      "tool": "Bash"
+     }
+    ]
+   },
+   "plan": {
+    "status": "none"
+   }
+  },
+  {
+   "name": "rejected is none",
+   "status": 200,
+   "body": {
+    "lifecycleState": "REJECTED"
+   },
+   "plan": {
+    "status": "none"
+   }
+  },
+  {
+   "name": "no plan for the session",
+   "status": 404,
+   "body": {
+    "error": "Plan not found"
+   },
+   "plan": {
+    "status": "none"
+   }
+  },
+  {
+   "name": "a server error",
+   "status": 500,
+   "body": {
+    "error": "Internal server error"
+   },
+   "plan": {
+    "status": "unavailable"
+   }
+  },
+  {
+   "name": "unreachable",
+   "status": null,
+   "body": null,
+   "plan": {
+    "status": "unavailable"
+   }
+  },
+  {
+   "name": "200 that is not an object",
+   "status": 200,
+   "body": [],
+   "plan": {
+    "status": "unavailable"
+   }
+  }
+ ]
+}

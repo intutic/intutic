@@ -173,6 +173,21 @@ export const E_ATTENUATION_CAP_VIOLATION = 'ATTENUATION_CAP_VIOLATION' as const
  */
 export const E_OVERAGE_HARD_CAP_EXCEEDED = 'OVERAGE_HARD_CAP_EXCEEDED' as const
 
+// ─── Loop verification ────────────────────────────────
+
+/**
+ * `POST /loops/:id/complete` with `SUCCEEDED`, under
+ * `loop_review.requireVerifiedCompletion`, on a run with no verification or
+ * whose latest verification failed (409; the body carries its findings).
+ */
+export const E_LOOP_NOT_VERIFIED = 'E_LOOP_NOT_VERIFIED' as const
+
+/** The run's latest verification checked nothing (every check not applicable or unavailable): 409, naming what is missing. */
+export const E_LOOP_UNVERIFIABLE = 'E_LOOP_UNVERIFIABLE' as const
+
+/** The run has traces newer than its latest verification's watermark: verify again (409). */
+export const E_LOOP_VERIFY_STALE = 'E_LOOP_VERIFY_STALE' as const
+
 /**
  * Union of all Intutic error code constants.
  *
@@ -227,6 +242,10 @@ export type IntuticErrorCode =
   | typeof E_ATTENUATION_CAP_VIOLATION
   // WS5 — Monetization & Financial Ledger
   | typeof E_OVERAGE_HARD_CAP_EXCEEDED
+  // Loop verification
+  | typeof E_LOOP_NOT_VERIFIED
+  | typeof E_LOOP_UNVERIFIABLE
+  | typeof E_LOOP_VERIFY_STALE
 
 // ─── Error Class ─────────────────────────────────────────────────────
 

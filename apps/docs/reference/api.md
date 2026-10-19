@@ -677,11 +677,50 @@ A rule enforces only under an active calibration, and a calibration becomes acti
 
 The daily calibration job writes candidates itself: for each rule and model digest with at least 30 new Review Queue rulings since its last fit, it fits a combiner and band on all but the newest 30%, registers a `source: "job"` run with that band, combiner and the held-out review ids, and then writes the held-out results. Its `passed` covers the marks it measures; it asks no model, so the planted-approval mark comes from a second run whose `prereg` names the candidate's `calibrationId`, `band` and `combiner` and whose results carry `adversarial.planted_approval.recall`. With the workspace setting `decideAutoPromote` on (off by default), the job promotes a candidate that meets every mark, as `promotedBy: "decideAutoPromote"`.
 
+A rule that decides `on: tool_call` subjects in a closed reversibility lane (a token of a lane a SOP's `closed_lanes:` or the workspace's `closedLanes` closes, or a shell tool while any lane is closed) has one more mark: a member signed in promotes its calibration. The job leaves such a candidate for a person, and the promote route refuses an API key with `mark 7: …`. Promotion releases nothing a lane holds: lane holds are evaluated before any decide rule.
+
 `GET /api/v1/policy/resolve` serves the decide rules as `decideRules`, each with its active calibrations as `pins`. The server switch `INTUTIC_DECIDE` decides what it serves: nothing (`off`, the default), every rule stamped shadow (`shadow`), or the rules as written (`on`).
 
 ### The rules view
 
 `GET /api/v1/decide/rules?days=30` (1 to 90) answers what the dashboard's Decide Rules page shows: every rule `GET /api/v1/policy/resolve` would serve, each with its `ruleRef`, `ruleHash`, the rule as its line carries it (or the `error` of a line that does not read), the server's shadow `stamp`, its `pins`, and `stats` over the uploaded decisions in the window: `decisions`, `outcomes`, `shadow` and `enforce` counts, `shadowWouldAct` (shadow decisions that refused or escalated), `escalationRate`, `shadowDisagreementRate` (`shadowWouldAct` over shadow decisions), and per question ten probability `buckets` with the answers inside the band (`unknown`) and the review queue's rulings on them (`labelled`, `refuseLabels`). `mode` is the kill switch for the workspace; under `off` no rule is listed.
+
+
+## Loop Endpoints
+
+### POST /api/v1/loops/:loopRunId/verify
+
+Checks a run's work: `{ diff, taskDescription, files?, base? }`. `files` (at most 2000 paths, each at most 512 characters) names changed paths the diff does not show; `base` is the ref the diff was taken against, logged with the verify; it changes no check.
+
+The deterministic checks run first, over the enforced SOPs that declare no `roles:`:
+
+- `scope_paths`: every path the diff, `files` and the run's change manifests changed must be inside the declared scopes. There is no tolerance.
+- `plan_steps`: the run's traced tool sequence against the declared plan, forgiving 40% of steps under `plan_steps_mode: advise` and none under `enforce`.
+
+When either fails, the answer has `stage: "deterministic"` and the judge is not called. Otherwise the judge grades the diff against the SOPs as before (`stage: "judge"`). The answer keeps `ok`, `score`, `findings` and `unverified` (present, and `true`, only when no check could run), and adds `verificationId`, `stage` and `checks`: each `{ id, status, findings, scope? }`, with `status` one of `pass`, `fail`, `not_applicable` or `unavailable`.
+
+### POST /api/v1/loops/:loopRunId/complete
+
+`{ outcome?: "SUCCEEDED" | "FAILED" }`. With the workspace setting `loop_review.requireVerifiedCompletion` on (off by default), a `SUCCEEDED` completion needs the run's latest verify to have passed:
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 409 | `E_LOOP_NOT_VERIFIED` | The run has no verify, or the latest one failed (its `findings` are included) |
+| 409 | `E_LOOP_UNVERIFIABLE` | The latest verify could check nothing; `missing` names what was absent |
+| 409 | `E_LOOP_VERIFY_STALE` | The run has traces newer than the latest verify |
+| 503 | `GOVERNANCE_UNAVAILABLE` | The check could not run; the run is not completed |
+
+`FAILED` is never refused. A run with no gateway traces (hook gates only) cannot go stale, so its passing verify stands. `GET /api/v1/loops/:loopRunId` answers `requiresVerifiedCompletion` beside the run.
+
+### Gate records and holds on policy resolve
+
+`GET /api/v1/policy/resolve` also serves, for the enforced SOPs with no `roles:`:
+
+- `gateRecords`: one per qualified `requires_before: action:run_tests[ok] -> …`, per `scope_paths` under `scope_paths_mode: enforce`, and per `plan_approval:`. Each is `{ sopId, kind, rollout, fallbackId, payload }`; the snapshot writer encodes the record and its fallback line.
+- `holdRules`: a hold per token of each closed lane (`sop.lane.<class>.<token>`), from SOP `closed_lanes:` and the workspace `closedLanes`, and per revert hold (`revert.<token>`).
+- `revertHolds`: under `revertLane` `shadow` or `enforce`, each reversible-wide token whose revert or rejection rate reached the threshold, with both rates.
+
+`GET /api/v1/plans/approved` lists the workspace's `APPROVED` and `EXECUTING` plans updated in the last 7 days, each `{ sessionId, planId, state, tools, updatedAt }`, for `plan_approval:` at the hook gates.
 
 ---
 
@@ -691,7 +730,7 @@ The daily calibration job writes candidates itself: for each rule and model dige
 
 ## Route Catalog
 
-Every route the control plane serves: 418 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
+Every route the control plane serves: 419 routes, grouped by the source file that defines them. The **Auth** column says what a request must carry (see [Authentication](#authentication)); the **Key scope** column, which scopes cover it for an API key, any one of them (see [API key scopes](#api-key-scopes)). The badge on a section is the plan most of its routes need; a route that needs a different plan carries its own badge.
 
 ### `app.ts` <Badge type="tip" text="Cloud" />
 
@@ -1191,6 +1230,7 @@ Every route the control plane serves: 418 routes, grouped by the source file tha
 | POST | `/api/v1/plans/:planId/close` | OWNER/ADMIN/EM | `traces:write` | Close plan with a final outcome (OWNER/ADMIN/EM) |
 | GET | `/api/v1/plans/:planId/deviation` | Authenticated | `traces:read` | Get deviation log |
 | POST | `/api/v1/plans/:planId/reject` | OWNER/ADMIN/EM | `traces:write` | Reject plan before it executes (OWNER/ADMIN/EM) |
+| GET | `/api/v1/plans/approved` | Authenticated | `traces:read` | Approved and executing plans, for the hook gates |
 | POST | `/api/v1/plans/capture` | OWNER/ADMIN/EM/DEVELOPER | `traces:write` | Capture a plan artifact |
 | GET | `/api/v1/plans/session/:sessionId` | Authenticated | `traces:read` |  |
 | GET | `/api/v1/sops/:sopId/proof-tree` | Authenticated | `sops:read` | Get latest proof tree |

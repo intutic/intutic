@@ -121,6 +121,11 @@ fn evaluate_sop_shadows(
     let with_sops = |sops: &[crate::sops::Sop]| {
         let sop_gov = crate::sops::governance_fields_from(sops, role);
         crate::wasm::context::RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             denied_tools: sop_gov.denied_tools,
             denied_tool_sources: sop_gov.denied_tool_sources,
             plan_steps: sop_gov.plan_steps,
@@ -1141,6 +1146,178 @@ async fn decide_log_upload(
     })
 }
 
+/// The workspace's closed lanes (`closedLanes`) and revert-lane setting
+/// (`revertLane`) from `/auth/key-context`, the same
+/// cached answer the intervention mode reads. Nothing closed and `off`
+/// whenever the answer does not say otherwise: no control plane or virtual
+/// key, a control plane that could not answer, or one older than the fields.
+async fn lane_settings(
+    state: &AppState,
+    virtual_key: Option<&crate::credential::VirtualKey>,
+    workspace_id: &str,
+) -> (
+    Vec<crate::plugins::anomaly::actions::LaneClass>,
+    crate::key_context::RevertLane,
+) {
+    let policy = &state.config.intutic_settings.policy;
+    let Some((cp_url, virtual_key)) = policy.control_plane_url.as_deref().zip(virtual_key) else {
+        return Default::default();
+    };
+    let version = state.control_plane.policy_version(workspace_id).await;
+    match crate::key_context::fetch(
+        &state.http_client,
+        cp_url,
+        virtual_key,
+        std::time::Duration::from_millis(policy.timeout_ms),
+        version,
+    )
+    .await
+    {
+        Ok(crate::key_context::Answer::Body(body)) => (
+            crate::key_context::closed_lanes(&body),
+            crate::key_context::revert_lane(&body),
+        ),
+        _ => Default::default(),
+    }
+}
+
+/// Pause a loop run whose correction ran out, and answer the
+/// request that exhausted it.
+///
+/// 1. The review hold is placed with the byte-stable reason
+///    ([`exhausted_review_reason`]), as a `review_before:` hold is.
+/// 2. The reask counter for the detector or rule is cleared, so the run gets
+///    three fresh attempts once a person approves it.
+/// 3. The blocked trace carries the loop run id, so the control plane's
+///    `reconcileReviewHolds` moves the run to PENDING_REVIEW.
+/// 4. The answer is 403 `LOOP_RUN_PENDING_REVIEW`, not `policy_denied`.
+#[allow(clippy::too_many_arguments)]
+async fn pause_exhausted_run(
+    store: &Arc<dyn crate::store::LocalStore>,
+    loop_run_id: &str,
+    scope: &str,
+    detector: &str,
+    reason: &str,
+    trace: crate::telemetry::ExecutionTrace,
+    mode: crate::refusal::InterventionMode,
+) -> Response {
+    store.request_loop_review(loop_run_id, reason).await;
+    store.reset_reask_attempt(scope, detector).await;
+    crate::local_spend::log_offline_trace(&serde_json::to_value(&trace).unwrap_or_default());
+    let publisher = Arc::clone(store);
+    spawn(async move {
+        if let Err(e) = publisher.publish_trace(&trace).await {
+            tracing::warn!("Failed to publish the paused run's trace: {}", e);
+        }
+    });
+    json_error(
+        StatusCode::FORBIDDEN,
+        "LOOP_RUN_PENDING_REVIEW",
+        &loop_review_message(loop_run_id, reason, mode),
+    )
+}
+
+/// Log, once per workspace and role, that the SOPs declare more than one node
+/// kind for it. The union of their limits still applies.
+fn warn_node_kind_conflict(
+    workspace_id: &str,
+    role: &str,
+    kind: &crate::plugins::anomaly::graph_detectors::EffectiveNodeKind,
+) {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let key = format!("{workspace_id}|{role}");
+    let Ok(mut seen) = SEEN
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+        .lock()
+    else {
+        return;
+    };
+    // Bounded: past the cap the set is reset, so a conflict is at worst
+    // logged again rather than the set growing with every role ever seen.
+    if seen.len() >= 4096 {
+        seen.clear();
+    }
+    if seen.insert(key) {
+        let kinds: Vec<&str> = kind.kinds.iter().map(|k| k.as_str()).collect();
+        tracing::warn!(
+            workspace_id = %workspace_id,
+            agent_role = %role,
+            kinds = ?kinds,
+            "SOPs declare more than one node_kind for this role; the union of their limits applies"
+        );
+    }
+}
+
+/// The session's test outcomes for a qualified `requires_before:` rule:
+/// the stored record, brought up to date with this request.
+///
+/// The history is replayed to its last paired `action:run_tests` result
+/// (`outcome::latest_test_outcome`) — idempotent, so a retried request
+/// records nothing new — and a file write after it makes a pass stale (Q1).
+/// A history with no paired result (compacted, or no run) leaves the stored
+/// outcome, made stale by a write in this turn's delta.
+///
+/// `None` when the store could not be read or written: every qualified rule
+/// is then unmet, because rule failures fail closed.
+async fn resolve_action_outcomes(
+    store: &dyn crate::store::LocalStore,
+    scope: &str,
+    body: &serde_json::Value,
+    history: &[crate::manifest::ToolInvocation],
+    delta: &[crate::manifest::ToolInvocation],
+) -> Option<Vec<(String, crate::plugins::anomaly::outcome::OutcomeEntry)>> {
+    use crate::plugins::anomaly::outcome::{
+        is_file_write, latest_test_outcome, OutcomeEntry, OUTCOME_TOKENS,
+    };
+    let token = OUTCOME_TOKENS[0];
+    let stored = store.action_outcomes(scope).await?;
+    let mut list: Vec<(String, OutcomeEntry)> = stored
+        .iter()
+        .filter_map(|(t, v)| Some((t.clone(), OutcomeEntry::decode(v)?)))
+        .collect();
+    let mut all: Vec<crate::manifest::ToolInvocation> = history.to_vec();
+    all.extend(crate::manifest::extract_responses_outcome_items(body));
+    let now = chrono::Utc::now().timestamp_millis();
+    let current = list
+        .iter()
+        .find(|(t, _)| t == token)
+        .map(|(_, o)| o.clone());
+    let update = match latest_test_outcome(&all, now) {
+        Some(entry) => Some(entry),
+        // No paired run in the history: the stored record stands, noted with
+        // this turn's calls (a write makes a pass stale, any call ends
+        // adjacency).
+        None => current.as_ref().and_then(|c| {
+            let calls: Vec<_> = delta
+                .iter()
+                .filter(|i| i.source == crate::manifest::InvocationSource::Call)
+                .collect();
+            if calls.is_empty() {
+                return None;
+            }
+            let mut next = c.clone();
+            for call in calls {
+                next.note_completed_call(is_file_write(call));
+            }
+            Some(next)
+        }),
+    };
+    if let Some(update) = update {
+        if current.as_ref().is_none_or(|c| !c.same_state(&update)) {
+            if !store
+                .record_action_outcome(scope, token, &update.encode())
+                .await
+            {
+                return None;
+            }
+            list.retain(|(t, _)| t != token);
+            list.push((token.to_string(), update));
+        }
+    }
+    Some(list)
+}
+
 /// Whether the workspace stores tool-call argument values in sampled replay
 /// contexts (`storeToolArguments` on `/auth/key-context`, the same cached
 /// answer the intervention mode reads). Read only for a sampled request.
@@ -1185,6 +1362,67 @@ fn json_error(status: StatusCode, error_type: &str, message: &str) -> Response {
         }
     });
     (status, axum::Json(body)).into_response()
+}
+
+/// [`json_error`], with the refusal's `scope` and `evidence`
+/// as `error.scope` and `error.evidence` — bounded, and dropped under OPAQUE
+/// so only the type survives (`refusal::detail_for_mode`). Absent when there
+/// is nothing to say, so the body is [`json_error`]'s.
+fn json_error_detailed(
+    status: StatusCode,
+    error_type: &str,
+    message: &str,
+    scope: Option<&crate::refusal::RefusalScope>,
+    evidence: &[crate::refusal::RefusalEvidence],
+    mode: crate::refusal::InterventionMode,
+) -> Response {
+    let (scope, evidence) = crate::refusal::detail_for_mode(scope, evidence, mode);
+    let mut error = serde_json::json!({ "type": error_type, "message": message });
+    if let Some(scope) = scope {
+        error["scope"] = serde_json::to_value(scope).unwrap_or_default();
+    }
+    if !evidence.is_empty() {
+        error["evidence"] = serde_json::to_value(evidence).unwrap_or_default();
+    }
+    (status, axum::Json(serde_json::json!({ "error": error }))).into_response()
+}
+
+/// The `LOOP_RUN_PENDING_REVIEW` message. The "Held by" clause is the hold's
+/// reason as the workspace's intervention mode lets the agent see it: an
+/// OPAQUE workspace's agent is told the run is held and how to release it,
+/// never which rule held it.
+fn loop_review_message(
+    loop_run_id: &str,
+    reason: &str,
+    mode: crate::refusal::InterventionMode,
+) -> String {
+    format!(
+        "Loop run {} is paused for human review. Held by: {}. \
+         An Owner, Admin or EM must approve or reject it before work continues — \
+         `intutic loop review {} --approve`, or the Held Changes tab in the dashboard.",
+        loop_run_id,
+        mode.agent_text(reason),
+        loop_run_id
+    )
+}
+
+/// The review reason a loop run is paused under when a correction is
+/// exhausted, capped at 512 bytes on a char boundary.
+///
+/// Byte-stable on purpose: the control plane stores the reason a person
+/// cleared as the run's watermark and compares it whole.
+fn exhausted_review_reason(source: &str, attempts: u32, finding_reason: &str) -> String {
+    let mut reason = format!(
+        "Run held for review: correction exhausted — {source} refused {attempts} attempts: {finding_reason}"
+    );
+    if reason.len() > 512 {
+        let mut cut = 512;
+        while !reason.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        reason.truncate(cut);
+    }
+    reason
 }
 
 /// What a request is estimated to cost on `model`, as the pre-request spend
@@ -4271,15 +4509,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     .await
                     .unwrap_or_else(|| "a declared review_before: action".to_string());
                 tracing::warn!(workspace_id = %workspace_id, loop_run_id = %lr_id, reason = %reason, "Loop run held for human review — rejecting request");
+                // Resolved here, before the request-wide read further down: the
+                // reason names the rule that held the run, and an OPAQUE
+                // workspace's agent must not learn it. The same
+                // cached key-context answer, so no extra request.
+                let mode = intervention_mode(&state, credential.virtual_key(), &workspace_id).await;
                 return json_error(
                     StatusCode::FORBIDDEN,
                     "LOOP_RUN_PENDING_REVIEW",
-                    &format!(
-                        "Loop run {} is paused for human review. Held by: {}. \
-                         An Owner, Admin or EM must approve or reject it before work continues — \
-                         `intutic loop review {} --approve`, or the Held Changes tab in the dashboard.",
-                        lr_id, reason, lr_id
-                    ),
+                    &loop_review_message(lr_id, &reason, mode),
                 );
             }
             // Every terminal status, enumerated negatively rather than positively:
@@ -4747,6 +4985,53 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         ))
     };
 
+    // Worker context isolation. Only a worker in a real graph
+    // with a parent is compared, and only against its siblings: the best
+    // match among the graph's stored signatures is handed to
+    // `ContextOverlapDetector` as plain data. A node's signature is stored on
+    // its first qualifying request — the one carrying the brief it was handed.
+    let sibling_overlap = if crate::context_sig::is_sibling_candidate(
+        &node.graph_id,
+        &node.node_id,
+        &node.parent_session_id,
+        node.depth,
+    ) {
+        match crate::context_sig::context_signature(&body_json) {
+            Some(sig) => {
+                let fields = state
+                    .store
+                    .context_signatures(&workspace_id, &node.graph_id)
+                    .await;
+                let overlap = fields.as_ref().and_then(|f| {
+                    crate::context_sig::best_sibling(
+                        &node.node_id,
+                        &node.parent_session_id,
+                        &sig,
+                        f.iter().map(|(n, v)| (n.as_str(), v.as_str())),
+                    )
+                });
+                if fields
+                    .as_ref()
+                    .is_some_and(|f| !f.iter().any(|(n, _)| n == &node.node_id))
+                {
+                    state
+                        .store
+                        .store_context_signature(
+                            &workspace_id,
+                            &node.graph_id,
+                            &node.node_id,
+                            &crate::context_sig::encode_field(&sig, &node.parent_session_id),
+                        )
+                        .await;
+                }
+                overlap
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+
     // Resolve the SOP set to enforce for this node's role — the process-global
     // on-disk set everywhere (today's behaviour, unchanged), or a workspace-
     // scoped control-plane fetch on a hosted gateway (which closes a gap:
@@ -4769,7 +5054,123 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // enforcing field set below — that is what makes them non-enforcing. Their
     // would-act evaluation happens separately, once the anomaly registry exists.
     let (enforcing_sops, shadow_mode_sops) = crate::sops::split_by_mode(&resolved_sops);
-    let gov = crate::sops::governance_fields_from(&enforcing_sops, &node.agent_role);
+    // Reversibility lanes: the workspace's `closedLanes` join
+    // the SOPs' `closed_lanes:`, and the tokens they hold are merged into
+    // `review_before`, where the review gate holds the run.
+    let (workspace_lanes, revert_lane) =
+        lane_settings(&state, credential.virtual_key(), &workspace_id).await;
+    let mut gov = crate::sops::governance_fields_with_lanes(
+        &enforcing_sops,
+        &node.agent_role,
+        &workspace_lanes,
+    );
+    // Revert history as an input: reversible-wide tokens
+    // whose revert or rejection rate for this role reached the threshold.
+    // Read while `revertLane` is on, and for the decide log's `revertRate`
+    // when a decide rule is in force; held only under `enforce`.
+    let revert_rates = if revert_lane.mode != crate::key_context::RevertLaneMode::Off
+        || resolved_sops.iter().any(|s| !s.decide_rules.is_empty())
+    {
+        state.control_plane.revert_rates(&workspace_id).await
+    } else {
+        None
+    };
+    let revert_hold_tokens: Vec<String> = match (&revert_rates, revert_lane.mode) {
+        (Some(rates), mode) if mode != crate::key_context::RevertLaneMode::Off => {
+            crate::key_context::revert_hold_tokens(rates, &node.agent_role, revert_lane.threshold)
+        }
+        _ => Vec::new(),
+    };
+    if revert_lane.mode == crate::key_context::RevertLaneMode::Enforce
+        && !revert_hold_tokens.is_empty()
+    {
+        gov.review_before.extend(revert_hold_tokens.iter().cloned());
+        gov.review_before.sort();
+        gov.review_before.dedup();
+    }
+    // Qualified prerequisites: the session's test outcomes,
+    // read and brought up to date only while such a rule is in force.
+    let qualified_rules = crate::plugins::anomaly::outcome::qualified_rules(&gov.requires_before);
+    let action_outcomes = if qualified_rules.is_empty() {
+        None
+    } else {
+        resolve_action_outcomes(
+            state.store.as_ref(),
+            &tool_scope_id,
+            &body_json,
+            &request_tool_calls,
+            &new_invocations,
+        )
+        .await
+    };
+    // Node kinds: the SOPs' `node_kind:` for this role, plus any
+    // kind the client declares for itself — which can only add limits.
+    let node_kind = {
+        use crate::node_kind::{Capability, NodeKind};
+        let sop_kinds: Vec<NodeKind> = gov
+            .node_kinds
+            .iter()
+            .filter_map(|k| NodeKind::parse(k))
+            .collect();
+        let allow: Vec<Capability> = gov
+            .node_kind_allow
+            .iter()
+            .filter_map(|c| Capability::parse(c))
+            .collect();
+        let declared = crate::graph::declared_node_kind(&headers).and_then(|v| NodeKind::parse(&v));
+        crate::plugins::anomaly::graph_detectors::effective_node_kind(&sop_kinds, declared, &allow)
+    };
+    if node_kind.sop_conflict {
+        warn_node_kind_conflict(&workspace_id, &node.agent_role, &node_kind);
+    }
+    if let Some(kind) = node_kind.recorded_kind() {
+        state
+            .store
+            .record_node_kind(&workspace_id, &node.graph_id, &node.node_id, kind.as_str())
+            .await;
+    }
+    let node_kind_denial = if node_kind.limits.is_none() && node.parent_session_id.is_empty() {
+        None
+    } else {
+        let parent_recorded = if node.parent_session_id.is_empty() {
+            None
+        } else {
+            state
+                .store
+                .recorded_node_kind(&workspace_id, &node.graph_id, &node.parent_session_id)
+                .await
+        };
+        crate::plugins::anomaly::graph_detectors::request_denial(
+            &node_kind,
+            &node.node_id,
+            &node.parent_session_id,
+            parent_recorded.as_deref(),
+        )
+    };
+    // `on_reask_exhausted: pause`, read here before `gov`'s
+    // fields move into the context.
+    let on_reask_pause = gov.on_reask_pause;
+    // The response gate's argument checks.
+    let arg_gates = crate::plugins::response_gate::ArgGates::new(
+        qualified_rules,
+        action_outcomes.clone(),
+        if gov.scope_paths_enforce && !gov.scope_paths.is_empty() {
+            Some(crate::plugins::response_gate::ScopeGate {
+                paths: gov.scope_paths.clone(),
+                rule: enforcing_sops
+                    .iter()
+                    .find(|s| {
+                        s.applies_to(&node.agent_role)
+                            && s.scope_paths_mode == crate::sops::CheckMode::Enforce
+                    })
+                    .map(|s| crate::refusal::tool_rule_id("scope_paths", &s.title))
+                    .unwrap_or_else(|| "scope_paths".to_string()),
+            })
+        } else {
+            None
+        },
+        (!node_kind.limits.is_none()).then(|| node_kind.clone()),
+    );
     // Hook-rule guardrails, enforcing and shadow together: each rule carries
     // its SOP's mode. Enforced on the response's tool calls below, and on the
     // calls of the turn this request reports on. A rule scoped to workspace
@@ -4856,13 +5257,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             } else {
                 None
             };
-            rules.with_log(crate::decide::gateway::GatewayLog {
-                harness: harness_type.clone(),
-                workspace_id: workspace_id.clone(),
-                session_id: session_id.clone(),
-                dirs: crate::decide::log::LogDirs::default_dirs(),
-                upload,
-            })
+            rules
+                .with_log(crate::decide::gateway::GatewayLog {
+                    harness: harness_type.clone(),
+                    workspace_id: workspace_id.clone(),
+                    session_id: session_id.clone(),
+                    dirs: crate::decide::log::LogDirs::default_dirs(),
+                    upload,
+                })
+                .with_lane_context(crate::decide::gateway::LaneContext {
+                    role: node.agent_role.clone(),
+                    revert_rates: revert_rates.clone(),
+                })
         };
         Arc::new(rules)
     };
@@ -4979,6 +5385,18 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         workflow_spend_usd: workflow_spend,
         workflow_budget_usd: workflow_budget,
         node,
+        action_outcomes,
+        revert_hold_tokens: revert_hold_tokens.clone(),
+        sibling_overlap,
+        context_isolation: if gov.context_isolation_enforce {
+            crate::plugins::anomaly::graph_detectors::IsolationMode::Enforce
+        } else {
+            crate::plugins::anomaly::graph_detectors::IsolationMode::Advise
+        },
+        modes: crate::wasm::context::EnforceModes {
+            scope_paths: gov.scope_paths_enforce,
+            plan_steps: gov.plan_steps_enforce,
+        },
     };
 
     // From here on `change_manifest` is only written onto traces: the
@@ -5157,6 +5575,112 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // an unreachable flag service can never silently switch enforcement off.
     let shadow_enforcement = feature_flags.is_some_and(|f| f.shadow_enforcement);
 
+    // A node kind that forbids this request: a `code` node
+    // calls no model, and a child of a `worker` or `gate` node may not run.
+    // Before the detectors' verdicts, like the loop gate: no finding can make
+    // the request one this node is allowed to make.
+    if let Some(denial) = node_kind_denial.as_ref().filter(|_| !bypass_everything) {
+        if shadow_enforcement {
+            tracing::info!(
+                workspace_id = %workspace_id,
+                rule = %denial.rule,
+                "SHADOW: a node kind would have refused this request"
+            );
+        } else {
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                node_id = %wasm_ctx.node.node_id,
+                rule = %denial.rule,
+                "{}",
+                denial.reason
+            );
+            crate::metrics::record_policy_refusal("node_kind", "kill");
+            // The literal (= graph_detectors::NODE_KIND_DENIED) keeps the SDKs'
+            // refusal-table tests, which read error codes from this file, honest.
+            return json_error_detailed(
+                StatusCode::FORBIDDEN,
+                "NODE_KIND_DENIED",
+                intervention_mode.agent_text(&format!("{} [{}]", denial.reason, denial.rule)),
+                Some(&crate::refusal::RefusalScope::default().with_rule(denial.rule.clone())),
+                &[],
+                intervention_mode,
+            );
+        }
+    }
+
+    // The blocked request's trace: built by the anomaly block below and by
+    // a paused run's exhausted correction, whose trace carries
+    // the loop run id for `reconcileReviewHolds` to surface the pause.
+    let make_blocked_trace = |verdict: &str,
+                              findings: &[crate::plugins::anomaly::AnomalyFinding]|
+     -> crate::telemetry::ExecutionTrace {
+        crate::telemetry::ExecutionTrace {
+            // Blocked before the model answered; there is no response to score.
+            // RIS_MAX means 'not measured', which is the only safe reading —
+            // 0 would drag the arm's reward down for a request it never served.
+            response_integrity: None,
+            quality_fault: None,
+            // Blocked before WASM evaluation ran.
+            wasm_shadow_reports: Vec::new(),
+            sop_shadow_reports: sop_shadow_reports.clone(),
+            // Blocked before any upstream call — nothing to compact.
+            tool_result_bytes_saved: 0,
+            // Blocked before any upstream call — routing never ran.
+            routing_shadow_model: None,
+            decision_traffic: None,
+            trace_id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.clone(),
+            proxy_instance_id: proxy_instance_id().to_string(),
+            workspace_id: workspace_id.clone(),
+            virtual_key_id: key_prefix.to_string(),
+            model: model.clone(),
+            provider: provider.harness_name().to_string(),
+            raw_input_tokens: wasm_ctx.estimated_input_tokens,
+            compressed_input_tokens: wasm_ctx.estimated_input_tokens,
+            output_tokens: 0,
+            raw_cost_usd: 0.0,
+            actual_cost_usd: 0.0,
+            cache_hit: false,
+            // Blocked before any upstream call — no provider usage exists.
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            reasoning_tokens: None,
+            latency_ms: start.elapsed().as_millis() as u32,
+            verdict: verdict.to_string(),
+            harness_type: harness_type.clone(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            requested_model: model.clone(),
+            actual_model_routed: model.clone(),
+            task_type: String::new(),
+            tools: new_tool_calls.clone(),
+            change_manifest: change_manifest.clone(),
+            reconstruction_quality: 0,
+            token_anomaly: false,
+            break_glass: has_break_glass,
+            break_glass_request_id: break_glass_request_id.clone(),
+            loop_run_id: loop_run_id_header.clone(),
+            findings: findings
+                .iter()
+                .map(crate::telemetry::FindingWire::from_finding)
+                .map(|w| if shadow_enforcement { w.shadowed() } else { w })
+                .collect(),
+            // Blocked before the model answered — no output to echo-scan.
+            response_injection_findings: Vec::new(),
+            context_snapshot: context_snapshot_for_trace.clone(),
+            // Blocked before any upstream call was made.
+            upstream_error: None,
+            upstream_attempts: Vec::new(),
+            upstream_fallback: None,
+            graph: crate::telemetry::GraphTrace::from_node(
+                &wasm_ctx.node,
+                findings
+                    .iter()
+                    .map(|f| f.kind.as_str().to_string())
+                    .collect(),
+            ),
+        }
+    };
+
     let mut advisory_anomalies: Vec<String> = Vec::new();
     // The same findings, attributed. `advisory_anomalies` above is kind strings
     // and cannot say which detector fired; this can. Kept as a second buffer
@@ -5232,39 +5756,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // the events anyone reading a trajectory is looking for. A refused
             // request costs nothing upstream, hence the zeroed token and cost
             // fields.
-            let blocked_trace = crate::telemetry::ExecutionTrace {
-                // Blocked before the model answered; there is no response to score.
-                // RIS_MAX means 'not measured', which is the only safe reading —
-                // 0 would drag the arm's reward down for a request it never served.
-                response_integrity: None,
-                quality_fault: None,
-                // Blocked before WASM evaluation ran.
-                wasm_shadow_reports: Vec::new(),
-                sop_shadow_reports: sop_shadow_reports.clone(),
-                // Blocked before any upstream call — nothing to compact.
-                tool_result_bytes_saved: 0,
-                // Blocked before any upstream call — routing never ran.
-                routing_shadow_model: None,
-                decision_traffic: None,
-                trace_id: uuid::Uuid::new_v4().to_string(),
-                session_id: session_id.clone(),
-                proxy_instance_id: proxy_instance_id().to_string(),
-                workspace_id: workspace_id.clone(),
-                virtual_key_id: key_prefix.to_string(),
-                model: model.clone(),
-                provider: provider.harness_name().to_string(),
-                raw_input_tokens: wasm_ctx.estimated_input_tokens,
-                compressed_input_tokens: wasm_ctx.estimated_input_tokens,
-                output_tokens: 0,
-                raw_cost_usd: 0.0,
-                actual_cost_usd: 0.0,
-                cache_hit: false,
-                // Blocked before any upstream call — no provider usage exists.
-                cache_read_input_tokens: None,
-                cache_creation_input_tokens: None,
-                reasoning_tokens: None,
-                latency_ms: start.elapsed().as_millis() as u32,
-                verdict: match worst.disposition {
+            let blocked_trace = make_blocked_trace(
+                match worst.disposition {
                     // `Ask` reports as "killed" rather than gaining a sixth
                     // string. `execution_traces.enforcement_action` is a
                     // Postgres enum fixed at BYPASS|ENHANCE|HIJACK|REASK|KILL,
@@ -5277,40 +5770,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     | crate::plugins::anomaly::Disposition::Ask => "killed",
                     crate::plugins::anomaly::Disposition::Reask => "reasked",
                     crate::plugins::anomaly::Disposition::Steer => "hijacked",
-                }
-                .to_string(),
-                harness_type: harness_type.clone(),
-                created_at: now,
-                requested_model: model.clone(),
-                actual_model_routed: model.clone(),
-                task_type: String::new(),
-                tools: new_tool_calls.clone(),
-                change_manifest: change_manifest.clone(),
-                reconstruction_quality: 0,
-                token_anomaly: false,
-                break_glass: has_break_glass,
-                break_glass_request_id: break_glass_request_id.clone(),
-                loop_run_id: loop_run_id_header.clone(),
-                findings: findings
-                    .iter()
-                    .map(crate::telemetry::FindingWire::from_finding)
-                    .map(|w| if shadow_enforcement { w.shadowed() } else { w })
-                    .collect(),
-                // Blocked before the model answered — no output to echo-scan.
-                response_injection_findings: Vec::new(),
-                context_snapshot: context_snapshot_for_trace.clone(),
-                // Blocked before any upstream call was made.
-                upstream_error: None,
-                upstream_attempts: Vec::new(),
-                upstream_fallback: None,
-                graph: crate::telemetry::GraphTrace::from_node(
-                    &wasm_ctx.node,
-                    findings
-                        .iter()
-                        .map(|f| f.kind.as_str().to_string())
-                        .collect(),
-                ),
-            };
+                },
+                &findings,
+            );
             crate::local_spend::log_offline_trace(
                 &serde_json::to_value(&blocked_trace).unwrap_or_default(),
             );
@@ -5352,7 +5814,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     );
                 } else {
                     crate::metrics::record_policy_refusal("anomaly", "kill");
-                    return json_error(
+                    return json_error_detailed(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
                         intervention_mode.agent_text(&format!(
@@ -5360,6 +5822,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             k.kind.as_str(),
                             k.reason
                         )),
+                        k.scope.as_ref(),
+                        &k.evidence,
+                        intervention_mode,
                     );
                 }
             }
@@ -5393,7 +5858,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     );
                 } else {
                     crate::metrics::record_policy_refusal("anomaly", "ask");
-                    return json_error(
+                    return json_error_detailed(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
                         intervention_mode.agent_text(&format!(
@@ -5401,6 +5866,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             c.kind.as_str(),
                             c.reason
                         )),
+                        c.scope.as_ref(),
+                        &c.evidence,
+                        intervention_mode,
                     );
                 }
             }
@@ -5478,8 +5946,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         attempts,
                         "Reask allowance exhausted — escalating to block"
                     );
+                    // A loop run whose SOPs say `on_reask_exhausted: pause`
+                    // is held for a person instead.
+                    if let Some(lr_id) = loop_run_id_header.as_deref().filter(|_| on_reask_pause) {
+                        crate::metrics::record_policy_refusal("anomaly", "reask_paused");
+                        let reason = exhausted_review_reason(r.detector_id, attempts, &r.reason);
+                        return pause_exhausted_run(
+                            &state.store,
+                            lr_id,
+                            &tool_scope_id,
+                            r.detector_id,
+                            &reason,
+                            make_blocked_trace("killed", &findings),
+                            intervention_mode,
+                        )
+                        .await;
+                    }
                     crate::metrics::record_policy_refusal("anomaly", "reask_exhausted");
-                    return json_error(
+                    return json_error_detailed(
                         StatusCode::FORBIDDEN,
                         "policy_denied",
                         intervention_mode.agent_text(&format!(
@@ -5488,6 +5972,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             attempts,
                             r.reason
                         )),
+                        r.scope.as_ref(),
+                        &r.evidence,
+                        intervention_mode,
                     );
                 }
 
@@ -5506,7 +5993,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 // that retries on conflict does the right thing here by default,
                 // where retrying a 403 would just replay the refusal.
                 crate::metrics::record_policy_refusal("anomaly", "reask");
-                return json_error(
+                return json_error_detailed(
                     StatusCode::CONFLICT,
                     "policy_reask",
                     intervention_mode.agent_text(&format!(
@@ -5515,6 +6002,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         remaining,
                         if remaining == 1 { "" } else { "s" },
                     )),
+                    r.scope.as_ref(),
+                    &r.evidence,
+                    intervention_mode,
                 );
             }
 
@@ -5529,6 +6019,39 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .map(crate::telemetry::FindingWire::from_finding)
                 .map(|w| if shadow_enforcement { w.shadowed() } else { w })
                 .collect();
+        }
+    }
+
+    // `revertLane: shadow`: a reversible-wide action whose
+    // revert history would have held it is recorded as a shadowed hold on
+    // the trace, and the request proceeds.
+    if revert_lane.mode == crate::key_context::RevertLaneMode::Shadow && !bypass_everything {
+        let mut hits: Vec<&str> = wasm_ctx
+            .new_tool_calls
+            .iter()
+            .filter(|t| {
+                wasm_ctx
+                    .revert_hold_tokens
+                    .iter()
+                    .any(|r| r.eq_ignore_ascii_case(t))
+            })
+            .map(String::as_str)
+            .collect();
+        hits.sort_unstable();
+        hits.dedup();
+        if !hits.is_empty() {
+            let mut finding = crate::plugins::anomaly::AnomalyFinding::ask(
+                crate::plugins::anomaly::AnomalyKind::ScopeViolation,
+                format!(
+                    "Run {}: {} — its revert history is over the workspace's revertLane threshold",
+                    crate::plugins::anomaly::detectors::REVIEW_HOLD_MARKER,
+                    hits.join(", ")
+                ),
+            )
+            .with_scope(crate::refusal::RefusalScope::tools(hits.iter().copied()));
+            finding.detector_id = "revert_lane";
+            advisory_findings
+                .push(crate::telemetry::FindingWire::from_finding(&finding).shadowed());
         }
     }
 
@@ -5622,6 +6145,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         attempts,
                         "WASM reask allowance exhausted — escalating to block"
                     );
+                    if let Some(lr_id) = loop_run_id_header.as_deref().filter(|_| on_reask_pause) {
+                        crate::metrics::record_policy_refusal("wasm", "reask_paused");
+                        let review = exhausted_review_reason(
+                            &format!("custom WASM rule {rule_id}"),
+                            attempts,
+                            &reason,
+                        );
+                        return pause_exhausted_run(
+                            &state.store,
+                            lr_id,
+                            &tool_scope_id,
+                            &rule_id,
+                            &review,
+                            make_blocked_trace("killed", &findings),
+                            intervention_mode,
+                        )
+                        .await;
+                    }
                     crate::metrics::record_policy_refusal("wasm", "reask_exhausted");
                     return json_error(
                         StatusCode::FORBIDDEN,
@@ -7438,6 +7979,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let sql_guard_policies_clone = sql_guard_policies.clone();
         let hook_rule_set_clone = hook_rule_set.clone();
         let decide_rules_clone = Arc::clone(&decide_rules);
+        let arg_gates_clone = arg_gates.clone();
         // Same reason as response_gate_cfg above: the stream task outlives
         // this scope, and the snippet-capture config has to travel with it.
         let response_injection_snippet_cfg = state
@@ -7531,11 +8073,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             let mut sql_hold = (response_gate_cfg.enabled
                 && (!sql_guard_policies_clone.is_empty()
                     || !hook_rule_set_clone.is_empty()
-                    || !decide_tools.is_empty()))
+                    || !decide_tools.is_empty()
+                    || !arg_gates_clone.is_empty()))
             .then(|| {
                 crate::plugins::sql_guard::StreamHold::new(sql_guard_policies_clone.clone())
                     .with_hook_rules(hook_rule_set_clone.clone())
                     .with_decide_tools(decide_tools)
+                    .with_arg_gates(arg_gates_clone.clone())
             });
             // `on: response` rules judge the text once the stream is complete,
             // before its terminal event; the note, when there is one, is
@@ -7794,7 +8338,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             hook_shadow_hits.push(hit);
                                         }
                                     }
-                                    match (step.refuse, step.refuse_hook, decide_refusal) {
+                                    let gate_refusal = step.refuse_gate.take();
+                                    match (step.refuse, step.refuse_hook, gate_refusal.or(decide_refusal.map(|(r, idx)| (crate::plugins::response_gate::DenialReason::Decide(r), idx)))) {
                                         (Some((v, idx)), _, _) => Some(crate::plugins::response_gate::Denial {
                                             reason: crate::plugins::response_gate::DenialReason::DestructiveSql(v),
                                             block_index: idx,
@@ -7803,8 +8348,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                             reason: crate::plugins::response_gate::DenialReason::HookRule(hit),
                                             block_index: idx,
                                         }),
-                                        (None, None, Some((r, idx))) => Some(crate::plugins::response_gate::Denial {
-                                            reason: crate::plugins::response_gate::DenialReason::Decide(r),
+                                        (None, None, Some((reason, idx))) => Some(crate::plugins::response_gate::Denial {
+                                            reason,
                                             block_index: idx,
                                         }),
                                         (None, None, None) => {
@@ -9728,6 +10273,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         );
     }
     let response_denial = response_denial.or(hook_denial);
+    // 3.0's argument checks — qualified prerequisites, the enforced path
+    // scope, the node kind's tool limits — after every deterministic gate
+    // above and before the decide rules (§14's order of evidence).
+    let response_denial = response_denial.or_else(|| {
+        crate::plugins::response_gate::gate_response_args(
+            &state.config.intutic_settings.response_gate,
+            parsed_response.as_ref(),
+            &arg_gates,
+        )
+    });
     // Decide rules on the calls every gate above allowed (protection 1: a
     // deterministic refusal asks no engine anything).
     let response_denial = match response_denial {
@@ -13587,6 +14142,11 @@ mod tests {
         use crate::wasm::context::ToolCall;
 
         let ctx = crate::wasm::context::RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             tool_calls: vec![ToolCall {
                 id: "call_1".into(),
                 name: "kubectl".into(),
@@ -13759,6 +14319,11 @@ mod tests {
         use crate::wasm::context::ToolCall;
 
         let ctx = crate::wasm::context::RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             tool_contract_changed: true,
             tool_calls: vec![ToolCall {
                 id: "call_1".into(),
@@ -13801,6 +14366,11 @@ mod tests {
         use crate::wasm::context::ToolCall;
 
         let ctx = crate::wasm::context::RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
             tool_contract_changed: true,
             tool_calls: vec![ToolCall {
                 id: "call_1".into(),
@@ -14697,5 +15267,64 @@ mod tests {
                 crate::metering::check_model_allowed("claude-sonnet-4-5", Some(&ws), &key).is_err()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod lld75_proxy_tests {
+    use super::*;
+    use crate::refusal::{InterventionMode, RefusalEvidence, RefusalScope, OPAQUE_MESSAGE};
+
+    /// The pause reason is the cleared-watermark string the control plane
+    /// compares whole: pinned byte for byte.
+    #[test]
+    fn the_exhausted_review_reason_is_byte_stable_and_capped() {
+        assert_eq!(
+            exhausted_review_reason("plan_adherence", 3, "Off the declared plan: Bash"),
+            "Run held for review: correction exhausted — plan_adherence refused 3 attempts: Off the declared plan: Bash"
+        );
+        let long = exhausted_review_reason("x", 3, &"é".repeat(600));
+        assert!(long.len() <= 512 && long.is_char_boundary(long.len()));
+    }
+
+    /// 3.0: an OPAQUE workspace's agent is told the run is held and
+    /// how to release it, never which rule held it.
+    #[test]
+    fn the_pending_review_message_hides_the_rule_under_opaque() {
+        let reason = "Run held for human review: action:destroy — declared in review_before:";
+        let opaque = loop_review_message("lr_1", reason, InterventionMode::Opaque);
+        assert!(!opaque.contains("review_before"), "{opaque}");
+        assert!(opaque.contains(OPAQUE_MESSAGE));
+        assert!(opaque.contains("intutic loop review lr_1 --approve"));
+        let open = loop_review_message("lr_1", reason, InterventionMode::Transparent);
+        assert!(open.contains(reason));
+    }
+
+    #[tokio::test]
+    async fn detailed_errors_carry_scope_and_evidence_except_under_opaque() {
+        let scope = RefusalScope::paths(["infra/main.tf"]);
+        let evidence = vec![RefusalEvidence::new("scope", "src")];
+        async fn body(r: Response) -> serde_json::Value {
+            let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            serde_json::from_slice::<serde_json::Value>(&b).unwrap()
+        }
+        let detailed = |mode| {
+            json_error_detailed(
+                StatusCode::FORBIDDEN,
+                "policy_denied",
+                "m",
+                Some(&scope),
+                &evidence,
+                mode,
+            )
+        };
+        let open = body(detailed(InterventionMode::SilentLog)).await;
+        assert_eq!(open["error"]["scope"]["paths"][0], "infra/main.tf");
+        assert_eq!(open["error"]["evidence"][0]["kind"], "scope");
+        let opaque = body(detailed(InterventionMode::Opaque)).await;
+        assert!(
+            opaque["error"].get("scope").is_none() && opaque["error"].get("evidence").is_none()
+        );
+        assert_eq!(opaque["error"]["type"], "policy_denied");
     }
 }

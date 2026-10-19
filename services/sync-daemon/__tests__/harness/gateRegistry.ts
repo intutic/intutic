@@ -138,6 +138,21 @@ export interface GateEntry {
   mcpCalls: 'yes' | 'reachable' | 'no'
   /** Detail behind `mcpCalls` — what was confirmed, how, and what was not. */
   mcpNote: string
+  /**
+   * How this gate honours an approved bypass of a hold it refused (3.0
+   * §10):
+   *
+   * - `'file'` — the shared gate body's bypass check reads the daemon's
+   *   `~/.intutic/hooks/approved-bypasses.jsonl` (digest, workspace, exact
+   *   key, expiry): every JS and bash hook gate, the in-process ones included;
+   * - `'api'` — the gate asks `GET /api/v1/decisions/approved-bypasses`
+   *   itself (`@intutic/gate`'s `hold.ts`: dsh);
+   * - `'refuses-by-design'` — a hold is a refusal here, with nothing to
+   *   approve: the n8n workflow gate runs in the n8n server with no workspace
+   *   to record a hold or developer to approve one, and the Open WebUI filter
+   *   sees a prompt, not a tool call to retry.
+   */
+  holdBypass: 'file' | 'api' | 'refuses-by-design'
 }
 
 const PROXY_URL = 'http://127.0.0.1:4000'
@@ -156,6 +171,7 @@ export const GATES: readonly GateEntry[] = [
     contract: 'exit2',
     migrated: true,
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote: 'bash-family: no matcher concept, the script runs for every tool call unconditionally. Goose’s own MCP tool-naming convention was not independently verified during M3.',
   },
   {
@@ -168,6 +184,7 @@ export const GATES: readonly GateEntry[] = [
     migrated: true,
     note: 'never extracted a command — has no shell-bypass guard at all',
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote: 'bash-family: runs unconditionally. OpenHands’ own MCP tool-naming convention was not independently verified during M3.',
   },
   {
@@ -179,6 +196,7 @@ export const GATES: readonly GateEntry[] = [
     contract: 'exit2',
     migrated: true,
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote: 'bash-family: runs unconditionally. Hermes’ own MCP tool-naming convention was not independently verified during M3.',
   },
   {
@@ -190,6 +208,7 @@ export const GATES: readonly GateEntry[] = [
     contract: 'exit2',
     migrated: true,
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote: 'bash-family: runs unconditionally. Antigravity (Gemini CLI)’s own MCP tool-naming convention was not independently verified during M3.',
   },
   {
@@ -210,6 +229,7 @@ export const GATES: readonly GateEntry[] = [
       'Not verified against a running Antigravity: how it reads a result with no decision ({}), ' +
       'which is what the gate prints on an allow.',
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote: 'Matcher "*" runs the gate for every tool call. Antigravity\'s own MCP tool-naming convention is not documented and was not verified.',
   },
 
@@ -225,6 +245,7 @@ export const GATES: readonly GateEntry[] = [
     migrated: true,
     note: 'the primary harness; shipped a ReferenceError that disabled it entirely',
     mcpCalls: 'yes',
+    holdBypass: 'file',
     mcpNote: "M3 added an `hookEntry('mcp__.*')` PreToolUse matcher. Claude Code's own MCP tool-naming convention IS `mcp__<server>__<tool>` — this is the scheme every other harness's shape is measured against, not an assumption made for this phase.",
   },
   {
@@ -236,6 +257,7 @@ export const GATES: readonly GateEntry[] = [
     contract: 'exit2',
     migrated: true,
     mcpCalls: 'yes',
+    holdBypass: 'file',
     mcpNote:
       'M3 fix: the extraction bug flagged for investigation was real in effect, though not ' +
       'literally as described — `tool_name` IS populated on a beforeMCPExecution payload ' +
@@ -255,6 +277,7 @@ export const GATES: readonly GateEntry[] = [
     contract: 'exit2',
     migrated: true,
     mcpCalls: 'yes',
+    holdBypass: 'file',
     mcpNote:
       'CONFIRMED, not a guess (2026-08-18 follow-up to M3\'s UNCONFIRMED flag): M3\'s composition ' +
       'fix targeted Cursor\'s event names/payload shape by analogy, and that assumption was wrong — ' +
@@ -283,6 +306,7 @@ export const GATES: readonly GateEntry[] = [
       'registered in ~/.codex/hooks.json and <repo>/.codex/hooks.json; the stdin ' +
       'shape and exit-2 contract are Claude-Code-compatible, so the shared gate is a drop-in',
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote: "Already a `.*` catch-all matcher — reaches the gate script for any tool name. Its stdin envelope is stated Claude-Code-compatible, which is suggestive but not a confirmation of Codex's own MCP tool-naming convention; not independently verified during M3.",
   },
   {
@@ -301,6 +325,7 @@ export const GATES: readonly GateEntry[] = [
       'the `muse` binary was not installable in the environment this writer was authored in, ' +
       'so neither could be confirmed against the real product',
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote:
       "Already a `.*` catch-all matcher across both PreToolUse and PermissionRequest. Muse " +
       "Code's own MCP tool-naming convention was not independently verified — the binary " +
@@ -318,6 +343,7 @@ export const GATES: readonly GateEntry[] = [
       'VS Code agent hooks are a PREVIEW feature (.github/hooks/*.json + ~/.copilot/hooks). ' +
       'The gate refuses payloads it does not recognise, so a format change fails closed',
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote: "Already a `.*` catch-all matcher. GitHub Copilot's own MCP tool-naming convention was not independently verified during M3.",
   },
 
@@ -337,6 +363,7 @@ export const GATES: readonly GateEntry[] = [
       'preToolUse {toolName, parameters} and the SDK\'s tool_call {name, input} — confirmed ' +
       'against Cline\'s source, not a live session',
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote:
       'The file hook has no matcher, so it runs for every tool call, `use_mcp_tool` included, ' +
       'and the shared intuticGate (gateBody.ts) composes `use_mcp_tool` {server_name, tool_name} ' +
@@ -370,6 +397,7 @@ export const GATES: readonly GateEntry[] = [
       'not independently verified against a live Grok Build install — ' +
       'unavailable in this environment.',
     mcpCalls: 'reachable',
+    holdBypass: 'file',
     mcpNote:
       'No matcher on its PreToolUse registration — runs for every tool call, so an ' +
       'mcp__<server>__<tool>-shaped call WOULD be caught if Grok Build sends one. ' +
@@ -429,6 +457,7 @@ export const GATES: readonly GateEntry[] = [
       'dsh-permission, dsh-settings-local, and dsh-fs-policy are npm-restricted and could not ' +
       'be inspected directly).',
     mcpCalls: 'reachable',
+    holdBypass: 'api',
     mcpNote:
       '`tools/pre-execute` fires for every tool call unconditionally (confirmed from ' +
       '`dsh-tools`\'s shipped `.d.ts` — it is the registry\'s own dispatch point, not an ' +
@@ -452,6 +481,7 @@ export const GATES: readonly GateEntry[] = [
       '(1.x) / tool execute.before (2.x) hook before every tool call; a throw is the refusal. ' +
       'Driven by the "OpenCode plugin gate" block, which loads the file the way OpenCode does.',
     mcpCalls: 'yes',
+    holdBypass: 'file',
     mcpNote:
       'The hook fires for MCP tools too (tools.ts runs it for every tool id). OpenCode 1.x ' +
       'names them sanitize(server) + "_" + sanitize(tool) (mcp/catalog.ts, read from source); ' +
@@ -476,6 +506,7 @@ export const GATES: readonly GateEntry[] = [
       'Driven by the "Pi and OpenClaw plugin gates" block. Earlier versions wrote ~/.pi/hooks.json, ' +
       'which Pi never reads.',
     mcpCalls: 'yes',
+    holdBypass: 'file',
     mcpNote:
       'Pi registers each MCP tool as mcp__<server>__<tool> (docs/mcp.md at earendil-works/pi ' +
       '6fb2e78) and runs tool_call handlers for every tool, nested ctx.executeTool() calls ' +
@@ -495,6 +526,7 @@ export const GATES: readonly GateEntry[] = [
       'fail-closed. Driven by the "Pi and OpenClaw plugin gates" block. Earlier versions ' +
       'registered an internal hook, which never sees a tool call.',
     mcpCalls: 'yes',
+    holdBypass: 'file',
     mcpNote:
       'OpenClaw names an MCP tool <server>__<tool> (src/agents/agent-bundle-mcp-names.ts, ' +
       'TOOL_NAME_SEPARATOR, at openclaw/openclaw 59309cc); the plugin composes ' +
@@ -516,6 +548,7 @@ export const GATES: readonly GateEntry[] = [
       'is MANUAL and deployment-side (the daemon cannot set another process’s env) — ' +
       'see the INSTALL.md the writer emits. Exercised by its own describe block.',
     mcpCalls: 'no',
+    holdBypass: 'refuses-by-design',
     mcpNote:
       "Confirmed by reading emitN8nWorkflowGate (gateBody.ts): this gate's unit of evaluation " +
       "is a workflow NODE TYPE, addressed by n8n's own dot-namespaced convention (e.g. " +
@@ -540,6 +573,7 @@ export const GATES: readonly GateEntry[] = [
       'is someone asking about a file. Only a snapshot rule marked block refuses. ' +
       'Exercised by its own describe block, not the tool-call matrix.',
     mcpCalls: 'no',
+    holdBypass: 'refuses-by-design',
     mcpNote: "Confirmed by reading emitPythonGate (gateBody.ts): this evaluator sees PROMPT TEXT, not a tool call — no tool name of any shape reaches it, so an `mcp__<server>__<tool>` allowlist check does not apply.",
   },
 ]

@@ -64,6 +64,6 @@ describe('refreshGateCaches', () => {
 
   it('reports which caches landed and never throws when the control plane is down', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch)
-    await expect(refreshGateCaches({ controlPlaneUrl: 'https://cp.example', apiKey: 'k', workspaceId: 'ws_1' })).resolves.toEqual({ snapshot: false, bypasses: false, egress: false })
+    await expect(refreshGateCaches({ controlPlaneUrl: 'https://cp.example', apiKey: 'k', workspaceId: 'ws_1' })).resolves.toEqual({ snapshot: false, bypasses: false, plans: false, egress: false })
   })
 })

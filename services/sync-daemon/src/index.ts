@@ -14,6 +14,7 @@ export {
   syncOfflineTraces,
   refreshGateCaches,
   localHoldTokensFor,
+  localGateSopsFor,
   applySkillOptEdits,
   reportHarnessAgents,
   emitSkillFlaggedEvents,
@@ -104,7 +105,20 @@ export {
   SNAPSHOT_RULES,
   VERIFIED_SNAPSHOT_DIR,
 } from './lib/policySnapshot.js'
-export type { LocalHoldMode, ServedDecideRule } from './lib/policySnapshot.js'
+export type { LocalHoldMode, ServedDecideRule, ServedHoldRule, ServedRevertHold } from './lib/policySnapshot.js'
+export { compileGateRecords, parseServedGateRecords } from './lib/policySnapshot.js'
+export type { CompiledGateRecords } from './lib/policySnapshot.js'
+// 3.0 — the approved-plans cache. The rule records, test outcomes, scope
+// match and lanes are @intutic/shared-types' (gateRuleRecord.ts,
+// testOutcome.ts, scopeMatch.ts, lanes.ts); import them from there.
+export {
+  refreshApprovedPlans,
+  writeApprovedPlans,
+  fetchApprovedPlans,
+  APPROVED_PLANS_FILE,
+  APPROVED_PLANS_TTL_INTERVALS,
+} from './lib/approvedPlans.js'
+export type { ApprovedPlanEntry } from './lib/approvedPlans.js'
 export { pruneDecideLogs, uploadDecideLogs, DECIDE_UPLOAD_CURSOR, DECIDE_UPLOAD_BATCH } from './lib/decideLogs.js'
 export type { DecideUploadOptions } from './lib/decideLogs.js'
 export { findGateFile, GATE_ARTIFACTS } from './harness/gateArtifacts.js'

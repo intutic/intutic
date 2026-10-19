@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { decideRuleHash, validateDecideRule, type DecideRule } from '../decide.js'
 import {
+  buildDecideDecisionRecord,
   checkDecideDrift,
   decideArgsExcerpt,
   decideLogFileDate,
@@ -183,6 +184,19 @@ describe('writing a call', () => {
     latencyMs: 12,
     engine: { adapter: 'logprobs', host: '127.0.0.1:11434', model: 'm', digest: 'sha256:aa', digestStrength: 'strong', canary: 'cached' },
     redact: decideLogRedactionSources(),
+  })
+
+  it('carries the lane and revert rate of the loops, graphs and gates release, null when not given', () => {
+    const LOG_V = JSON.parse(fs.readFileSync(join(__dirname, '../../fixtures/decide-log-vectors.json'), 'utf8')).contextFields as Array<{
+      name: string
+      ctx: Partial<DecideLogContext>
+      record: { lane: string | null; revertRate: number | null }
+    }>
+    expect(LOG_V.length).toBeGreaterThan(3)
+    for (const c of LOG_V) {
+      const r = buildDecideDecisionRecord(evaluation('allow', 0.02), [entry], { ...ctx(0), ...c.ctx }, sha256Hex)
+      expect({ lane: r.lane, revertRate: r.revertRate }, c.name).toEqual(c.record)
+    }
   })
 
   it('appends the decision record, mode 0600, one line per call', () => {

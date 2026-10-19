@@ -144,6 +144,14 @@ export interface DecideLogContext {
   engine: DecideLogEngine
   /** Regex sources the arguments excerpt is redacted with. */
   redact: readonly string[]
+  /**
+   * The call's reversibility class (`laneOf` of the tokens it
+   * classifies to, lanes.ts), or null when it has none or the caller cannot
+   * say. Logged so calibrations can be stratified by consequence.
+   */
+  lane?: 'irreversible' | 'reversible_wide' | 'reversible_contained' | null
+  /** The subject's role-level revert or rejection rate, or null when none is published. */
+  revertRate?: number | null
 }
 
 /** One question's answer as the log keeps it. */
@@ -182,6 +190,10 @@ export interface DecideDecisionRecord {
   workspaceId: string
   sessionId: string
   tool: string
+  /** The call's reversibility class, or null. Readers ignore fields they do not know. */
+  lane: 'irreversible' | 'reversible_wide' | 'reversible_contained' | null
+  /** The subject's revert or rejection rate, or null. */
+  revertRate: number | null
   stateHash: string | null
   argsExcerpt: string
   engine: DecideLogEngine
@@ -298,6 +310,8 @@ export function buildDecideDecisionRecord(
     workspaceId: ctx.workspaceId,
     sessionId: ctx.sessionId,
     tool: ctx.tool,
+    lane: ctx.lane ?? null,
+    revertRate: typeof ctx.revertRate === 'number' && Number.isFinite(ctx.revertRate) ? ctx.revertRate : null,
     stateHash: logged[0]?.stateHash ?? null,
     argsExcerpt: decideArgsExcerpt(ctx.toolInput, ctx.redact),
     engine: ctx.engine,

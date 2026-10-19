@@ -9,15 +9,28 @@
  * PreToolUse hook for them. This package is that enforcement point: the
  * missing adapter, written against Intutic's own published gate contract.
  *
- * Seven tiers, in order — identical precedence to the Python SDK:
+ * Eight tiers, in order — identical precedence to the Python SDK:
  *
  *   A0  SSO group policy  from the policy snapshot       unknown groups refused
  *   A1  policy snapshot   port of intuticGate()          fails CLOSED
+ *   R   rule records      the snapshot's @rule records   fails CLOSED (a rule failure)
  *   M   MCP registry      from the policy snapshot       unverified snapshot admits none
  *   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
  *   A2  image integrity   local check                    fails CLOSED
  *   D   decide rules      the self-hosted decide engine  fails CLOSED when enforcing
  *   B   POST /hook-gate   control-plane check             fail posture set by GateClient
+ *
+ * Tier R evaluates the snapshot's `@rule` records (gateRuleRecord.ts,
+ * a byte-identical copy of `@intutic/shared-types`' module): a qualified
+ * `requires_before: action:run_tests[ok] -> X` refuses X with
+ * `PREREQUISITE_UNMET` unless the latest test run this gate recorded for the
+ * session ({@link Gate.recordOutcome}, which {@link wrapTool} calls) passed
+ * and no file changed since; `scope_paths_mode: enforce` refuses a file
+ * change outside the scope with `OUT_OF_SCOPE`; `plan_approval:` refuses
+ * with `PLAN_NOT_APPROVED` until the session's plan is approved
+ * (`GET /api/v1/plans/session/:id`, cached {@link PLAN_CACHE_MS}), and under
+ * `strict` a tool off the plan with `OFF_PLAN`. A plan that cannot be read
+ * refuses whatever `failClosed` says: rule failures always fail closed.
  *
  * Tier D runs only on a call every deterministic tier allowed: the snapshot's
  * decide rules on the tool, asked of the self-hosted engine configured in
@@ -94,7 +107,13 @@ import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isDeploy, touchesInfra } from './actions.js'
+import { dirname } from 'node:path'
+import { classify, isDeploy, touchesInfra } from './actions.js'
+import { evaluateGateRuleRecords, gateRulePlanFromResponse, type GateRulePlan } from './gateRuleRecord.js'
+import { laneOf } from './lanes.js'
+import { refusalDetailForMode } from './refusalDetail.js'
+import { isFileWriteCall } from './scopeMatch.js'
+import { decideTestOutcome, emptyOutcomeState, extractExitCode, noteCompletedCall, recordTestOutcome, type OutcomeState } from './testOutcome.js'
 import { chaosGateCall, chaosGateDecode, type ChaosGateFaultOutcome, type ChaosGatePlan } from './chaosGate.js'
 import { IntuticGateEscalation, IntuticGateHold, IntuticGateRefusal, type GateRefusalCode } from './errors.js'
 import { holdKey, holdMessage, requestHold } from './hold.js'
@@ -130,6 +149,23 @@ import { evaluateSsoGroupClearance } from './ssoGroups.js'
  * as in a gate that reads no `@decide` records.
  */
 export const CAN_EVALUATE_DECIDE = true
+
+/**
+ * Whether this gate evaluates the `@rule` records a snapshot carries (Tier
+ * R). Only a gate that does skips a record's fallback line, and only when
+ * the record decoded.
+ */
+export const CAN_EVALUATE_RULE_RECORDS = true
+
+/** How long Tier R keeps a session's plan before reading it again. */
+export const PLAN_CACHE_MS = 30_000
+
+/** What a tool call's result says about how it went, for {@link Gate.recordOutcome}. */
+export interface ToolOutcome {
+  exitCode?: number | null
+  isError?: boolean | null
+  output?: string | null
+}
 
 /** The decide tier's budget for one call: `INTUTIC_DECIDE_BUDGET_MS`, or {@link DECIDE_BUDGET_MS}. */
 function decideBudgetFromEnv(): number {
@@ -285,6 +321,10 @@ export class Gate {
   /** The SOP register said the workspace is OPAQUE (read with its rules). */
   private _registerOpaque = false
   private _chaos: ChaosState | null = null
+  /** The outcome state of each session (testOutcome.ts), by session id, in memory. */
+  private _outcomes = new Map<string, OutcomeState>()
+  /** Each session's plan, as Tier R last read it. */
+  private _plans = new Map<string, { atMs: number; plan: GateRulePlan }>()
 
   constructor(cfg: GateConfig = {}, client: GateClient | null = null) {
     this.cfg = resolveConfig(cfg)
@@ -300,7 +340,10 @@ export class Gate {
 
   getSnapshot(): snapshot.Snapshot {
     if (this._snapshot === null) {
-      this._snapshot = snapshot.loadSnapshot(this.cfg.workspaceId, undefined, { evaluatesDecide: CAN_EVALUATE_DECIDE })
+      this._snapshot = snapshot.loadSnapshot(this.cfg.workspaceId, undefined, {
+        evaluatesDecide: CAN_EVALUATE_DECIDE,
+        evaluatesRules: CAN_EVALUATE_RULE_RECORDS,
+      })
     }
     return this._snapshot
   }
@@ -586,6 +629,9 @@ export class Gate {
       d = snapshot.evaluate(toolName, target, command, this.getSnapshot(), disabled, d.next)
     }
 
+    // ---- Tier R: the snapshot's rule records ---------------------------
+    await this.guardRules(toolName, toolInput, note)
+
     // ---- Tier M: the MCP server registry and allowlist ----------------
     await this.guardMcp(toolName, toolInput, note)
 
@@ -679,6 +725,77 @@ export class Gate {
   }
 
   /**
+   * Records how a call that ran went, for Tier R. A test run
+   * (`action:run_tests`) records its outcome (testOutcome.ts: the exit code,
+   * else one read from `output`, the error flag and the runner summaries);
+   * any other call marks earlier outcomes as no longer adjacent, and a call
+   * that changed files (`isFileWriteCall`, scopeMatch.ts) makes an earlier pass stale.
+   * Kept in memory per {@link GateClient.sessionId}; with no session id
+   * nothing is kept, and a qualified rule stays unmet. {@link wrapTool} calls
+   * this after every call it ran.
+   */
+  recordOutcome(toolName: string, toolInput: ToolInput, result: ToolOutcome = {}): void {
+    const session = this.client?.sessionId ?? ''
+    if (!session) return
+    const state = this._outcomes.get(session) ?? emptyOutcomeState()
+    if (classify(toolName, toolInput).includes('action:run_tests')) {
+      const output = typeof result.output === 'string' ? result.output : undefined
+      const exitCode = typeof result.exitCode === 'number' ? result.exitCode : extractExitCode(output)
+      const decision = decideTestOutcome({ exitCode, isError: result.isError ?? null, output })
+      this._outcomes.set(session, recordTestOutcome(state, 'action:run_tests', decision, Date.now()))
+    } else {
+      this._outcomes.set(session, noteCompletedCall(state, isFileWriteCall(toolName, toolInput)))
+    }
+  }
+
+  /** The session's plan, read at most every {@link PLAN_CACHE_MS}. */
+  private async sessionPlan(sessionId: string): Promise<GateRulePlan> {
+    if (this.client === null || sessionId === '') return { status: 'none' }
+    const cached = this._plans.get(sessionId)
+    if (cached && Date.now() - cached.atMs < PLAN_CACHE_MS) return cached.plan
+    const res = await this.client.sessionPlan(sessionId)
+    const plan = gateRulePlanFromResponse(res.status, res.body)
+    // An unreadable feed is not cached: the next call asks again.
+    if (plan.status !== 'unavailable') this._plans.set(sessionId, { atMs: Date.now(), plan })
+    return plan
+  }
+
+  /**
+   * Tier R. Throws {@link IntuticGateRefusal} when an enforcing rule record
+   * refuses the call (`PREREQUISITE_UNMET`, `OUT_OF_SCOPE`, `OFF_PLAN`,
+   * `PLAN_NOT_APPROVED`), with the refusal's scope; each shadow record's
+   * finding is reported as `tool_would_block` and the call goes on.
+   */
+  private async guardRules(toolName: string, toolInput: ToolInput, note: ChaosNote | null): Promise<void> {
+    if (!CAN_EVALUATE_RULE_RECORDS) return
+    const records = this.getSnapshot().ruleRecords
+    if (records.length === 0) return
+    const sessionId = this.client?.sessionId ?? ''
+    const cwd = process.cwd()
+    const plan: GateRulePlan = records.some((r) => r.kind === 'plan_approval') ? await this.sessionPlan(sessionId) : { status: 'none' }
+    const ev = evaluateGateRuleRecords(records, {
+      tool: toolName,
+      input: toolInput,
+      actions: classify(toolName, toolInput),
+      cwd,
+      root: workspaceRoot(cwd),
+      sessionId,
+      harness: this.client?.harness ?? 'sdk',
+      outcomes: this._outcomes.get(sessionId) ?? null,
+      observable: true,
+      plan,
+      nowMs: Date.now(),
+    })
+    for (const f of ev.shadow) await this.emit('tool_would_block', toolName, `${f.reason} [${f.ruleId}]`, toolInput)
+    if (ev.refusal === null) return
+    const f = ev.refusal
+    if (note) note.ruleId = f.ruleId
+    await this.emit('tool_blocked', toolName, `${f.reason} [${f.ruleId}]`, toolInput)
+    const opaque = this.opaque()
+    throw new IntuticGateRefusal(this.shown(`${f.reason} [${f.ruleId}]`), f.code, undefined, refusalDetailForMode(opaque ? 'OPAQUE' : 'TRANSPARENT', f.scope, []))
+  }
+
+  /**
    * Tier D. Throws when a decide rule on this tool refuses the call
    * ({@link IntuticGateRefusal}, `DECIDE_REFUSED` or `GOVERNANCE_UNAVAILABLE`)
    * or could not decide it ({@link IntuticGateEscalation}). Each shadow rule's
@@ -751,6 +868,9 @@ export class Gate {
           latencyMs: now - call.startedMs,
           engine: decideLogEngine(call.cfg, ev),
           redact: DECIDE_LOG_REDACTION_SOURCES,
+          // The call's reversibility class; a gate has no revert rates.
+          lane: laneOf(classify(call.tool, call.toolInput)),
+          revertRate: null,
         },
         decideLogDeps(fs, homedir(), sha256Hex),
       )
@@ -854,6 +974,17 @@ function trimLeadingSlashes(s: string): string {
 
 function joinPath(a: string, b: string): string {
   return `${trimTrailingSlashes(a)}/${trimLeadingSlashes(b)}`
+}
+
+/** The workspace root Tier R makes paths relative to: the nearest directory at or above `cwd` holding `.git`, else `cwd`. */
+function workspaceRoot(cwd: string): string {
+  let dir = cwd
+  for (;;) {
+    if (existsSync(joinPath(dir, '.git'))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) return cwd
+    dir = parent
+  }
 }
 
 // The process-wide active gate lives in registry.ts, which imports no Node.js

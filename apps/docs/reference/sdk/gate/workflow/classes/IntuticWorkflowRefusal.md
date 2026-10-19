@@ -36,7 +36,7 @@ new IntuticWorkflowRefusal(
 | Parameter | Type |
 | ------ | ------ |
 | `reason` | `string` |
-| `code` | \| `"GOVERNANCE_UNAVAILABLE"` \| `"INSUFFICIENT_SCOPE"` \| `"DECIDE_REFUSED"` \| `"DECIDE_ESCALATED"` \| `"SSO_GROUP"` \| `"SNAPSHOT"` \| `"HELD"` \| `"SERVER_BLOCKED"` \| `"SERVER_HELD"` \| `"SERVER_NOT_APPROVED"` \| `"TOOL_DISABLED"` \| `"SERVER_NOT_ALLOWED"` \| `"POLICY_SNAPSHOT_UNVERIFIED"` \| `"SOP_RULE"` \| `"HOOK_GATE"` \| `"COMMAND_TOO_LARGE"` \| `"CHAOS_FAULT"` \| `"E_UNPINNED_LATEST"` \| `"E_UNPINNED_TAG"` \| `"E_UNKNOWN_REGISTRY"` \| `"E_UNKNOWN_IMAGE"` \| `"E_DIGEST_MISMATCH"` \| `"E_MANIFEST_UNPARSEABLE"` \| `"WORKFLOW_SANDBOX"` \| `"NO_GATE"` |
+| `code` | \| `"GOVERNANCE_UNAVAILABLE"` \| `"INSUFFICIENT_SCOPE"` \| `"DECIDE_REFUSED"` \| `"DECIDE_ESCALATED"` \| `"PREREQUISITE_UNMET"` \| `"OUT_OF_SCOPE"` \| `"OFF_PLAN"` \| `"PLAN_NOT_APPROVED"` \| `"SSO_GROUP"` \| `"SNAPSHOT"` \| `"HELD"` \| `"SERVER_BLOCKED"` \| `"SERVER_HELD"` \| `"SERVER_NOT_APPROVED"` \| `"TOOL_DISABLED"` \| `"SERVER_NOT_ALLOWED"` \| `"POLICY_SNAPSHOT_UNVERIFIED"` \| `"SOP_RULE"` \| `"HOOK_GATE"` \| `"COMMAND_TOO_LARGE"` \| `"CHAOS_FAULT"` \| `"E_UNPINNED_LATEST"` \| `"E_UNPINNED_TAG"` \| `"E_UNKNOWN_REGISTRY"` \| `"E_UNKNOWN_IMAGE"` \| `"E_DIGEST_MISMATCH"` \| `"E_MANIFEST_UNPARSEABLE"` \| `"WORKFLOW_SANDBOX"` \| `"NO_GATE"` |
 | `incidentId?` | `string` |
 | `holdId?` | `string` |
 
@@ -52,11 +52,13 @@ new IntuticWorkflowRefusal(
 
 | Property | Modifier | Type | Description | Inherited from |
 | ------ | ------ | ------ | ------ | ------ |
-| <a id="property-code"></a> `code` | `readonly` | \| `"GOVERNANCE_UNAVAILABLE"` \| `"INSUFFICIENT_SCOPE"` \| `"DECIDE_REFUSED"` \| `"DECIDE_ESCALATED"` \| `"SSO_GROUP"` \| `"SNAPSHOT"` \| `"HELD"` \| `"SERVER_BLOCKED"` \| `"SERVER_HELD"` \| `"SERVER_NOT_APPROVED"` \| `"TOOL_DISABLED"` \| `"SERVER_NOT_ALLOWED"` \| `"POLICY_SNAPSHOT_UNVERIFIED"` \| `"SOP_RULE"` \| `"HOOK_GATE"` \| `"COMMAND_TOO_LARGE"` \| `"CHAOS_FAULT"` \| `"E_UNPINNED_LATEST"` \| `"E_UNPINNED_TAG"` \| `"E_UNKNOWN_REGISTRY"` \| `"E_UNKNOWN_IMAGE"` \| `"E_DIGEST_MISMATCH"` \| `"E_MANIFEST_UNPARSEABLE"` \| `"WORKFLOW_SANDBOX"` \| `"NO_GATE"` | - | [`IntuticGateRefusal`](../../core/classes/IntuticGateRefusal.md).[`code`](../../core/classes/IntuticGateRefusal.md#property-code) |
+| <a id="property-code"></a> `code` | `readonly` | \| `"GOVERNANCE_UNAVAILABLE"` \| `"INSUFFICIENT_SCOPE"` \| `"DECIDE_REFUSED"` \| `"DECIDE_ESCALATED"` \| `"PREREQUISITE_UNMET"` \| `"OUT_OF_SCOPE"` \| `"OFF_PLAN"` \| `"PLAN_NOT_APPROVED"` \| `"SSO_GROUP"` \| `"SNAPSHOT"` \| `"HELD"` \| `"SERVER_BLOCKED"` \| `"SERVER_HELD"` \| `"SERVER_NOT_APPROVED"` \| `"TOOL_DISABLED"` \| `"SERVER_NOT_ALLOWED"` \| `"POLICY_SNAPSHOT_UNVERIFIED"` \| `"SOP_RULE"` \| `"HOOK_GATE"` \| `"COMMAND_TOO_LARGE"` \| `"CHAOS_FAULT"` \| `"E_UNPINNED_LATEST"` \| `"E_UNPINNED_TAG"` \| `"E_UNKNOWN_REGISTRY"` \| `"E_UNKNOWN_IMAGE"` \| `"E_DIGEST_MISMATCH"` \| `"E_MANIFEST_UNPARSEABLE"` \| `"WORKFLOW_SANDBOX"` \| `"NO_GATE"` | - | [`IntuticGateRefusal`](../../core/classes/IntuticGateRefusal.md).[`code`](../../core/classes/IntuticGateRefusal.md#property-code) |
+| <a id="property-evidence"></a> `evidence` | `readonly` | [`RefusalEvidence`](../../core/index.md#refusalevidence)[] \| `undefined` | What the refuser saw, bounded; undefined when nothing, and in OPAQUE. | [`IntuticGateRefusal`](../../core/classes/IntuticGateRefusal.md).[`evidence`](../../core/classes/IntuticGateRefusal.md#property-evidence) |
 | <a id="property-fatal"></a> `fatal` | `readonly` | `true` | - | - |
 | <a id="property-holdid"></a> `holdId` | `readonly` | `string` \| `undefined` | The hold's id when the refusal was a hold (`code` `HELD`); see `IntuticGateHold`. | - |
 | <a id="property-incidentid"></a> `incidentId` | `readonly` | `string` \| `undefined` | - | [`IntuticGateRefusal`](../../core/classes/IntuticGateRefusal.md).[`incidentId`](../../core/classes/IntuticGateRefusal.md#property-incidentid) |
 | <a id="property-reason"></a> `reason` | `readonly` | `string` | - | [`IntuticGateRefusal`](../../core/classes/IntuticGateRefusal.md).[`reason`](../../core/classes/IntuticGateRefusal.md#property-reason) |
+| <a id="property-scope"></a> `scope` | `readonly` | [`RefusalScope`](../../core/index.md#refusalscope) \| `undefined` | Where the refusal applies, so a retry can stay out of it (paths, tools, step, detector, rule), bounded as refusalDetail.ts says. Undefined when the refusal names none, and always in an OPAQUE workspace. | [`IntuticGateRefusal`](../../core/classes/IntuticGateRefusal.md).[`scope`](../../core/classes/IntuticGateRefusal.md#property-scope) |
 
 ## Methods
 

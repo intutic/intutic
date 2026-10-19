@@ -13,15 +13,27 @@ stock Intutic before the call runs locally.
 This module is that enforcement point: the missing adapter, written against
 Intutic's own published gate contract.
 
-Seven tiers, in order:
+Eight tiers, in order:
 
   A0  SSO group policy  from the policy snapshot       unknown groups refused
   A1  policy snapshot   port of intuticGate()          fails CLOSED
+  R   rule records      the snapshot's @rule records   fails CLOSED (a rule failure)
   M   MCP registry      from the policy snapshot       unverified snapshot admits none
   A3  SOP rules         authored in the product        fails OPEN (A2 covers it)
   A2  image integrity   local check                    fails CLOSED
   D   decide rules      the self-hosted decide engine  fails CLOSED when enforcing
   B   POST /hook-gate   control-plane check            fail posture set by GateClient
+
+Tier R evaluates the snapshot's @rule records (rule_record.py): a
+qualified `requires_before: action:run_tests[ok] -> X` refuses X with
+PREREQUISITE_UNMET unless the latest test run this gate recorded for the
+session (Gate.record_outcome, which @guard and guard_tools call) passed and
+no file changed since; `scope_paths_mode: enforce` refuses a file change
+outside the scope with OUT_OF_SCOPE; `plan_approval:` refuses with
+PLAN_NOT_APPROVED until the session's plan is approved (GET
+/api/v1/plans/session/:id, cached PLAN_CACHE_S), and under `strict` a tool off
+the plan with OFF_PLAN. A plan that cannot be read refuses whatever
+fail_closed says: rule failures always fail closed.
 
 Tier D runs only on a call every deterministic tier allowed: the snapshot's
 decide rules on the tool, asked of the self-hosted engine configured in
@@ -92,7 +104,9 @@ from .decide_evaluate import (
     CanaryFileStore, decide_decision, decide_shadow_findings, decide_stored_q95_ms, decide_unavailable_decision,
     evaluate_decide_call,
 )
-from .actions import is_deploy, touches_infra
+from . import refusal_detail, rule_record, test_outcome
+from .actions import classify, is_deploy, lane_of, touches_infra
+from .scope_match import is_file_write_call
 from .client import INSUFFICIENT_SCOPE, GateClient
 from .hold import hold_key, hold_message, request_hold
 from .limits import DECIDE_BUDGET_MS, too_large_reason
@@ -109,6 +123,14 @@ READ_ONLY_TOOLS = frozenset({"read_file", "list_files", "read", "cat", "view"})
 # rule's record decoded; otherwise the fallback line refuses its tools, as in
 # a gate that reads no @decide records.
 CAN_EVALUATE_DECIDE = True
+
+# Whether this gate evaluates the @rule records a snapshot carries (Tier R).
+# Only a gate that does skips a record's fallback line, and only when the
+# record decoded.
+CAN_EVALUATE_RULE_RECORDS = True
+
+# How long Tier R keeps a session's plan before reading it again, in seconds.
+PLAN_CACHE_S = 30.0
 
 
 def _decide_budget_ms() -> int:
@@ -156,6 +178,12 @@ GATE_REFUSAL_CODES = (
     "SSO_GROUP",
     "SNAPSHOT",
     "HELD",
+    # Tier R, the snapshot's rule records (rule_record.py): a qualified
+    # requires_before, scope_paths_mode: enforce, plan_approval.
+    "PREREQUISITE_UNMET",
+    "OUT_OF_SCOPE",
+    "OFF_PLAN",
+    "PLAN_NOT_APPROVED",
     # The MCP server registry and allowlist, from the policy snapshot or the
     # control plane's hook gate.
     "SERVER_BLOCKED",
@@ -199,11 +227,17 @@ class IntuticGateRefusal(ClawdeError):
     version.
     """
 
-    def __init__(self, reason: str, code: str, incident_id: Optional[str] = None):
+    def __init__(self, reason: str, code: str, incident_id: Optional[str] = None,
+                 scope: Optional[dict] = None, evidence: Optional[list] = None):
         super().__init__(f"[Intutic Governance] BLOCKED: {reason}")
         self.reason = reason
         self.code = code
         self.incident_id = incident_id
+        # Where the refusal applies, so a retry can stay out of it, and what
+        # the refuser saw, bounded as refusal_detail.py says; None when the
+        # refusal names none, and always in an OPAQUE workspace.
+        self.scope = scope
+        self.evidence = evidence
 
 
 class IntuticGateHold(IntuticGateRefusal):
@@ -283,12 +317,17 @@ class Gate:
         # A chaos run's plan, events path and why the plan cannot be used: read
         # from the environment on the first call.
         self._chaos: Optional[tuple] = None
+        # Tier R: each session's outcome state (test_outcome.py), and its plan
+        # as last read with when, by session id, in memory.
+        self._outcomes: dict = {}
+        self._plans: dict = {}
 
     # ------------------------------------------------------------ loading
 
     def snapshot(self) -> snapshot.Snapshot:
         if self._snapshot is None:
-            self._snapshot = snapshot.load_snapshot(self.cfg.workspace_id, evaluates_decide=CAN_EVALUATE_DECIDE)
+            self._snapshot = snapshot.load_snapshot(self.cfg.workspace_id, evaluates_decide=CAN_EVALUATE_DECIDE,
+                                                    evaluates_rules=CAN_EVALUATE_RULE_RECORDS)
         return self._snapshot
 
     def policy(self) -> dict:
@@ -529,6 +568,9 @@ class Gate:
                 note["policyHit"] = True
             d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled, d.next)
 
+        # ---- Tier R: the snapshot's rule records ---------------------------
+        self._guard_rules(tool_name, tool_input, note)
+
         # ---- Tier M: the MCP server registry and allowlist ----------------
         self._guard_mcp(tool_name, tool_input, note)
 
@@ -619,6 +661,73 @@ class Gate:
         if tool_name not in READ_ONLY_TOOLS:
             self._emit("tool_allowed", tool_name, "", tool_input, gate_decision_id=decision_id)
 
+    def record_outcome(self, tool_name: str, tool_input: dict, exit_code: Optional[int] = None,
+                       is_error: Optional[bool] = None, output: Optional[str] = None) -> None:
+        """Records how a call that ran went, for Tier R. A test run
+        (action:run_tests) records its outcome (test_outcome.py: the exit code,
+        else one read from `output`, the error flag and the runner summaries);
+        any other call marks earlier outcomes as no longer adjacent, and a call
+        that changed files makes an earlier pass stale. Kept in memory per
+        client session id; with no session id nothing is kept, and a qualified
+        rule stays unmet. @guard and guard_tools call this after every call
+        they ran."""
+        session = self.client.session_id if self.client is not None else ""
+        if not session:
+            return
+        state = self._outcomes.get(session) or test_outcome.empty_outcome_state()
+        if "action:run_tests" in classify(tool_name, tool_input):
+            out = output if isinstance(output, str) else None
+            code = exit_code if isinstance(exit_code, int) and not isinstance(exit_code, bool) else test_outcome.extract_exit_code(out)
+            decision = test_outcome.decide_test_outcome({"exitCode": code, "isError": is_error, "output": out})
+            self._outcomes[session] = test_outcome.record_test_outcome(state, "action:run_tests", decision, time.time() * 1000)
+        else:
+            self._outcomes[session] = test_outcome.note_completed_call(state, is_file_write_call(tool_name, tool_input))
+
+    def _session_plan(self, session_id: str) -> dict:
+        """The session's plan, read at most every PLAN_CACHE_S seconds; an unreadable one is not cached."""
+        if self.client is None or not session_id:
+            return {"status": "none"}
+        cached = self._plans.get(session_id)
+        if cached is not None and time.monotonic() - cached[0] < PLAN_CACHE_S:
+            return cached[1]
+        status, body = self.client.session_plan(session_id)
+        plan = rule_record.gate_rule_plan_from_response(status, body)
+        if plan["status"] != "unavailable":
+            self._plans[session_id] = (time.monotonic(), plan)
+        return plan
+
+    def _guard_rules(self, tool_name: str, tool_input: dict, note: Optional[dict] = None) -> None:
+        """Tier R. Raises IntuticGateRefusal when an enforcing rule record
+        refuses the call (PREREQUISITE_UNMET, OUT_OF_SCOPE, OFF_PLAN,
+        PLAN_NOT_APPROVED), with the refusal's scope; each shadow record's
+        finding is reported as tool_would_block and the call goes on."""
+        if not CAN_EVALUATE_RULE_RECORDS:
+            return
+        records = self.snapshot().rule_records
+        if not records:
+            return
+        session = self.client.session_id if self.client is not None else ""
+        cwd = os.getcwd()
+        plan = self._session_plan(session) if any(r["kind"] == "plan_approval" for r in records) else {"status": "none"}
+        ev = rule_record.evaluate_gate_rule_records(records, {
+            "tool": tool_name, "input": tool_input, "actions": classify(tool_name, tool_input),
+            "cwd": cwd, "root": _workspace_root(cwd), "sessionId": session,
+            "harness": self.client.harness if self.client is not None else "sdk",
+            "outcomes": self._outcomes.get(session), "observable": True, "plan": plan,
+            "nowMs": time.time() * 1000,
+        })
+        for f in ev["shadow"]:
+            self._emit("tool_would_block", tool_name, f"{f['reason']} [{f['ruleId']}]", tool_input)
+        f = ev["refusal"]
+        if f is None:
+            return
+        if note is not None:
+            note["ruleId"] = f["ruleId"]
+        reason = f"{f['reason']} [{f['ruleId']}]"
+        self._emit("tool_blocked", tool_name, reason, tool_input)
+        detail = refusal_detail.refusal_detail_for_mode("OPAQUE" if self._opaque() else "TRANSPARENT", f["scope"], [])
+        raise IntuticGateRefusal(self._shown(reason), f["code"], scope=detail.get("scope"), evidence=detail.get("evidence"))
+
     def _guard_decide(self, tool_name: str, tool_input: dict, note: Optional[dict] = None) -> None:
         """Tier D. Raises when a decide rule on this tool refuses the call
         (IntuticGateRefusal, DECIDE_REFUSED or GOVERNANCE_UNAVAILABLE) or could
@@ -681,6 +790,9 @@ class Gate:
                     "latencyMs": round((time.monotonic() - started) * 1000),
                     "engine": decide_log.decide_log_engine(cfg, ev),
                     "redact": decide_log.DECIDE_LOG_REDACTION_SOURCES,
+                    # The call's reversibility class; a gate has no revert rates.
+                    "lane": lane_of(classify(tool_name, tool_input)),
+                    "revertRate": None,
                 },
                 lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest(),
                 lambda rule_hash, run_id: decide_log.read_decide_eval_run_baseline(decide_log.default_decide_dir(), rule_hash, run_id),
@@ -741,6 +853,18 @@ class Gate:
         raise IntuticGateHold(hold_message(OPAQUE_REFUSAL_MESSAGE if opaque else rule_reason,
                                            "" if opaque else rule_id, outcome),
                               outcome.hold_id if outcome.recorded else None)
+
+
+def _workspace_root(cwd: str) -> str:
+    """The nearest directory at or above cwd holding .git, else cwd: what Tier R makes paths relative to."""
+    d = cwd
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return cwd
+        d = parent
 
 
 #: The refusal codes of the MCP registry and allowlist, which the hook gate may also return.

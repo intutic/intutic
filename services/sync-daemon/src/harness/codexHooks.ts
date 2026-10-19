@@ -134,7 +134,9 @@ process.stdin.on('end', async () => {
       input.target || input.notebook_path || '';
     const command = input.command || input.cmd || input.script || '';
 
-    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input);
+    // The session id (gate body v23): requires_before [ok] and plan_approval
+    // key their state on it.
+    await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input, _intuticSessionId);
 
     // Allow
     logEvent('tool_allowed', toolName, '');

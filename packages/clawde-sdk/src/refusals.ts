@@ -27,6 +27,7 @@ export const PROXY_REFUSALS: Readonly<Record<string, { status: number; verdict: 
   model_not_allowed: { status: 403, verdict: 'kill' },
   LOOP_RUN_TERMINATED: { status: 403, verdict: 'kill' },
   LOOP_RUN_PENDING_REVIEW: { status: 403, verdict: 'hold' },
+  NODE_KIND_DENIED: { status: 403, verdict: 'kill' },
   policy_held: { status: 403, verdict: 'hold' },
   policy_reask: { status: 409, verdict: 'reask' },
   GOVERNANCE_UNAVAILABLE: { status: 403, verdict: 'kill' },
@@ -38,6 +39,8 @@ export const PROXY_REFUSALS: Readonly<Record<string, { status: number; verdict: 
   TOOL_DENIED: { status: 200, verdict: 'kill' },
   SSO_GROUP: { status: 200, verdict: 'kill' },
   SQL_GUARD: { status: 200, verdict: 'kill' },
+  PREREQUISITE_UNMET: { status: 200, verdict: 'kill' },
+  OUT_OF_SCOPE: { status: 200, verdict: 'kill' },
   RESPONSE_UNPARSEABLE: { status: 200, verdict: 'kill' },
   OUTPUT_DLP: { status: 200, verdict: 'kill' },
 }

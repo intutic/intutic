@@ -1681,9 +1681,14 @@ intutic loop exec [options] -- <command> [args...]
 | `--auto-judge` | Enable automatic E2E judging for the loop | — |
 | `--dev` | Use local control plane | — |
 
-**What it does:** Starts a loop run, then runs the command with `INTUTIC_LOOP_RUN_ID` set to the
-run id. When the command exits, the run is marked `COMPLETED` (exit `0`) or `FAILED` (non-zero),
-and `loop exec` exits with the command's code. A run held for review (`PENDING_REVIEW`) is left
+**What it does:** Starts a loop run, writes its id and the commit it starts from
+(`INTUTIC_LOOP_BASE_COMMIT`) to `~/.intutic/env/loop.env`, then runs the command with
+`INTUTIC_LOOP_RUN_ID` set to the run id. When the command exits, the run is marked `COMPLETED`
+(exit `0`) or `FAILED` (non-zero), and `loop exec` exits with the command's code. When the
+workspace requires a verified completion (`loop_review.requireVerifiedCompletion`), a run whose
+command exited `0` is verified first, as [`intutic loop verify`](#intutic-loop-verify)
+does; a failed verify, or a `409` or `503` refusal from completing, is printed, the run stays
+`ACTIVE`, and `loop exec` exits `1`. A run held for review (`PENDING_REVIEW`) is left
 open, and the command prints the `intutic loop review` line to run. Exits `1` if the run cannot be
 started.
 
@@ -1710,9 +1715,36 @@ intutic loop list [options]
 
 ---
 
+## `intutic loop verify <loop_run_id>` <Badge type="tip" text="Cloud" />
+
+Verify a loop run's changes before completing it.
+
+```bash
+intutic loop verify <loop_run_id> [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--base <ref>` | Diff against this ref | the commit the run started from (`INTUTIC_LOOP_BASE_COMMIT`), else `HEAD` |
+| `--task <text>` | What the run was asked to do, for the judge | `Loop run <id>` |
+| `--dev` | Use local control plane | — |
+
+**What it does:** Takes `git diff <base>` and the changed paths, and first checks them against the
+`scope_paths` of the local SOPs the session selected (those with no `roles:`): a path outside them
+stops the verify with the findings, and nothing is sent. Otherwise it posts the diff, the paths and
+the base to the control plane, which checks scope and plan first and asks the judge only if those
+pass. Prints each check; exits `1` unless the run verified.
+
+---
+
 ## `intutic loop complete <loop_run_id>` <Badge type="tip" text="Cloud" />
 
-Mark a running loop as successfully completed.
+Mark a running loop as successfully completed. When the workspace requires a verified completion,
+an unverified, failed or stale verify is refused (`409` with `E_LOOP_NOT_VERIFIED`,
+`E_LOOP_UNVERIFIABLE` or `E_LOOP_VERIFY_STALE`), and a check that cannot run is refused with
+`503 GOVERNANCE_UNAVAILABLE`; the command prints the refusal and its findings and exits `1`.
 
 ```bash
 intutic loop complete <loop_run_id> [options]

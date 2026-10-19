@@ -694,6 +694,43 @@ export type LoopRunResponse = z.infer<typeof LoopRunResponse>
 export const LoopRunEnvelopeResponse = z.object({ ok: z.literal(true), loop: LoopRunResponse })
 export type LoopRunEnvelopeResponse = z.infer<typeof LoopRunEnvelopeResponse>
 
+/** `GET /api/v1/loops/:loopRunId`: the run, and whether completing it needs a passing verify. */
+export const LoopRunDetailResponse = LoopRunEnvelopeResponse.extend({
+  requiresVerifiedCompletion: z
+    .boolean()
+    .nullable()
+    .describe('`loop_review.requireVerifiedCompletion`: a SUCCEEDED completion needs a passing, current verify. Null when the setting could not be read.'),
+})
+export type LoopRunDetailResponse = z.infer<typeof LoopRunDetailResponse>
+
+/** Where a failed loop check applies (`RefusalScope`, refusalDetail.ts). */
+const LoopRefusalScope = z.object({
+  paths: z.array(z.string()).optional(),
+  tools: z.array(z.string()).optional(),
+  step: z.string().optional(),
+  detector: z.string().optional(),
+  rule: z.string().optional(),
+})
+
+/** `POST /api/v1/loops/:loopRunId/verify`. `ok`, `score`, `findings` and `unverified` keep their meaning. */
+export const LoopVerifyResponse = z.object({
+  ok: z.boolean(),
+  score: z.number(),
+  findings: z.array(z.string()),
+  unverified: z.literal(true).optional().describe('Present (true) only when no check could run: each is not_applicable or unavailable.'),
+  verificationId: z.string(),
+  stage: z.enum(['deterministic', 'judge']).describe('`deterministic` when a scope or plan check failed and the judge was not called.'),
+  checks: z.array(
+    z.object({
+      id: z.enum(['scope_paths', 'plan_steps', 'judge']),
+      status: z.enum(['pass', 'fail', 'not_applicable', 'unavailable']),
+      findings: z.array(z.string()),
+      scope: LoopRefusalScope.optional(),
+    }),
+  ),
+})
+export type LoopVerifyResponse = z.infer<typeof LoopVerifyResponse>
+
 /** `GET /api/v1/loops`, newest first. */
 export const LoopRunListResponse = listEnvelope('loops', 'camel').extend({
   ok: z.literal(true),

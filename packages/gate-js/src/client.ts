@@ -438,6 +438,21 @@ export class GateClient {
   }
 
   /**
+   * The session's plan (`GET /api/v1/plans/session/:sessionId`) as Tier R
+   * reads it: the HTTP status and body, or a null status when the control
+   * plane could not be reached. A local-only client has no plans to read:
+   * 404. Never throws.
+   */
+  async sessionPlan(sessionId: string): Promise<{ status: number | null; body: unknown }> {
+    if (this.localOnly) return { status: 404, body: null }
+    try {
+      return { status: 200, body: await this.request('GET', `/api/v1/plans/session/${encodeURIComponent(sessionId)}`, undefined, this.timeoutMs) }
+    } catch (err) {
+      return err instanceof HttpStatusError ? { status: err.status, body: err.body } : { status: null, body: null }
+    }
+  }
+
+  /**
    * Build a client from the environment, falling back to CLI credentials.
    *
    * Reading `~/.intutic/credentials.json` means the gate works with whatever

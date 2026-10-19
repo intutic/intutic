@@ -1,0 +1,48 @@
+{
+  "harness": "claude-code",
+  "product": "Claude Code",
+  "version": "2.1.233",
+  "capturedAt": "2026-10-19",
+  "how": "claude -p (model haiku) in a scratch project with --setting-sources project; .claude/settings.json registered PostToolUse and PostToolUseFailure command hooks that wrote stdin to a file. The agent ran printf of a cargo summary (exit 0) and sh -c with a pytest summary and exit 1. transcript_path and cwd are redacted; nothing else is edited.",
+  "events": [
+    {
+      "session_id": "74e85722-0d67-4b07-8ab3-abae7a5153ca",
+      "transcript_path": "<redacted:transcript_path>",
+      "cwd": "<redacted:cwd>",
+      "prompt_id": "2bfcdccb-dd98-423f-8e09-48e51044e077",
+      "permission_mode": "bypassPermissions",
+      "hook_event_name": "PostToolUse",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "printf 'test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured\n'",
+        "description": "Run test result command"
+      },
+      "tool_response": {
+        "stdout": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured",
+        "stderr": "",
+        "interrupted": false,
+        "isImage": false,
+        "noOutputExpected": false
+      },
+      "tool_use_id": "toolu_018rJz4JSCQKR8DyS67QHtsa",
+      "duration_ms": 156
+    },
+    {
+      "session_id": "74e85722-0d67-4b07-8ab3-abae7a5153ca",
+      "transcript_path": "<redacted:transcript_path>",
+      "cwd": "<redacted:cwd>",
+      "prompt_id": "2bfcdccb-dd98-423f-8e09-48e51044e077",
+      "permission_mode": "bypassPermissions",
+      "hook_event_name": "PostToolUseFailure",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sh -c 'echo \"=== 1 failed, 2 passed in 0.12s ===\"; exit 1'",
+        "description": "Run failing test command"
+      },
+      "tool_use_id": "toolu_01511EevRT7uEtfCMABWDnD7",
+      "error": "Exit code 1\n=== 1 failed, 2 passed in 0.12s ===",
+      "is_interrupt": false,
+      "duration_ms": 14
+    }
+  ]
+}

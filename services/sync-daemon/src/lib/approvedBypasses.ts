@@ -27,10 +27,23 @@
  * valid bypasses" (fail closed toward the hold); it can never resurrect an
  * entry whose own TTL has passed.
  *
- * Only `review_before` gates read this today (claudeCodeHooks.ts's
- * `_intuticApprovedBypass`) — see that module's docstring for why the other
- * harness writers are not wired to it: none of them implement `review_before`
- * holds at all, so there is nothing for a bypass to apply to there yet.
+ * Every hook gate that can hold reads it. The hold and the
+ * bypass check live in the shared gate bodies since gate body v8:
+ * `intuticApprovedBypass` in the JS body (`gateBody.ts`), emitted into all
+ * twelve JS gates (claude-code, codex, cursor, github-copilot, grok,
+ * antigravity-cli, muse-code, windsurf, cline, and the in-process opencode,
+ * pi and openclaw gates), and `intutic_bypass`/`intutic_hold` in the bash body,
+ * emitted into the four bash gates (antigravity/Gemini CLI, goose, hermes,
+ * openhands). It covers every hold rule id the snapshot carries:
+ * `REQUIRE_APPROVAL:` SOP rules, `sop.local.review_before.*`, and since v23
+ * the lane holds `sop.lane.<class>.<token>` and revert holds
+ * `revert.<subject>`. The n8n workflow gate and the Open WebUI filter refuse
+ * a hold outright by design: neither has a developer to approve one or a
+ * tool call to retry. The SDK gates (`@intutic/gate`, dsh, intutic-clawde) and
+ * the MCP proxy do not read this file; they ask
+ * `GET /api/v1/decisions/approved-bypasses` themselves. Each family's key
+ * matches only its own holds, because the control plane copies the key from
+ * the gate's own hold record.
  *
  * @module
  */

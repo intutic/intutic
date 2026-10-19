@@ -1,0 +1,1119 @@
+{
+ "_doc": "The test-outcome contract of the loops, graphs and gates release Every port runs every group: shared-types testOutcome.ts (and its byte-identical @intutic/gate copy, and the JavaScript hook gates through TEST_OUTCOME_JS_SOURCE), intutic_clawde/gate/test_outcome.py (and the bash gates, which embed it), and the proxy's plugins/anomaly/outcome.rs. extractExitCode: text to exit code. decide: decideTestOutcome inputs to {outcome, why}. qualifier: orderingQualifierError(side, left). state: steps applied to an empty state (record = recordTestOutcome with decideTestOutcome's answer for input; call = noteCompletedCall(changedFiles)), then prerequisiteCase(token, adjacent, now); reason = prerequisiteUnmetReason(first, then, case, why, harness) for unmet cases. parseState: state-file text to valid or not. reasons: the exact refusal reasons. adversarial: [name, field, unit, times] inputs every JavaScript and Python port must decide in under 200 ms (the unit repeated up to times times, as the output). An output written as {concat: [[text, n], ...]} is each text repeated n times, joined.",
+ "extractExitCode": [
+  {
+   "name": "codex shell JSON, metadata.exit_code",
+   "output": "{\"output\":\"1 failed\",\"metadata\":{\"exit_code\":1,\"duration_seconds\":0.4}}",
+   "exitCode": 1
+  },
+  {
+   "name": "codex shell JSON, exit 0",
+   "output": "{\"output\":\"ok\",\"metadata\":{\"exit_code\":0}}",
+   "exitCode": 0
+  },
+  {
+   "name": "top-level exit_code",
+   "output": "{\"stdout\":\"\",\"exit_code\":2}",
+   "exitCode": 2
+  },
+  {
+   "name": "top-level exitCode",
+   "output": "{\"exitCode\":0}",
+   "exitCode": 0
+  },
+  {
+   "name": "metadata wins over top level",
+   "output": "{\"exit_code\":0,\"metadata\":{\"exit_code\":3}}",
+   "exitCode": 3
+  },
+  {
+   "name": "a boolean is not an exit code",
+   "output": "{\"exit_code\":true}",
+   "exitCode": null
+  },
+  {
+   "name": "a fraction is not an exit code",
+   "output": "{\"exitCode\":1.5}",
+   "exitCode": null
+  },
+  {
+   "name": "a string is not an exit code",
+   "output": "{\"exit_code\":\"1\"}",
+   "exitCode": null
+  },
+  {
+   "name": "JSON surrounded by whitespace",
+   "output": "  \n{\"metadata\":{\"exit_code\":4}}\n",
+   "exitCode": 4
+  },
+  {
+   "name": "damaged JSON falls through to the lines",
+   "output": "{\"metadata\":{\"exit_code\":1}\nExit code 7",
+   "exitCode": 7
+  },
+  {
+   "name": "Claude Code Bash error result",
+   "output": "Exit code 1\nFAILED tests/test_a.py::test_x",
+   "exitCode": 1
+  },
+  {
+   "name": "Exit code with a colon",
+   "output": "running\nExit code: 0",
+   "exitCode": 0
+  },
+  {
+   "name": "Gemini CLI casing",
+   "output": "Command: pytest\nExit Code: 2",
+   "exitCode": 2
+  },
+  {
+   "name": "negative exit code",
+   "output": "Exit code -1",
+   "exitCode": -1
+  },
+  {
+   "name": "exit status",
+   "output": "--- FAIL: TestX\nexit status 1\nFAIL\tpkg\t0.1s",
+   "exitCode": 1
+  },
+  {
+   "name": "Process exited with code",
+   "output": "Process exited with code 0 after 3s",
+   "exitCode": 0
+  },
+  {
+   "name": "Command exited with code",
+   "output": "Command exited with code 137",
+   "exitCode": 137
+  },
+  {
+   "name": "first matching line wins",
+   "output": "Exit code 0\nexit status 1",
+   "exitCode": 0
+  },
+  {
+   "name": "indented line, trailing spaces",
+   "output": "   Exit code 3   ",
+   "exitCode": 3
+  },
+  {
+   "name": "CRLF line ends",
+   "output": "Exit code 5\r\nmore\r\n",
+   "exitCode": 5
+  },
+  {
+   "name": "a sentence is not an exit code line",
+   "output": "the exit code was 1",
+   "exitCode": null
+  },
+  {
+   "name": "exit status needs the whole line",
+   "output": "exit status 1 (ignored)",
+   "exitCode": null
+  },
+  {
+   "name": "exit status is never negative",
+   "output": "exit status -1",
+   "exitCode": null
+  },
+  {
+   "name": "lowercase process is not the shape",
+   "output": "process exited with code 1",
+   "exitCode": null
+  },
+  {
+   "name": "ten digits is not an exit code",
+   "output": "Exit code 1234567890",
+   "exitCode": null
+  },
+  {
+   "name": "empty",
+   "output": "",
+   "exitCode": null
+  },
+  {
+   "name": "no signal",
+   "output": "all good",
+   "exitCode": null
+  }
+ ],
+ "decide": [
+  {
+   "name": "nonzero exit code",
+   "input": {
+    "exitCode": 1,
+    "output": "3 passing"
+   },
+   "outcome": "failed",
+   "why": "exit_code"
+  },
+  {
+   "name": "exit code beats the summary",
+   "input": {
+    "exitCode": 2,
+    "output": "===== 4 passed in 0.10s ====="
+   },
+   "outcome": "failed",
+   "why": "exit_code"
+  },
+  {
+   "name": "is_error",
+   "input": {
+    "isError": true,
+    "output": "Tests: 3 passed, 3 total"
+   },
+   "outcome": "failed",
+   "why": "is_error"
+  },
+  {
+   "name": "success false",
+   "input": {
+    "success": false
+   },
+   "outcome": "failed",
+   "why": "success_false"
+  },
+  {
+   "name": "exit code checked before is_error",
+   "input": {
+    "exitCode": 1,
+    "isError": true
+   },
+   "outcome": "failed",
+   "why": "exit_code"
+  },
+  {
+   "name": "pytest failures with exit 0",
+   "input": {
+    "exitCode": 0,
+    "output": "collected 3 items\n\n=================== 1 failed, 2 passed in 0.12s ===================="
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "pytest errors",
+   "input": {
+    "output": "========= 2 passed, 1 error in 1.02s ========="
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "pytest errors plural",
+   "input": {
+    "output": "========= 3 errors in 1.02s ========="
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "pytest pass, no exit code",
+   "input": {
+    "output": "============================== 5 passed in 0.31s ==============================="
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "pytest pass with a duration suffix",
+   "input": {
+    "output": "==== 2 passed, 1 warning in 61.20s (0:01:01) ===="
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "pytest xfailed is not a failure",
+   "input": {
+    "output": "==== 2 passed, 1 xfailed in 0.2s ===="
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "pytest no tests ran",
+   "input": {
+    "output": "============================ no tests ran in 0.01s ============================="
+   },
+   "outcome": "failed",
+   "why": "no_tests"
+  },
+  {
+   "name": "pytest no tests ran beats exit 0",
+   "input": {
+    "exitCode": 0,
+    "output": "========= no tests ran in 0.01s ========="
+   },
+   "outcome": "failed",
+   "why": "no_tests"
+  },
+  {
+   "name": "pytest deselected only is no signal",
+   "input": {
+    "output": "==== 4 deselected in 0.02s ===="
+   },
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "jest failure",
+   "input": {
+    "output": "Test Suites: 1 failed, 1 total\nTests:       1 failed, 2 passed, 3 total\nSnapshots:   0 total"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "jest pass",
+   "input": {
+    "output": "Tests:       3 passed, 3 total"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "jest zero total",
+   "input": {
+    "exitCode": 0,
+    "output": "Tests:       0 total"
+   },
+   "outcome": "failed",
+   "why": "no_tests"
+  },
+  {
+   "name": "vitest failure",
+   "input": {
+    "output": " Test Files  1 failed | 3 passed (4)\n      Tests  1 failed | 41 passed (42)"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "vitest pass with skips",
+   "input": {
+    "output": "      Tests  1204 passed | 1 skipped (1205)"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "vitest pass with ANSI colours",
+   "input": {
+    "output": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m12 passed\u001b[39m\u001b[22m\u001b[90m (12)\u001b[39m"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "vitest Test Files line alone is no signal",
+   "input": {
+    "output": " Test Files  4 passed (4)"
+   },
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "go ok",
+   "input": {
+    "output": "ok  \tgithub.com/acme/api\t0.412s\nok  \tgithub.com/acme/web\t0.100s"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "go FAIL line",
+   "input": {
+    "output": "ok  \tgithub.com/acme/api\t0.4s\nFAIL\tgithub.com/acme/web\t0.1s"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "go --- FAIL",
+   "input": {
+    "output": "=== RUN   TestX\n--- FAIL: TestX (0.00s)"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "go bare FAIL",
+   "input": {
+    "output": "FAIL"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "FAILED is not go's FAIL",
+   "input": {
+    "output": "FAILURES summary below"
+   },
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "cargo pass across crates",
+   "input": {
+    "output": "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s\n\n   Doc-tests api\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "cargo failure",
+   "input": {
+    "output": "test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "cargo nothing ran",
+   "input": {
+    "exitCode": 0,
+    "output": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s"
+   },
+   "outcome": "failed",
+   "why": "no_tests"
+  },
+  {
+   "name": "mocha pass",
+   "input": {
+    "output": "  12 passing (40ms)"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "mocha failure",
+   "input": {
+    "output": "  11 passing (40ms)\n  1 failing"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "mocha zero passing",
+   "input": {
+    "output": "  0 passing (1ms)"
+   },
+   "outcome": "failed",
+   "why": "no_tests"
+  },
+  {
+   "name": "rspec pass",
+   "input": {
+    "output": "Finished in 0.5 seconds\n10 examples, 0 failures"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "rspec failure",
+   "input": {
+    "output": "10 examples, 2 failures, 1 pending"
+   },
+   "outcome": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "rspec singular",
+   "input": {
+    "output": "1 example, 0 failures"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "rspec zero examples",
+   "input": {
+    "output": "0 examples, 0 failures"
+   },
+   "outcome": "failed",
+   "why": "no_tests"
+  },
+  {
+   "name": "a zero summary does not cancel another runner's pass",
+   "input": {
+    "output": "Tests:       0 total\n  5 passing (1s)"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "phpunit decides by exit code only: 0",
+   "input": {
+    "exitCode": 0,
+    "output": "OK (12 tests, 30 assertions)"
+   },
+   "outcome": "ok",
+   "why": "exit_zero"
+  },
+  {
+   "name": "phpunit with no exit code is unknown",
+   "input": {
+    "output": "OK (12 tests, 30 assertions)"
+   },
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "gradle with no exit code is unknown",
+   "input": {
+    "output": "BUILD SUCCESSFUL in 3s"
+   },
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "exit 0 and nothing else",
+   "input": {
+    "exitCode": 0
+   },
+   "outcome": "ok",
+   "why": "exit_zero"
+  },
+  {
+   "name": "success true alone is unknown",
+   "input": {
+    "success": true
+   },
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "is_error false alone is unknown",
+   "input": {
+    "isError": false,
+    "output": ""
+   },
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "a fractional exit code is no exit code",
+   "input": {
+    "exitCode": 1.5,
+    "output": "Tests:       2 passed, 2 total"
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "nothing at all",
+   "input": {},
+   "outcome": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "a summary outside the last 64 KiB is not read",
+   "input": {
+    "output": {
+     "concat": [
+      [
+       "Tests:       1 failed, 2 total\n",
+       1
+      ],
+      [
+       "x",
+       70000
+      ],
+      [
+       "\nTests:       2 passed, 2 total",
+       1
+      ]
+     ]
+    }
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "a summary past 1 KiB of its line is not read",
+   "input": {
+    "output": {
+     "concat": [
+      [
+       "y",
+       1100
+      ],
+      [
+       "1 failing\n  3 passing",
+       1
+      ]
+     ]
+    }
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  },
+  {
+   "name": "multibyte text before the tail boundary",
+   "input": {
+    "output": {
+     "concat": [
+      [
+       "é",
+       40000
+      ],
+      [
+       "\n  2 passing",
+       1
+      ]
+     ]
+    }
+   },
+   "outcome": "ok",
+   "why": "summary_passed"
+  }
+ ],
+ "qualifier": [
+  {
+   "name": "plain tokens",
+   "side": "action:deploy",
+   "left": false,
+   "error": null
+  },
+  {
+   "name": "the qualified token on the left",
+   "side": "action:run_tests[ok]",
+   "left": true,
+   "error": null
+  },
+  {
+   "name": "the qualified token on the right",
+   "side": "action:run_tests[ok]",
+   "left": false,
+   "error": "\"action:run_tests[ok]\": [ok] qualifies only action:run_tests, on the left of ->"
+  },
+  {
+   "name": "a right side whose bracket the list parser stripped",
+   "side": "action:run_tests[ok",
+   "left": false,
+   "error": "\"action:run_tests[ok\": [ok] qualifies only action:run_tests, on the left of ->"
+  },
+  {
+   "name": "another token qualified",
+   "side": "action:deploy[ok]",
+   "left": true,
+   "error": "\"action:deploy[ok]\": [ok] qualifies only action:run_tests, on the left of ->"
+  },
+  {
+   "name": "another qualifier",
+   "side": "action:run_tests[failed]",
+   "left": true,
+   "error": "\"action:run_tests[failed]\": [ok] qualifies only action:run_tests, on the left of ->"
+  },
+  {
+   "name": "a tool qualified",
+   "side": "Bash[ok]",
+   "left": true,
+   "error": "\"Bash[ok]\": [ok] qualifies only action:run_tests, on the left of ->"
+  },
+  {
+   "name": "upper case is not the qualifier",
+   "side": "action:run_tests[OK]",
+   "left": true,
+   "error": "\"action:run_tests[OK]\": [ok] qualifies only action:run_tests, on the left of ->"
+  }
+ ],
+ "state": [
+  {
+   "name": "no run",
+   "steps": [],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 1000
+   },
+   "case": "none",
+   "why": null
+  },
+  {
+   "name": "a passing run",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "met",
+   "why": null
+  },
+  {
+   "name": "a failing run",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 1
+     },
+     "at": 1000
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "failed",
+   "why": "exit_code"
+  },
+  {
+   "name": "an unreadable run",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "output": "done"
+     },
+     "at": 1000
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "unknown",
+   "why": "no_signal"
+  },
+  {
+   "name": "the latest run decides: fail then pass",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 1
+     },
+     "at": 1000
+    },
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1500
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "met",
+   "why": null
+  },
+  {
+   "name": "the latest run decides: pass then fail",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    },
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "output": "Tests:       1 failed, 1 total"
+     },
+     "at": 1500
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "failed",
+   "why": "summary_failed"
+  },
+  {
+   "name": "a read after the pass keeps it",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    },
+    {
+     "op": "call",
+     "changedFiles": false
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "met",
+   "why": null
+  },
+  {
+   "name": "a file write after the pass makes it stale (Q1)",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    },
+    {
+     "op": "call",
+     "changedFiles": true
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "changed",
+   "why": null
+  },
+  {
+   "name": "a new pass after the write meets it again",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    },
+    {
+     "op": "call",
+     "changedFiles": true
+    },
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1500
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "met",
+   "why": null
+  },
+  {
+   "name": "a failure after a write still says failed",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 1
+     },
+     "at": 1000
+    },
+    {
+     "op": "call",
+     "changedFiles": true
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "failed",
+   "why": "exit_code"
+  },
+  {
+   "name": "adjacent: nothing between",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": true,
+    "now": 2000
+   },
+   "case": "met",
+   "why": null
+  },
+  {
+   "name": "adjacent: a read between",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    },
+    {
+     "op": "call",
+     "changedFiles": false
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": true,
+    "now": 2000
+   },
+   "case": "not_adjacent",
+   "why": null
+  },
+  {
+   "name": "an outcome a day old is gone",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 86401000
+   },
+   "case": "none",
+   "why": null
+  },
+  {
+   "name": "an outcome just under a day old counts",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 1000
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 86400999
+   },
+   "case": "met",
+   "why": null
+  },
+  {
+   "name": "an outcome from the future is ignored",
+   "steps": [
+    {
+     "op": "record",
+     "token": "action:run_tests",
+     "input": {
+      "exitCode": 0
+     },
+     "at": 5000
+    }
+   ],
+   "check": {
+    "token": "action:run_tests",
+    "adjacent": false,
+    "now": 2000
+   },
+   "case": "none",
+   "why": null
+  }
+ ],
+ "parseState": [
+  {
+   "name": "empty state",
+   "text": "{\"v\":1,\"outcomes\":{}}",
+   "valid": true
+  },
+  {
+   "name": "one entry",
+   "text": "{\"v\":1,\"outcomes\":{\"action:run_tests\":{\"o\":\"ok\",\"at\":1000,\"why\":\"exit_zero\"}}}",
+   "valid": true
+  },
+  {
+   "name": "changed and later",
+   "text": "{\"v\":1,\"outcomes\":{\"action:run_tests\":{\"o\":\"ok\",\"at\":1000,\"changed\":true,\"later\":true}}}",
+   "valid": true
+  },
+  {
+   "name": "not JSON",
+   "text": "{\"v\":1,",
+   "valid": false
+  },
+  {
+   "name": "wrong version",
+   "text": "{\"v\":2,\"outcomes\":{}}",
+   "valid": false
+  },
+  {
+   "name": "outcomes is a list",
+   "text": "{\"v\":1,\"outcomes\":[]}",
+   "valid": false
+  },
+  {
+   "name": "unknown outcome",
+   "text": "{\"v\":1,\"outcomes\":{\"action:run_tests\":{\"o\":\"passed\",\"at\":1}}}",
+   "valid": false
+  },
+  {
+   "name": "at is a string",
+   "text": "{\"v\":1,\"outcomes\":{\"action:run_tests\":{\"o\":\"ok\",\"at\":\"1\"}}}",
+   "valid": false
+  },
+  {
+   "name": "changed is false",
+   "text": "{\"v\":1,\"outcomes\":{\"action:run_tests\":{\"o\":\"ok\",\"at\":1,\"changed\":false}}}",
+   "valid": false
+  },
+  {
+   "name": "a list",
+   "text": "[]",
+   "valid": false
+  }
+ ],
+ "reasons": [
+  {
+   "case": "none",
+   "first": "action:run_tests",
+   "then": "action:deploy",
+   "why": null,
+   "harness": "claude-code",
+   "reason": "action:deploy needs a passing action:run_tests first; none ran in this session"
+  },
+  {
+   "case": "failed",
+   "first": "action:run_tests",
+   "then": "action:deploy",
+   "why": "exit_code",
+   "harness": "claude-code",
+   "reason": "action:deploy needs a passing action:run_tests first; the last action:run_tests failed (exit_code)"
+  },
+  {
+   "case": "unknown",
+   "first": "action:run_tests",
+   "then": "action:deploy",
+   "why": "no_signal",
+   "harness": "claude-code",
+   "reason": "action:deploy needs a passing action:run_tests first; the result of the last action:run_tests could not be read; rerun the tests so their summary is visible"
+  },
+  {
+   "case": "changed",
+   "first": "action:run_tests",
+   "then": "action:publish",
+   "why": null,
+   "harness": "claude-code",
+   "reason": "action:publish needs a passing action:run_tests first; files changed after the last passing action:run_tests; rerun the tests"
+  },
+  {
+   "case": "not_adjacent",
+   "first": "action:run_tests",
+   "then": "action:deploy",
+   "why": null,
+   "harness": "claude-code",
+   "reason": "action:deploy needs a passing action:run_tests first; action:deploy must come directly after it, and another call came between"
+  },
+  {
+   "case": "not_observable",
+   "first": "action:run_tests",
+   "then": "action:deploy",
+   "why": null,
+   "harness": "windsurf",
+   "reason": "action:deploy needs a passing action:run_tests first; windsurf reports no tool results Intutic can read, so a passing run cannot be observed here"
+  },
+  {
+   "case": "no_session",
+   "first": "action:run_tests",
+   "then": "Bash",
+   "why": null,
+   "harness": "cursor",
+   "reason": "Bash needs a passing action:run_tests first; cursor sent no session id, so test results cannot be tied to this session"
+  }
+ ],
+ "adversarial": [
+  [
+   "pytest equals run",
+   "output",
+   "=",
+   200000
+  ],
+  [
+   "pytest frame with many ins",
+   "output",
+   "= in in in in in ",
+   20000
+  ],
+  [
+   "many short lines",
+   "output",
+   "Tests: 1 passed,\n",
+   20000
+  ],
+  [
+   "one long separator run",
+   "output",
+   ",|",
+   100000
+  ],
+  [
+   "ANSI escapes without a final letter",
+   "output",
+   "\u001b[1;2;3;4",
+   20000
+  ],
+  [
+   "digits after exit code",
+   "output",
+   "Exit code 1",
+   20000
+  ],
+  [
+   "exit lines",
+   "output",
+   "Exit code x\n",
+   20000
+  ],
+  [
+   "JSON braces",
+   "output",
+   "{\"a\":",
+   20000
+  ]
+ ]
+}

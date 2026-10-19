@@ -104,9 +104,10 @@ Three limits apply to this figure:
 - **It is a lower bound.** BFCL is API-orchestration traffic filtered to successful
   completion — short (median 6 calls) and clean. Every sequence detector's exposure
   grows with trajectory length, and agentic coding runs are far longer.
-- **It covers 8 of 27 detectors.** Seven against the two corpora above, plus one
-  measured against 10,753 real tool and parameter descriptions. The other nineteen
-  read fields no public corpus supplies — graph depth, workflow budget, DLP findings —
+- **It covers 8 of 28 detectors.** Seven against the two corpora above, plus one
+  measured against 10,753 real tool and parameter descriptions. The other twenty
+  read fields no public corpus supplies — graph depth, workflow budget, DLP findings,
+  sibling workers' briefs —
   or fire only on an operator declaration and so have no false-positive rate to
   measure at all. The split is generated from the registry at test time into
   `packages/proxy/tests/corpus/BASELINE.txt`, and a gate fails this page if the two

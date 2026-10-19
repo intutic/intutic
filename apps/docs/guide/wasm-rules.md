@@ -265,6 +265,12 @@ Declaring these in a SOP makes the proxy's own detectors enforce them. They are
 | `forbid_with` | `(string, string)[]` | `forbid_with: secrets(), action:http_post` — **co-occurrence, not flow**, because `dlp_findings` carries no sequence position. |
 | `risk_tier` | `string` | `risk_tier:` — `Low` \| `Medium` \| `High` \| `Critical`. No proxy detector reads it; it exists for your rules. |
 
+`review_before` already includes the tokens a closed lane holds
+(`closed_lanes:`), and a `requires_before` entry keeps its `[ok]` qualifier
+as written (`action:run_tests[ok]`). The session's test outcomes, the enforce
+modes (`scope_paths_mode:`, `plan_steps_mode:`, `context_isolation:`), the
+revert-history holds and a sibling's context overlap are not sent to rules.
+
 ### Temporal policy
 
 This context already carries most of what a time-aware policy needs — spread

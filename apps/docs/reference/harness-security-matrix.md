@@ -18,8 +18,9 @@ This document is the canonical reference for what Intutic enforces, how, and the
 ### Vector A — review holds
 
 Every Vector A gate evaluates the same policy snapshot, and since gate body v8
-that includes the `hold` tier: a `review_before:` token or a
-`REQUIRE_APPROVAL:` SOP refuses the call through the harness's own blocking
+that includes the `hold` tier: a `review_before:` token, a closed reversibility
+lane (`closed_lanes:`, held as `sop.lane.<class>.<token>`), a revert hold
+(`revert.<token>`) or a `REQUIRE_APPROVAL:` SOP refuses the call through the harness's own blocking
 contract, records a hold for **Findings › Review Queue › Held Changes**, and lets the exact
 same call through once a reviewer approves it on a control plane<!-- ENTERPRISE_ONLY_START --> (`intutic decision approve <holdId>` or
 Slack)<!-- ENTERPRISE_ONLY_END --> while the workspace's review-hold bypass is on (short TTL); otherwise the
@@ -28,6 +29,12 @@ call stays refused. The n8n workflow hook and the Open WebUI prompt filter
 refuse a hold outright — neither runs in a workspace that could record one. The in-process
 SDK gates (`@intutic/gate`, `intutic_clawde.gate`) hold the call the same way, recording it
 through the decisions API themselves; see [Holds](/reference/gate-sdk#holds).
+
+Since gate body v23 the tiers run in one order at every gate: refusals first
+(the built-in rules, the snapshot's block rules, a qualified `requires_before`,
+the MCP registry and allowlist), then holds, then `scope_paths` and
+`plan_approval`, then decide rules. A held call is held whatever a decide rule
+would say; only an approved bypass releases it.
 
 ### Refusal codes in a JSON decision {#hook-refusal-codes}
 
@@ -45,12 +52,24 @@ so its reason ends with the code instead, `(refusal code SERVER_BLOCKED)`. The
 harnesses that read the exit code get the refusal as text on stderr, with the
 rule id in brackets.
 
+A refusal by a `requires_before … [ok]`, `scope_paths` or `plan_approval` rule
+also says where to retry: the JSON decision carries `scope` beside `code` and
+`ruleId` (`{"paths": [...]}` for `OUT_OF_SCOPE`, `{"tools": [...], "step": ...}`
+for `PREREQUISITE_UNMET`, `{"tools": [...]}` for a plan refusal; each list at
+most 8 items, each string at most 256 characters), and an exit-code harness
+gets one more stderr line, `[Intutic] Retry scope: <paths, else tools>`. An
+OPAQUE workspace gets neither, as it gets no rule id.
+
 | Code | Meaning |
 |---|---|
 | `BUILT_IN_RULE` | A rule built into the hook gate matched: a governance bypass, a write to a protected path or a skill directory, or a secret in written content |
 | `SNAPSHOT` | A block rule in the policy snapshot matched: an SOP, a skill-content rule, or a destructive-command rule promoted to block (the tier ships flagging, not blocking) |
 | `SSO_GROUP` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
 | `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
+| `PREREQUISITE_UNMET` | A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, the harness reports no tool results, or there is no session id |
+| `OUT_OF_SCOPE` | A file-changing call targets a path outside `scope_paths` under `scope_paths_mode: enforce`, or outside the workspace |
+| `OFF_PLAN` | `plan_approval: strict` is set and the tool is not a step of the session's approved plan |
+| `PLAN_NOT_APPROVED` | `plan_approval:` is set and the session has no APPROVED or EXECUTING plan, the approved plans could not be read, or there is no session id |
 | `SERVER_BLOCKED` | The MCP server is blocked in the MCP server registry |
 | `SERVER_HELD` | The MCP server changed its tools in a way scored high risk and waits for an owner or admin to approve it again |
 | `SERVER_NOT_APPROVED` | The workspace refuses MCP servers it has not approved (`mcpDefaultPolicy: deny`), and this one is not approved |
@@ -64,6 +83,64 @@ rule id in brackets.
 | `DECIDE_REFUSED` | The rule asked its questions of the self-hosted decide engine and the answers made its `when` true |
 | `DECIDE_ESCALATED` | The answers to a decide rule's questions fell between its bands or disagreed across option orders, and the harness cannot ask a person, so the call is refused until a person decides |
 | `GOVERNANCE_UNAVAILABLE` | An enforcing decide rule could not be evaluated: its engine is not configured, is not self-hosted, did not answer in time, gave no usable probabilities or failed its known-answer canary, or more than four enforcing decide rules name the tool |
+
+### Post-tool outcome {#post-tool-outcome}
+
+A `requires_before: action:run_tests[ok] -> action:deploy` rule (gate body
+v23) is met only when the session's last test run passed and no file changed
+after it: a write, edit, delete or move tool, or a shell command that changes
+files (`sed -i`, `perl -i`, `git apply`, `git checkout`, `git restore`,
+`git merge`, `git pull`, `git rebase`, `git stash pop`, `patch -p` and the
+like), makes an earlier pass stale. A hook gate learns a run's result from the harness's post-tool hook,
+so the rule can be met only where that hook's payload carries an exit code or
+an error flag. Each row below was checked against a payload captured from the
+harness itself (`services/sync-daemon/__tests__/fixtures/post-tool/`); a
+harness with no captured payload gets no post-tool registration, and a
+qualified rule there refuses with the reason that the harness "reports no tool
+results Intutic can read".
+
+| Harness | Post-tool event registered | What the gate reads | Session id |
+|---|---|---|---|
+| Claude Code | `PostToolUse` and `PostToolUseFailure`, matcher `Bash` | the success event's `tool_response.stdout` and `stderr` (no exit code: a run passes on a runner summary with passes and no failures); the failure event's `error`, whose first line is `Exit code N` (captured from Claude Code 2.1.233) | `session_id` |
+| Gemini CLI (Antigravity's bash gate) | `AfterTool`, matcher `run_shell_command` | `tool_response.llmContent`, which carries `Exit Code: N` when the command failed (captured from Gemini CLI 0.36.0) | `session_id` |
+| Goose | `PostToolUse` (registered before v23; it no longer re-runs the pre-tool gate) | nothing: not captured | — |
+| Cursor, Windsurf, Codex CLI, Muse Code, GitHub Copilot, Cline, Grok Build, Google Antigravity, OpenHands, Hermes, OpenCode, Pi, OpenClaw | none | not observable: no payload captured | Cursor `conversation_id`, Cline `taskId`, Codex and Muse `session_id`, the in-process gates their host's session |
+| n8n, Open WebUI | none | no tool results | — |
+
+A post-tool invocation records the outcome in
+`~/.intutic/hooks/state/outcomes/` (one file per harness and session, under the
+protected `.intutic/hooks`) and always allows: the tool has already run.
+Runner summaries are read for pytest, jest, vitest, go test, cargo test, mocha
+and rspec; other runners decide by exit code only. A command that both tests
+and deploys (`npm test && git push`) is checked before its tests run, so it
+needs an earlier passing run. Gates older than v23 refuse the gated call
+through the rule's `requires_outcome-fallback:` line.
+
+### Scope and plan at the hook gates {#scope-and-plan}
+
+Two SOP keys refuse at every hook gate since gate body v23 (SOPs with no
+`roles:` only: a hook gate knows no agent role):
+
+- **`scope_paths_mode: enforce`** — a file change (a write, edit, delete or
+  move tool) whose target, made relative to the workspace root (the nearest
+  `.git` above the call's working directory), is outside the SOP's
+  `scope_paths` is refused `OUT_OF_SCOPE`. A path outside the root is out of
+  scope; shell commands are never read as paths. `plan_steps_mode` stays
+  gateway-only.
+- **`plan_approval: required | strict`** — every call that is not a read
+  (`read`, `view`, `cat`, `glob`, `grep`, `ls`, `list_dir`, `search`,
+  `todowrite`…) is refused `PLAN_NOT_APPROVED` until the session's plan is
+  APPROVED or EXECUTING; under `strict`, a call whose tool is not one of the
+  plan's steps is refused `OFF_PLAN`. The gates read
+  `~/.intutic/hooks/approved-plans.jsonl`, which the sync daemon writes from
+  `GET /api/v1/plans/approved` (its key needs `traces:read`) with a digest, a
+  workspace id and an expiry three sync intervals out; a cache that is missing,
+  expired or fails a check is "no plan". With no control plane no plan can be
+  approved, so `plan_approval:` refuses everything; `intutic gates install` and
+  `intutic doctor` say so. A harness that sends the gate no session id
+  (GitHub Copilot, Grok Build, Windsurf, Google Antigravity) is refused there
+  too. Gates older than v23 refuse through the rule's fallback line: upgrade
+  them before enabling either key.
 
 ### Vector D — Response Gate {#vector-d--response-gate}
 

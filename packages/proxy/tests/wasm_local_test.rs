@@ -55,6 +55,11 @@ fn temp_rule_dir(tag: &str) -> PathBuf {
 
 fn test_ctx(workspace_id: &str) -> RequestContext {
     RequestContext {
+        action_outcomes: None,
+        revert_hold_tokens: Vec::new(),
+        sibling_overlap: None,
+        context_isolation: Default::default(),
+        modes: Default::default(),
         session_id: "test-session".to_string(),
         plan_steps: Vec::new(),
         scope_paths: Vec::new(),

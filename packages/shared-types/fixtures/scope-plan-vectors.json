@@ -1,0 +1,1483 @@
+{
+ "_doc": "Scope and plan semantics of the loops, graphs and gates release, held equal across shared-types scopeMatch.ts (and its @intutic/gate copy and the JavaScript hook gates' embedded source), intutic_clawde/gate/scope_match.py (and the bash gates), and the proxy (detectors.rs is_within_scope, sops.rs collect_scope_paths, PlanAdherenceDetector, manifest.rs). isWithinScope: target and scopes to within. collectScopePaths: SOPs (scope, roles, scopePaths) and a role to the scope in force. planOffSteps: sequence, plan and tolerance to the off-plan names (empty when within tolerance). changeTargets: one tool call to its mutations. diffChangedPaths: a diff to the paths it changes. scopeRelativePath: a gate's target made relative to its workspace root (null: outside, out of scope). planExemptTools: the list, and tools that are and are not exempt. isFileWriteCall: whether a call makes an earlier passing test run stale (Q1). collectPlanSteps: SOPs (scope, roles, planSteps) and a role to the plan in force (sops.rs collect_plan_steps). loopVerify: verifyLoopDeterministic inputs to its two checks (TypeScript only: the control plane and the CLI run it).",
+ "isWithinScope": [
+  {
+   "target": "packages/proxy/src/main.rs",
+   "scopes": [
+    "packages/proxy"
+   ],
+   "within": true
+  },
+  {
+   "target": "packages/proxy-extras/x.rs",
+   "scopes": [
+    "packages/proxy"
+   ],
+   "within": false
+  },
+  {
+   "target": "packages/proxy",
+   "scopes": [
+    "packages/proxy"
+   ],
+   "within": true
+  },
+  {
+   "target": "./packages/proxy/a",
+   "scopes": [
+    "packages/proxy/"
+   ],
+   "within": true
+  },
+  {
+   "target": "././packages/proxy/a",
+   "scopes": [
+    "packages/proxy"
+   ],
+   "within": true
+  },
+  {
+   "target": "/packages/proxy/a",
+   "scopes": [
+    "packages/proxy"
+   ],
+   "within": true
+  },
+  {
+   "target": "Packages/Proxy/A.rs",
+   "scopes": [
+    "packages/proxy"
+   ],
+   "within": true
+  },
+  {
+   "target": "src/a.ts",
+   "scopes": [
+    "packages/proxy",
+    "src"
+   ],
+   "within": true
+  },
+  {
+   "target": "anything",
+   "scopes": [
+    ""
+   ],
+   "within": true
+  },
+  {
+   "target": "anything",
+   "scopes": [
+    "/"
+   ],
+   "within": true
+  },
+  {
+   "target": "anything",
+   "scopes": [],
+   "within": false
+  },
+  {
+   "target": "../outside",
+   "scopes": [
+    "packages"
+   ],
+   "within": false
+  },
+  {
+   "target": "packages/../etc/passwd",
+   "scopes": [
+    "packages"
+   ],
+   "within": true
+  },
+  {
+   "target": "x",
+   "scopes": [
+    "<none: workspace list disjoint from org ceiling>"
+   ],
+   "within": false
+  },
+  {
+   "target": "École/a",
+   "scopes": [
+    "école"
+   ],
+   "within": false
+  }
+ ],
+ "collectScopePaths": [
+  {
+   "name": "no SOPs",
+   "sops": [],
+   "role": "",
+   "paths": []
+  },
+  {
+   "name": "workspace union, sorted and deduplicated",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "src",
+      "infra/"
+     ]
+    },
+    {
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "src"
+     ]
+    }
+   ],
+   "role": "",
+   "paths": [
+    "infra/",
+    "src"
+   ]
+  },
+  {
+   "name": "a scoped SOP reaches its role",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [
+      "deployer"
+     ],
+     "scopePaths": [
+      "infra"
+     ]
+    }
+   ],
+   "role": "Deployer",
+   "paths": [
+    "infra"
+   ]
+  },
+  {
+   "name": "a scoped SOP never reaches a caller with no role",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [
+      "deployer"
+     ],
+     "scopePaths": [
+      "infra"
+     ]
+    }
+   ],
+   "role": "",
+   "paths": []
+  },
+  {
+   "name": "org ceiling narrows by containment",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "infra/k8s",
+      "src"
+     ]
+    },
+    {
+     "scope": "org",
+     "roles": [],
+     "scopePaths": [
+      "infra"
+     ]
+    }
+   ],
+   "role": "",
+   "paths": [
+    "infra/k8s"
+   ]
+  },
+  {
+   "name": "org ceiling with no workspace scope is the scope",
+   "sops": [
+    {
+     "scope": "org",
+     "roles": [],
+     "scopePaths": [
+      "infra"
+     ]
+    }
+   ],
+   "role": "",
+   "paths": [
+    "infra"
+   ]
+  },
+  {
+   "name": "disjoint ceiling narrows to nothing",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "src"
+     ]
+    },
+    {
+     "scope": "org",
+     "roles": [],
+     "scopePaths": [
+      "infra"
+     ]
+    }
+   ],
+   "role": "",
+   "paths": [
+    "<none: workspace list disjoint from org ceiling>"
+   ]
+  },
+  {
+   "name": "an org SOP with no scope imposes none",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "src"
+     ]
+    },
+    {
+     "scope": "org",
+     "roles": [],
+     "scopePaths": []
+    }
+   ],
+   "role": "",
+   "paths": [
+    "src"
+   ]
+  }
+ ],
+ "collectPlanSteps": [
+  {
+   "name": "no SOPs",
+   "sops": [],
+   "role": "",
+   "steps": []
+  },
+  {
+   "name": "workspace steps in order, not deduplicated",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [],
+     "planSteps": [
+      "Read",
+      "Edit",
+      "Read"
+     ]
+    },
+    {
+     "scope": "workspace",
+     "roles": [],
+     "planSteps": [
+      "Bash"
+     ]
+    }
+   ],
+   "role": "",
+   "steps": [
+    "Read",
+    "Edit",
+    "Read",
+    "Bash"
+   ]
+  },
+  {
+   "name": "a scoped SOP never reaches a caller with no role",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [
+      "deployer"
+     ],
+     "planSteps": [
+      "Bash"
+     ]
+    }
+   ],
+   "role": "",
+   "steps": []
+  },
+  {
+   "name": "org ceiling by membership, ignoring case, keeping the workspace's text",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [],
+     "planSteps": [
+      "bash",
+      "WebFetch",
+      "Read"
+     ]
+    },
+    {
+     "scope": "org",
+     "roles": [],
+     "planSteps": [
+      "Bash",
+      "read"
+     ]
+    }
+   ],
+   "role": "",
+   "steps": [
+    "bash",
+    "Read"
+   ]
+  },
+  {
+   "name": "org plan with no workspace plan is the plan",
+   "sops": [
+    {
+     "scope": "org",
+     "roles": [],
+     "planSteps": [
+      "Bash"
+     ]
+    }
+   ],
+   "role": "",
+   "steps": [
+    "Bash"
+   ]
+  },
+  {
+   "name": "disjoint ceiling narrows to nothing",
+   "sops": [
+    {
+     "scope": "workspace",
+     "roles": [],
+     "planSteps": [
+      "Bash"
+     ]
+    },
+    {
+     "scope": "org",
+     "roles": [],
+     "planSteps": [
+      "Read"
+     ]
+    }
+   ],
+   "role": "",
+   "steps": [
+    "<none: workspace list disjoint from org ceiling>"
+   ]
+  }
+ ],
+ "planOffSteps": [
+  {
+   "name": "no plan",
+   "sequence": [
+    "Bash"
+   ],
+   "plan": [],
+   "tolerance": 0.4,
+   "offPlan": []
+  },
+  {
+   "name": "no sequence",
+   "sequence": [],
+   "plan": [
+    "Bash"
+   ],
+   "tolerance": 0.4,
+   "offPlan": []
+  },
+  {
+   "name": "on plan, case ignored",
+   "sequence": [
+    "bash",
+    "Read"
+   ],
+   "plan": [
+    "Bash",
+    "read"
+   ],
+   "tolerance": 0,
+   "offPlan": []
+  },
+  {
+   "name": "within the advise tolerance",
+   "sequence": [
+    "Bash",
+    "Read",
+    "Edit",
+    "Grep",
+    "Bash"
+   ],
+   "plan": [
+    "Bash",
+    "Read",
+    "Edit"
+   ],
+   "tolerance": 0.4,
+   "offPlan": []
+  },
+  {
+   "name": "exactly the tolerance is within it",
+   "sequence": [
+    "Bash",
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash"
+   ],
+   "plan": [
+    "Bash",
+    "Read",
+    "Edit"
+   ],
+   "tolerance": 0.4,
+   "offPlan": []
+  },
+  {
+   "name": "past the advise tolerance",
+   "sequence": [
+    "Grep",
+    "Glob",
+    "WebFetch",
+    "Bash"
+   ],
+   "plan": [
+    "Bash"
+   ],
+   "tolerance": 0.4,
+   "offPlan": [
+    "Glob",
+    "Grep",
+    "WebFetch"
+   ]
+  },
+  {
+   "name": "enforce: any off-plan step",
+   "sequence": [
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Grep"
+   ],
+   "plan": [
+    "Bash"
+   ],
+   "tolerance": 0,
+   "offPlan": [
+    "Grep"
+   ]
+  },
+  {
+   "name": "off-plan names deduplicated",
+   "sequence": [
+    "Grep",
+    "Grep",
+    "Glob"
+   ],
+   "plan": [
+    "Bash"
+   ],
+   "tolerance": 0,
+   "offPlan": [
+    "Glob",
+    "Grep"
+   ]
+  },
+  {
+   "name": "action tokens are steps too",
+   "sequence": [
+    "Bash",
+    "action:deploy"
+   ],
+   "plan": [
+    "Bash"
+   ],
+   "tolerance": 0,
+   "offPlan": [
+    "action:deploy"
+   ]
+  }
+ ],
+ "changeTargets": [
+  {
+   "name": "Write",
+   "tool": "Write",
+   "input": {
+    "file_path": "src/a.ts",
+    "content": "x"
+   },
+   "targets": [
+    {
+     "op": "write",
+     "target": "src/a.ts"
+    }
+   ]
+  },
+  {
+   "name": "Edit",
+   "tool": "Edit",
+   "input": {
+    "file_path": "src/a.ts",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "targets": [
+    {
+     "op": "edit",
+     "target": "src/a.ts"
+    }
+   ]
+  },
+  {
+   "name": "MultiEdit",
+   "tool": "MultiEdit",
+   "input": {
+    "file_path": "src/a.ts",
+    "edits": []
+   },
+   "targets": [
+    {
+     "op": "edit",
+     "target": "src/a.ts"
+    }
+   ]
+  },
+  {
+   "name": "apply_patch with path",
+   "tool": "apply_patch",
+   "input": {
+    "path": "b.py"
+   },
+   "targets": [
+    {
+     "op": "edit",
+     "target": "b.py"
+    }
+   ]
+  },
+  {
+   "name": "namespaced write",
+   "tool": "mcp__fs__write_file",
+   "input": {
+    "path": "/etc/hosts"
+   },
+   "targets": [
+    {
+     "op": "write",
+     "target": "/etc/hosts"
+    }
+   ]
+  },
+  {
+   "name": "delete",
+   "tool": "delete_file",
+   "input": {
+    "filepath": "old.txt"
+   },
+   "targets": [
+    {
+     "op": "delete",
+     "target": "old.txt"
+    }
+   ]
+  },
+  {
+   "name": "move names both ends",
+   "tool": "move_file",
+   "input": {
+    "source": "a.txt",
+    "destination": "b/a.txt"
+   },
+   "targets": [
+    {
+     "op": "move",
+     "target": "a.txt"
+    },
+    {
+     "op": "move",
+     "target": "b/a.txt"
+    }
+   ]
+  },
+  {
+   "name": "rename with only a path falls through to nothing",
+   "tool": "rename",
+   "input": {
+    "path": "a"
+   },
+   "targets": []
+  },
+  {
+   "name": "editor view is a read",
+   "tool": "str_replace_based_edit_tool",
+   "input": {
+    "command": "view",
+    "path": "a.py"
+   },
+   "targets": []
+  },
+  {
+   "name": "editor create is a write",
+   "tool": "str_replace_based_edit_tool",
+   "input": {
+    "command": "CREATE",
+    "path": "a.py"
+   },
+   "targets": [
+    {
+     "op": "write",
+     "target": "a.py"
+    }
+   ]
+  },
+  {
+   "name": "editor with no command is an edit",
+   "tool": "text_editor",
+   "input": {
+    "path": "a.py"
+   },
+   "targets": [
+    {
+     "op": "edit",
+     "target": "a.py"
+    }
+   ]
+  },
+  {
+   "name": "a shell command is never a path",
+   "tool": "Bash",
+   "input": {
+    "command": "echo x > /etc/passwd"
+   },
+   "targets": []
+  },
+  {
+   "name": "Read is not a mutation",
+   "tool": "Read",
+   "input": {
+    "file_path": "/etc/passwd"
+   },
+   "targets": []
+  },
+  {
+   "name": "an empty path is no target",
+   "tool": "Write",
+   "input": {
+    "file_path": "",
+    "path": "fallback.txt"
+   },
+   "targets": [
+    {
+     "op": "write",
+     "target": "fallback.txt"
+    }
+   ]
+  },
+  {
+   "name": "no path key",
+   "tool": "Write",
+   "input": {
+    "content": "x"
+   },
+   "targets": []
+  },
+  {
+   "name": "first path key wins",
+   "tool": "Edit",
+   "input": {
+    "path": "second",
+    "file_path": "first"
+   },
+   "targets": [
+    {
+     "op": "edit",
+     "target": "first"
+    }
+   ]
+  },
+  {
+   "name": "a long path is clipped as the manifest clips it",
+   "tool": "Write",
+   "input": {
+    "file_path": "d/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "targets": [
+    {
+     "op": "write",
+     "target": "d/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    }
+   ]
+  },
+  {
+   "name": "not an object",
+   "tool": "Write",
+   "input": "src/a.ts",
+   "targets": []
+  }
+ ],
+ "diffChangedPaths": [
+  {
+   "name": "git diff with a modification",
+   "diff": "diff --git a/src/a.ts b/src/a.ts\nindex 1..2 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n",
+   "paths": [
+    "src/a.ts"
+   ]
+  },
+  {
+   "name": "a new file",
+   "diff": "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n",
+   "paths": [
+    "new.txt"
+   ]
+  },
+  {
+   "name": "a deleted file",
+   "diff": "diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\n--- a/gone.txt\n+++ /dev/null\n",
+   "paths": [
+    "gone.txt"
+   ]
+  },
+  {
+   "name": "a rename",
+   "diff": "diff --git a/old/x.ts b/new/x.ts\nsimilarity index 100%\nrename from old/x.ts\nrename to new/x.ts\n",
+   "paths": [
+    "old/x.ts",
+    "new/x.ts"
+   ]
+  },
+  {
+   "name": "a path with b/ inside it",
+   "diff": "diff --git a/lib b/c.ts b/lib b/c.ts\n--- a/lib b/c.ts\n+++ b/lib b/c.ts\n",
+   "paths": [
+    "lib b/c.ts"
+   ]
+  },
+  {
+   "name": "a plain unified diff with timestamps",
+   "diff": "--- a/x.py\t2026-10-18 10:00:00\n+++ b/x.py\t2026-10-18 10:01:00\n@@ -1 +1 @@\n",
+   "paths": [
+    "x.py"
+   ]
+  },
+  {
+   "name": "quoted paths",
+   "diff": "diff --git \"a/sp ace.txt\" \"b/sp ace.txt\"\n--- \"a/sp ace.txt\"\n+++ \"b/sp ace.txt\"\n",
+   "paths": [
+    "sp ace.txt"
+   ]
+  },
+  {
+   "name": "two files",
+   "diff": "--- a/one\n+++ b/one\n--- a/two\n+++ b/two\n",
+   "paths": [
+    "one",
+    "two"
+   ]
+  },
+  {
+   "name": "CRLF",
+   "diff": "--- a/w.txt\r\n+++ b/w.txt\r\n",
+   "paths": [
+    "w.txt"
+   ]
+  },
+  {
+   "name": "content lines are not headers",
+   "diff": "@@ -1 +1 @@\n---- a/not\n+-- b/not\n",
+   "paths": []
+  },
+  {
+   "name": "empty",
+   "diff": "",
+   "paths": []
+  }
+ ],
+ "scopeRelativePath": [
+  {
+   "name": "relative to cwd at the root",
+   "target": "src/a.ts",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": "src/a.ts"
+  },
+  {
+   "name": "relative to a cwd below the root",
+   "target": "a.ts",
+   "cwd": "/repo/src",
+   "root": "/repo",
+   "path": "src/a.ts"
+  },
+  {
+   "name": "absolute inside",
+   "target": "/repo/infra/k8s/x.yaml",
+   "cwd": "/repo/src",
+   "root": "/repo",
+   "path": "infra/k8s/x.yaml"
+  },
+  {
+   "name": "absolute outside",
+   "target": "/etc/passwd",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": null
+  },
+  {
+   "name": "dot-dot climbs out",
+   "target": "../other/x",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": null
+  },
+  {
+   "name": "dot-dot stays inside",
+   "target": "src/../infra/x",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": "infra/x"
+  },
+  {
+   "name": "a sibling with the root as prefix",
+   "target": "/repo-other/x",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": null
+  },
+  {
+   "name": "the root itself",
+   "target": ".",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": ""
+  },
+  {
+   "name": "home directory",
+   "target": "~/x",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": null
+  },
+  {
+   "name": "slashes collapse",
+   "target": ".//src///a",
+   "cwd": "/repo/",
+   "root": "/repo/",
+   "path": "src/a"
+  },
+  {
+   "name": "a relative cwd is no answer",
+   "target": "a",
+   "cwd": "repo",
+   "root": "/repo",
+   "path": null
+  },
+  {
+   "name": "empty target",
+   "target": "",
+   "cwd": "/repo",
+   "root": "/repo",
+   "path": null
+  }
+ ],
+ "planExemptTools": {
+  "list": [
+   "read",
+   "readfile",
+   "view",
+   "cat",
+   "open_file",
+   "glob",
+   "grep",
+   "ls",
+   "list_dir",
+   "search",
+   "todowrite"
+  ],
+  "exempt": [
+   "Read",
+   "Grep",
+   "Glob",
+   "LS",
+   "TodoWrite",
+   "mcp__fs__read",
+   "mcp__code__search",
+   "view"
+  ],
+  "notExempt": [
+   "Bash",
+   "Write",
+   "Edit",
+   "WebFetch",
+   "mcp__k8s__tools",
+   "concat",
+   "web_search",
+   "mcp__x__readfile_and_delete",
+   "readx"
+  ]
+ },
+ "loopVerify": [
+  {
+   "name": "nothing declared",
+   "changedPaths": [
+    "src/a.ts"
+   ],
+   "toolSequence": [
+    "Bash"
+   ],
+   "sops": [],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "not_applicable",
+     "findings": []
+    },
+    {
+     "id": "plan_steps",
+     "status": "not_applicable",
+     "findings": []
+    }
+   ]
+  },
+  {
+   "name": "inside the scope",
+   "changedPaths": [
+    "infra/main.tf",
+    "./infra/k8s/a.yaml"
+   ],
+   "toolSequence": [],
+   "sops": [
+    {
+     "title": "Infra",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "infra"
+     ],
+     "scopeMode": "advise",
+     "planSteps": [],
+     "planMode": "advise"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "pass",
+     "findings": []
+    },
+    {
+     "id": "plan_steps",
+     "status": "not_applicable",
+     "findings": []
+    }
+   ]
+  },
+  {
+   "name": "outside the scope fails with no tolerance, advise or not",
+   "changedPaths": [
+    "infra/main.tf",
+    "infra/b.tf",
+    "infra/c.tf",
+    "src/app.ts"
+   ],
+   "toolSequence": [],
+   "sops": [
+    {
+     "title": "Infra",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "infra"
+     ],
+     "scopeMode": "advise",
+     "planSteps": [],
+     "planMode": "advise"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "fail",
+     "findings": [
+      "src/app.ts is outside the declared file scope (scope: infra)"
+     ],
+     "scope": {
+      "paths": [
+       "src/app.ts"
+      ]
+     }
+    },
+    {
+     "id": "plan_steps",
+     "status": "not_applicable",
+     "findings": []
+    }
+   ]
+  },
+  {
+   "name": "a SOP with roles does not count",
+   "changedPaths": [
+    "src/app.ts"
+   ],
+   "toolSequence": [
+    "Bash"
+   ],
+   "sops": [
+    {
+     "title": "Deployers",
+     "scope": "workspace",
+     "roles": [
+      "deployer"
+     ],
+     "scopePaths": [
+      "infra"
+     ],
+     "scopeMode": "enforce",
+     "planSteps": [
+      "Read"
+     ],
+     "planMode": "enforce"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "not_applicable",
+     "findings": []
+    },
+    {
+     "id": "plan_steps",
+     "status": "not_applicable",
+     "findings": []
+    }
+   ]
+  },
+  {
+   "name": "the org ceiling applies",
+   "changedPaths": [
+    "infra/k8s/a.yaml",
+    "infra/tf/b.tf"
+   ],
+   "toolSequence": [],
+   "sops": [
+    {
+     "title": "W",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "infra"
+     ],
+     "scopeMode": "advise",
+     "planSteps": [],
+     "planMode": "advise"
+    },
+    {
+     "title": "O",
+     "scope": "org",
+     "roles": [],
+     "scopePaths": [
+      "infra/k8s"
+     ],
+     "scopeMode": "advise",
+     "planSteps": [],
+     "planMode": "advise"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "fail",
+     "findings": [
+      "infra/k8s/a.yaml is outside the declared file scope (scope: <none: workspace list disjoint from org ceiling>)",
+      "infra/tf/b.tf is outside the declared file scope (scope: <none: workspace list disjoint from org ceiling>)"
+     ],
+     "scope": {
+      "paths": [
+       "infra/k8s/a.yaml",
+       "infra/tf/b.tf"
+      ]
+     }
+    },
+    {
+     "id": "plan_steps",
+     "status": "not_applicable",
+     "findings": []
+    }
+   ]
+  },
+  {
+   "name": "plan within the advise tolerance",
+   "changedPaths": [],
+   "toolSequence": [
+    "Read",
+    "Edit",
+    "Bash",
+    "Grep",
+    "Bash"
+   ],
+   "sops": [
+    {
+     "title": "P",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [],
+     "scopeMode": "advise",
+     "planSteps": [
+      "Read",
+      "Edit",
+      "Bash"
+     ],
+     "planMode": "advise"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "not_applicable",
+     "findings": []
+    },
+    {
+     "id": "plan_steps",
+     "status": "pass",
+     "findings": []
+    }
+   ]
+  },
+  {
+   "name": "plan enforce has no tolerance",
+   "changedPaths": [],
+   "toolSequence": [
+    "Read",
+    "Edit",
+    "Bash",
+    "Grep",
+    "Bash"
+   ],
+   "sops": [
+    {
+     "title": "P",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [],
+     "scopeMode": "advise",
+     "planSteps": [
+      "Read",
+      "Edit",
+      "Bash"
+     ],
+     "planMode": "enforce"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "not_applicable",
+     "findings": []
+    },
+    {
+     "id": "plan_steps",
+     "status": "fail",
+     "findings": [
+      "Work outside the declared plan: 20% of steps are unlisted (Grep)"
+     ],
+     "scope": {
+      "tools": [
+       "Grep"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "a hook-only loop has no sequence",
+   "changedPaths": [],
+   "toolSequence": [],
+   "sops": [
+    {
+     "title": "P",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [],
+     "scopeMode": "advise",
+     "planSteps": [
+      "Read"
+     ],
+     "planMode": "enforce"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "not_applicable",
+     "findings": []
+    },
+    {
+     "id": "plan_steps",
+     "status": "not_applicable",
+     "findings": []
+    }
+   ]
+  },
+  {
+   "name": "off-plan names are capped at five",
+   "changedPaths": [],
+   "toolSequence": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G"
+   ],
+   "sops": [
+    {
+     "title": "P",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [],
+     "scopeMode": "advise",
+     "planSteps": [
+      "Read"
+     ],
+     "planMode": "advise"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "not_applicable",
+     "findings": []
+    },
+    {
+     "id": "plan_steps",
+     "status": "fail",
+     "findings": [
+      "Work outside the declared plan: 100% of steps are unlisted (A, B, C, D, E, …)"
+     ],
+     "scope": {
+      "tools": [
+       "A",
+       "B",
+       "C",
+       "D",
+       "E",
+       "F",
+       "G"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "findings are capped at twenty",
+   "changedPaths": [
+    "x00",
+    "x01",
+    "x02",
+    "x03",
+    "x04",
+    "x05",
+    "x06",
+    "x07",
+    "x08",
+    "x09",
+    "x10",
+    "x11",
+    "x12",
+    "x13",
+    "x14",
+    "x15",
+    "x16",
+    "x17",
+    "x18",
+    "x19",
+    "x20",
+    "x21",
+    "x22"
+   ],
+   "toolSequence": [],
+   "sops": [
+    {
+     "title": "S",
+     "scope": "workspace",
+     "roles": [],
+     "scopePaths": [
+      "src"
+     ],
+     "scopeMode": "enforce",
+     "planSteps": [],
+     "planMode": "advise"
+    }
+   ],
+   "checks": [
+    {
+     "id": "scope_paths",
+     "status": "fail",
+     "findings": [
+      "x00 is outside the declared file scope (scope: src)",
+      "x01 is outside the declared file scope (scope: src)",
+      "x02 is outside the declared file scope (scope: src)",
+      "x03 is outside the declared file scope (scope: src)",
+      "x04 is outside the declared file scope (scope: src)",
+      "x05 is outside the declared file scope (scope: src)",
+      "x06 is outside the declared file scope (scope: src)",
+      "x07 is outside the declared file scope (scope: src)",
+      "x08 is outside the declared file scope (scope: src)",
+      "x09 is outside the declared file scope (scope: src)",
+      "x10 is outside the declared file scope (scope: src)",
+      "x11 is outside the declared file scope (scope: src)",
+      "x12 is outside the declared file scope (scope: src)",
+      "x13 is outside the declared file scope (scope: src)",
+      "x14 is outside the declared file scope (scope: src)",
+      "x15 is outside the declared file scope (scope: src)",
+      "x16 is outside the declared file scope (scope: src)",
+      "x17 is outside the declared file scope (scope: src)",
+      "x18 is outside the declared file scope (scope: src)",
+      "x19 is outside the declared file scope (scope: src)",
+      "… and 3 more paths outside the scope"
+     ],
+     "scope": {
+      "paths": [
+       "x00",
+       "x01",
+       "x02",
+       "x03",
+       "x04",
+       "x05",
+       "x06",
+       "x07"
+      ]
+     }
+    },
+    {
+     "id": "plan_steps",
+     "status": "not_applicable",
+     "findings": []
+    }
+   ]
+  }
+ ],
+ "isFileWriteCall": [
+  {
+   "name": "Write",
+   "tool": "Write",
+   "input": {
+    "file_path": "a"
+   },
+   "write": true
+  },
+  {
+   "name": "Edit",
+   "tool": "Edit",
+   "input": {
+    "file_path": "a"
+   },
+   "write": true
+  },
+  {
+   "name": "editor view",
+   "tool": "str_replace_editor",
+   "input": {
+    "command": "view",
+    "path": "a"
+   },
+   "write": false
+  },
+  {
+   "name": "Read",
+   "tool": "Read",
+   "input": {
+    "file_path": "a"
+   },
+   "write": false
+  },
+  {
+   "name": "sed -i",
+   "tool": "Bash",
+   "input": {
+    "command": "sed -i 's/a/b/' src/x.ts"
+   },
+   "write": true
+  },
+  {
+   "name": "git checkout of a file",
+   "tool": "Bash",
+   "input": {
+    "command": "git checkout -- src/x.ts"
+   },
+   "write": true
+  },
+  {
+   "name": "git pull",
+   "tool": "run_shell_command",
+   "input": {
+    "command": "git  pull --rebase"
+   },
+   "write": true
+  },
+  {
+   "name": "git stash pop",
+   "tool": "Bash",
+   "input": {
+    "command": "git stash pop"
+   },
+   "write": true
+  },
+  {
+   "name": "patch",
+   "tool": "Bash",
+   "input": {
+    "command": "patch -p1 < fix.diff"
+   },
+   "write": true
+  },
+  {
+   "name": "tests are not a write",
+   "tool": "Bash",
+   "input": {
+    "command": "npm test > out.log"
+   },
+   "write": false
+  },
+  {
+   "name": "git status is not a write",
+   "tool": "Bash",
+   "input": {
+    "command": "git status && git diff"
+   },
+   "write": false
+  },
+  {
+   "name": "git push is not a write",
+   "tool": "Bash",
+   "input": {
+    "command": "git push origin main"
+   },
+   "write": false
+  },
+  {
+   "name": "a shell phrase in a non-shell tool",
+   "tool": "WebFetch",
+   "input": {
+    "url": "https://x/?q=sed -i"
+   },
+   "write": false
+  },
+  {
+   "name": "a shell tool with no command",
+   "tool": "Bash",
+   "input": {
+    "description": "sed -i"
+   },
+   "write": false
+  }
+ ]
+}

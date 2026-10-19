@@ -20,8 +20,11 @@ export { canonicalJson, holdKey, holdMessage } from './hold.js'
 
 export { COMMAND_SIZE_LIMIT, ARGUMENTS_SIZE_LIMIT, GATE_DEADLINE_MS } from './limits.js'
 
-export { Gate, READ_ONLY_TOOLS, install, active } from './gate.js'
-export type { GateConfig, ToolInput } from './gate.js'
+export { Gate, READ_ONLY_TOOLS, CAN_EVALUATE_RULE_RECORDS, PLAN_CACHE_MS, install, active } from './gate.js'
+export type { GateConfig, ToolInput, ToolOutcome } from './gate.js'
+export type { GateRuleCode, GateRuleKind, GateRuleRecord } from './gateRuleRecord.js'
+export type { RefusalEvidence, RefusalScope } from './refusalDetail.js'
+export type { LaneClass } from './lanes.js'
 
 export { intuticHeaders } from './headers.js'
 export type { IntuticHeadersOptions } from './headers.js'
@@ -77,5 +80,5 @@ export {
 } from './soprules.js'
 export type { SopRegister, SopRule } from './soprules.js'
 
-export { wrapTool, wrapTools } from './wrapTools.js'
+export { toolOutcomeOf, wrapTool, wrapTools } from './wrapTools.js'
 export type { AnyFn, ExecutableTool, WrapToolOptions } from './wrapTools.js'

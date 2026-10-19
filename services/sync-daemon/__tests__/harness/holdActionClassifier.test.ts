@@ -15,8 +15,12 @@ import { expectLinearTime, expectLinearTimes } from './linearTime.js'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ACTION_NEEDLES, GATE_PY_LIB, emitJsActionClassifier } from '../../src/harness/gateBody.js'
+import { ACTION_NEEDLES, FORCE_PUSH_TOKEN, GATE_PY_LIB, emitJsActionClassifier } from '../../src/harness/gateBody.js'
 import { PHRASES_PY_SOURCE } from '../../src/lib/phrasesPy.js'
+import { TEST_OUTCOME_PY_SOURCE } from '../../src/lib/testOutcomePy.js'
+import { SCOPE_MATCH_PY_SOURCE } from '../../src/lib/scopeMatchPy.js'
+import { RULE_RECORD_PY_SOURCE } from '../../src/lib/ruleRecordPy.js'
+import { REFUSAL_DETAIL_PY_SOURCE } from '../../src/lib/refusalDetailPy.js'
 
 /**
  * The vectors every command classifier shares — the proxy's actions.rs,
@@ -34,12 +38,22 @@ import { PHRASES_PY_SOURCE } from '../../src/lib/phrasesPy.js'
 const VECTORS = JSON.parse(
   readFileSync(join(__dirname, '../../../../packages/proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
 ) as { held: Array<[string, string[]]>; notHeld: string[]; adversarial: Array<[string, number]> }
-const HOLD_TOKENS = new Set(ACTION_NEEDLES.map(([a]) => a))
+/**
+ * The lane vectors' classify cases: the lane tokens, the
+ * force-push compound and the out-of-tree `rm -rf` (Q3), which every
+ * classifier, these two included, must give the same tokens.
+ */
+const LANE_CLASSIFY = (
+  JSON.parse(readFileSync(join(__dirname, '../../../../packages/shared-types/fixtures/lane-vectors.json'), 'utf-8')) as { classify: Array<[string, string[]]> }
+).classify
+// The needle tokens, and the force-push compound the classifier adds after them.
+const HOLD_TOKENS = new Set([...ACTION_NEEDLES.map(([a]) => a), FORCE_PUSH_TOKEN])
 const forHold = (tokens: string[]) => tokens.filter((t) => HOLD_TOKENS.has(t)).join(' ')
-const HELD: ReadonlyArray<readonly [string, string]> = VECTORS.held
+const ALL_HELD = [...VECTORS.held, ...LANE_CLASSIFY.filter(([c]) => !VECTORS.held.some(([h]) => h === c))]
+const HELD: ReadonlyArray<readonly [string, string]> = ALL_HELD
   .map(([c, t]) => [c, forHold(t)] as const)
   .filter(([, t]) => t !== '')
-const NOT_HELD: readonly string[] = [...VECTORS.notHeld, ...VECTORS.held.filter(([, t]) => forHold(t) === '').map(([c]) => c)]
+const NOT_HELD: readonly string[] = [...VECTORS.notHeld, ...ALL_HELD.filter(([, t]) => forHold(t) === '').map(([c]) => c)]
 
 /**
  * Runs `GATE_PY_LIB` the way the extractor does and returns, per input, the
@@ -141,8 +155,14 @@ describe('the hold classifier', () => {
     expect(pythonWrite).toBe(' ')
   })
 
-  it('emits a byte-identical copy of intutic-clawde’s phrases.py', () => {
-    const clawde = readFileSync(join(__dirname, '../../../../packages/intutic-clawde/intutic_clawde/gate/phrases.py'), 'utf-8')
-    expect(PHRASES_PY_SOURCE).toBe(clawde)
+  it.each([
+    ['phrases.py', PHRASES_PY_SOURCE],
+    ['test_outcome.py', TEST_OUTCOME_PY_SOURCE],
+    ['scope_match.py', SCOPE_MATCH_PY_SOURCE],
+    ['rule_record.py', RULE_RECORD_PY_SOURCE],
+    ['refusal_detail.py', REFUSAL_DETAIL_PY_SOURCE],
+  ])('emits a byte-identical copy of intutic-clawde’s %s', (file, source) => {
+    const clawde = readFileSync(join(__dirname, '../../../../packages/intutic-clawde/intutic_clawde/gate', file), 'utf-8')
+    expect(source).toBe(clawde)
   })
 })

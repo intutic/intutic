@@ -84,6 +84,11 @@ pub struct ProbeVerdict {
 fn base_ctx() -> RequestContext {
     use crate::wasm::context::{NodeIdentity, RiskLevel};
     RequestContext {
+        action_outcomes: None,
+        revert_hold_tokens: Vec::new(),
+        sibling_overlap: None,
+        context_isolation: Default::default(),
+        modes: Default::default(),
         session_id: "ses_probe".into(),
         plan_steps: Vec::new(),
         scope_paths: Vec::new(),

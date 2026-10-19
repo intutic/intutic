@@ -31,6 +31,7 @@ PROXY_REFUSALS: Dict[str, Tuple[int, str]] = {
     "model_not_allowed": (403, "kill"),
     "LOOP_RUN_TERMINATED": (403, "kill"),
     "LOOP_RUN_PENDING_REVIEW": (403, "hold"),
+    "NODE_KIND_DENIED": (403, "kill"),
     "policy_held": (403, "hold"),
     "policy_reask": (409, "reask"),
     "GOVERNANCE_UNAVAILABLE": (403, "kill"),
@@ -42,6 +43,8 @@ PROXY_REFUSALS: Dict[str, Tuple[int, str]] = {
     "TOOL_DENIED": (200, "kill"),
     "SSO_GROUP": (200, "kill"),
     "SQL_GUARD": (200, "kill"),
+    "PREREQUISITE_UNMET": (200, "kill"),
+    "OUT_OF_SCOPE": (200, "kill"),
     "RESPONSE_UNPARSEABLE": (200, "kill"),
     "OUTPUT_DLP": (200, "kill"),
 }

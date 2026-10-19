@@ -38,6 +38,7 @@ Every autonomous agent session can be registered as a **Loop Run** under a works
 If a budget is breached, or if an administrator manually terminates a loop run from the dashboard, the loop state is set to `KILLED`.
 - Once `KILLED` (or in any other status but `ACTIVE`), the reverse proxy refuses any subsequent model request for that loop run with an HTTP `403 Forbidden` response and error code `LOOP_RUN_TERMINATED`. The run is the one named in the `X-Loop-Run-Id` header or, when a request carries none, the member's active loop run.
 - A run held for review (`PENDING_REVIEW`) is refused with `LOOP_RUN_PENDING_REVIEW` until it is approved or rejected.
+- **Correction that runs out pauses the run, when you ask for it.** A detector that re-asks the agent refuses on the third attempt. With `on_reask_exhausted: pause` in an applicable SOP (the default is `block`), a loop run is held for review on that third attempt instead (`LOOP_RUN_PENDING_REVIEW`), and an approved run gets three fresh attempts. Without a loop run nothing changes.
 - This immediately stops the running agent CLI or IDE extension, preventing any further waste.
 
 ## Using the CLI to Manage Loops
@@ -61,11 +62,14 @@ intutic loop exec --name "refactor-auth" --budget 2.50 --sops=1 --auto-judge -- 
 intutic loop list
 ```
 
-### Complete or Kill a Loop Run
+### Verify, Complete or Kill a Loop Run
 ```bash
+intutic loop verify lr_abc123 --base main
 intutic loop complete lr_abc123
 intutic loop kill lr_abc123
 ```
+
+`loop verify` diffs the working tree against `--base` (by default the commit the run started on), checks it against the local SOPs selected for the run, and only then asks the control plane; see [Verification Gate](#verification-gate).
 
 A run held for review is approved or rejected (which kills it) with `intutic loop review lr_abc123 --approve` or `--reject`, optionally with `--note`.
 
@@ -77,23 +81,43 @@ A run held for review is approved or rejected (which kills it) with `intutic loo
 - **Circuit Breaker Controls**: **Mark Completed** or **Force Stop** a running session. A session held for review offers **Approve & Resume** or **Reject & Kill** instead; held runs are also listed under **Findings › Review Queue › Held Changes**.
 - **Start New Session** opens a loop run with a session name and a budget in USD.
 
-## Verification Gate (Loop Verifier API)
+## Verification Gate (Loop Verifier API) {#verification-gate}
 
-Agent loops can actively check code diffs and progress against workspace SOPs before executing final operations:
-- **Endpoint**: `POST /api/v1/loops/:loopRunId/verify`
-- **Request Payload**:
-  ```json
-  {
-    "diff": "git diff content",
-    "taskDescription": "Deploy auth fixes"
-  }
-  ```
-- **Response Verdict**:
-  ```json
-  {
-    "ok": false,
-    "score": 0.2,
-    "findings": ["SOP violation: Destructive command detected in diff."]
-  }
-  ```
-This endpoint triggers the compliance evaluation engine to analyze the diff against the workspace's `VALIDATED` SOPs, returning findings and safety status dynamically to the running harness. With no `VALIDATED` SOP, or on a plan without LLM judging, nothing is checked: the response is `ok: true`, `score: 0`, `unverified: true`, with a finding saying why.
+`intutic loop verify <id>` (or `POST /api/v1/loops/:loopRunId/verify` with `{ diff, taskDescription, files? }`) checks a run's work in two stages.
+
+1. **Deterministic checks first,** against the enforced SOPs that declare no `roles:` (a loop run has no agent role):
+   - **Scope.** Every path the diff, `files` and the run's recorded file changes touched must be inside the SOPs' `scope_paths`. One path outside fails the check, whatever `scope_paths_mode` says: a verify is a boundary check.
+   - **Plan.** The run's tool calls, as the gateway traced them, against the SOPs' `plan_steps`. Up to 40% of the steps may be off the plan under `plan_steps_mode: advise`, none under `enforce`. A run with no gateway traces (hook gates only) has nothing to check here.
+2. **The judge,** only when both pass: it grades the diff against the workspace's `VALIDATED` SOPs, as before. On a plan without LLM judging, or with no `VALIDATED` SOP, the judge is unavailable.
+
+```json
+{
+  "ok": false,
+  "score": 0,
+  "stage": "deterministic",
+  "findings": ["1 changed path is outside scope_paths (src): infra/main.tf"],
+  "checks": [
+    { "id": "scope_paths", "status": "fail", "findings": ["…"], "scope": { "paths": ["infra/main.tf"] } },
+    { "id": "plan_steps", "status": "pass", "findings": [] }
+  ],
+  "verificationId": "lv_…"
+}
+```
+
+`stage: "deterministic"` means a scope or plan check failed and the judge was not asked. `unverified: true` appears only when no check could run (no scope, no plan, no judge); the response then says why in `findings`.
+
+### Completing only verified runs {#require-verified-completion}
+
+With **Require a passing verify before a run completes** on (**Settings › Security › Loop Runs & Reversibility Lanes**, the setting `loop_review.requireVerifiedCompletion`, off by default), a run is marked completed only when its latest verify passed and nothing ran after it:
+
+| Refusal (409) | Why |
+| --- | --- |
+| `E_LOOP_NOT_VERIFIED` | The run was never verified, or its latest verify failed. The findings come with it. |
+| `E_LOOP_UNVERIFIABLE` | The latest verify could check nothing; the refusal names what was missing. |
+| `E_LOOP_VERIFY_STALE` | The agent did more traced work after the latest verify. Verify again. |
+
+If the check itself cannot run, the completion is refused with `503 GOVERNANCE_UNAVAILABLE` rather than let through. Recording a failed run (`outcome: FAILED`) is never refused. A run that used only hook gates has no traces, so a passing verify cannot go stale there.
+
+`intutic loop exec` verifies before completing when the setting is on, and leaves the run active if the verify does not pass. In the dashboard, **Mark Completed** shows the refusal and its findings in the session's details.
+
+The setting is off by default because a run completed by `intutic loop exec` was never verified before, and turning it on leaves such runs active until they are.

@@ -558,7 +558,9 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth, opts: { local
   const dropped = snap.droppedRules > 0 ? `, ${snap.droppedRules} rule(s) dropped as uncompilable` : ''
   // The gates evaluate decide rules themselves and skip their fallback lines,
   // which the rule count leaves out, so they are counted on their own.
-  const decide = snap.decideRules > 0 ? ` and ${snap.decideRules} decide rule(s)` : ''
+  const decide =
+    (snap.decideRules > 0 ? ` and ${snap.decideRules} decide rule(s)` : '') +
+    (snap.gateRules > 0 ? ` and ${snap.gateRules} rule record(s)` : '')
 
   switch (snap.state) {
     case 'ok':
@@ -613,6 +615,51 @@ export function describePolicySnapshot(snap: PolicySnapshotHealth, opts: { local
           ? 'Write it with `intutic gates install`.'
           : 'Write it with `intutic policy snapshot`, or start the daemon with `intutic connect`.',
       }
+  }
+}
+
+/**
+ * Check 8c: `plan_approval:`. Every gated call waits for the
+ * session's plan to be approved, which only a control plane holds; with none
+ * connected, or with no fresh approved-plans cache from the daemon, the gates
+ * refuse every call that is not a read. One passing line when no SOP sets it.
+ */
+export function describePlanApproval(
+  snap: PolicySnapshotHealth,
+  opts: { connected: boolean; cacheAgeMs: number | null },
+): CheckResult | null {
+  if (!snap.planApproval) return null
+  const name = 'Plan Approval'
+  if (!opts.connected) {
+    return {
+      name,
+      passed: false,
+      detail: 'A SOP sets plan_approval:, and no control plane is connected to approve a plan — every gated call is refused (PLAN_NOT_APPROVED)',
+      remediation: 'Remove plan_approval: from the local SOP, or connect a workspace with `intutic connect` and capture plans there.',
+    }
+  }
+  if (opts.cacheAgeMs === null) {
+    return {
+      name,
+      passed: false,
+      detail: 'A SOP sets plan_approval:, and the daemon has written no approved-plans cache — every gated call is refused',
+      remediation: 'Start the daemon with `intutic connect`; its key needs the traces:read scope to read approved plans.',
+    }
+  }
+  return { name, passed: true, detail: `plan_approval: in force; approved-plans cache ${Math.round(opts.cacheAgeMs / 1000)}s old` }
+}
+
+function approvedPlansCacheAgeMs(): number | null {
+  try {
+    const text = readFileSync(join(homedir(), '.intutic', 'hooks', 'approved-plans.jsonl'), 'utf8')
+    const line = text.split('\n').find((l) => l.startsWith('#expires '))
+    const exp = line ? Date.parse(line.slice(9).trim()) : NaN
+    if (Number.isNaN(exp) || Date.now() >= exp) return null
+    const gen = text.split('\n').find((l) => l.startsWith('#generated '))
+    const at = gen ? Date.parse(gen.slice(11).trim()) : NaN
+    return Number.isNaN(at) ? 0 : Math.max(0, Date.now() - at)
+  } catch {
+    return null
   }
 }
 
@@ -724,6 +771,8 @@ export async function runDoctor(): Promise<void> {
     results.push(describePolicySnapshot(readPolicySnapshot({}), { local: true }))
     results.push(await checkLocalGates())
   }
+  const planCheck = describePlanApproval(readPolicySnapshot({}), { connected, cacheAgeMs: approvedPlansCacheAgeMs() })
+  if (planCheck) results.push(planCheck)
   results.push(await checkCiscoScanner())
   // Decide: the engine, its model, the canary, the per-call p95 and the
   // harness budgets it cannot fit. One passing line when nothing uses it.

@@ -248,7 +248,17 @@ export const ResolvedWorkspaceSettings = z
       .optional(),
     reviewHoldBypassEnabled: z.boolean().optional(),
     reviewHoldBypassTtlMinutes: z.number().optional(),
-    loop_review: z.object({ requireDistinctApprover: z.boolean().optional() }).optional(),
+    loop_review: z.object({ requireDistinctApprover: z.boolean().optional(), requireVerifiedCompletion: z.boolean().optional() }).optional(),
+    closedLanes: z.array(z.enum(['irreversible', 'reversible_wide'])).optional(),
+    revertLane: z
+      .object({
+        mode: z.enum(['off', 'shadow', 'enforce']),
+        threshold: z.number().optional(),
+        minExecutions: z.number().int().optional(),
+        minReversals: z.number().int().optional(),
+        windowDays: z.number().int().optional(),
+      })
+      .optional(),
     egressMode: z.enum(['off', 'monitor', 'enforce']).optional(),
     egressAllow: StringList.optional(),
     allowedModels: StringList.optional(),
@@ -407,6 +417,25 @@ export const KeyContextResponse = z.object({
   llmJudgeEnabled: z.boolean().nullable(),
 })
 export type KeyContextResponse = z.infer<typeof KeyContextResponse>
+
+/** `GET /api/v1/auth/key-context`, with the reversibility-lane settings. */
+export const KeyContextGatesResponse = KeyContextResponse.extend({
+  closedLanes: z
+    .array(z.enum(['irreversible', 'reversible_wide']))
+    .nullable()
+    .describe('The workspace `closedLanes`: every role holds the tokens of these classes. Null when unset or unreadable.'),
+  revertLane: z
+    .object({
+      mode: z.enum(['off', 'shadow', 'enforce']),
+      threshold: z.number(),
+      minExecutions: z.number().int(),
+      minReversals: z.number().int(),
+      windowDays: z.number().int(),
+    })
+    .nullable()
+    .describe('The workspace `revertLane`, defaults filled in. Null when the settings could not be read.'),
+})
+export type KeyContextGatesResponse = z.infer<typeof KeyContextGatesResponse>
 
 // ─── Provider credentials (routes/providerCredentials.ts) ────────────
 

@@ -114,7 +114,9 @@ export async function rewriteDecideSnapshot(): Promise<'local' | 'connected' | '
   const harnesses = config.harnesses.filter((h) => !disconnected.has(h)) as HarnessType[]
   const root = config.workspaceRoot
   const holdTokens = await localHoldTokensFor(root, [], undefined, harnesses)
-  const decideRules = await localDecideRules(await loadLocalSopEntries(root, harnesses, { ignoreSelection: true }), { decideDir: decideDir() })
-  await writeLocalPolicySnapshot({ localHoldTokens: holdTokens, snapshotDir: node_path.join(homedir(), '.intutic', 'hooks'), decideRules })
+  const localSops = await loadLocalSopEntries(root, harnesses, { ignoreSelection: true })
+  const decideRules = await localDecideRules(localSops, { decideDir: decideDir() })
+  // The rule records and lane holds the snapshot carries beside the decide rules.
+  await writeLocalPolicySnapshot({ localHoldTokens: holdTokens, snapshotDir: node_path.join(homedir(), '.intutic', 'hooks'), decideRules, localSops })
   return 'local'
 }

@@ -90,6 +90,20 @@ import { CHAOS_PY_SOURCE } from '../lib/chaosPy.js'
 import { MCP_REGISTRY_PY_SOURCE } from '../lib/mcpRegistryPy.js'
 import { PHRASES_PY_SOURCE } from '../lib/phrasesPy.js'
 import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
+import {
+  REFUSAL_DETAIL_JS_SOURCE,
+  RULE_RECORD_JS_SOURCE,
+  RULE_RECORD_TAG,
+  RULE_SNAPSHOT_FORMAT,
+  SCOPE_MATCH_JS_SOURCE,
+  TEST_OUTCOME_JS_SOURCE,
+  LANE_PHRASES,
+  type GateRuleKind,
+} from '@intutic/shared-types'
+import { TEST_OUTCOME_PY_SOURCE } from '../lib/testOutcomePy.js'
+import { SCOPE_MATCH_PY_SOURCE } from '../lib/scopeMatchPy.js'
+import { RULE_RECORD_PY_SOURCE } from '../lib/ruleRecordPy.js'
+import { REFUSAL_DETAIL_PY_SOURCE } from '../lib/refusalDetailPy.js'
 
 /**
  * Bumped when the emitted evaluator changes shape.
@@ -321,8 +335,92 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
  * reading a format above 2 reports `snapshot_format_newer` and enforces what
  * it reads. A v21 gate skips the records, as it skips any line under six
  * columns, and refuses each fallback line's tools.
+ *
+ * v23: rule records, post-tool outcomes and the tier order. A
+ * snapshot carrying any `@rule` record (five columns: tag, fallback line id
+ * or `-`, kind, stamped rollout, base64 of the canonical payload;
+ * `gateRuleRecord.ts` in `@intutic/shared-types`) starts with `@format 3`. Three kinds: `requires_outcome`
+ * (`requires_before: action:run_tests[ok] -> X`), `scope_paths` (under
+ * `scope_paths_mode: enforce`) and `plan_approval` (`required | strict`). Each
+ * enforcing record has a `<kind>-fallback:` line, an ordinary `block` rule
+ * placed after the SSO-group rules and the decide fallbacks, which a gate
+ * skips only when a record that decodes names it and its family evaluates
+ * that kind ({@link GATE_EVALUATES_RULE_RECORDS}); the JS gates decode
+ * in process, the bash gates in the extractor's Python. A post-tool
+ * invocation (`--event post`, or the writer's own post handler) records a
+ * test run's outcome in `~/.intutic/hooks/state/outcomes/<sha256(harness NUL
+ * session)[:32]>.json` and always allows: the fail-closed prelude exits 0
+ * in post mode. Only the harnesses whose post-tool payload was captured
+ * report outcomes ({@link POST_TOOL_OBSERVABLE}); on the others a qualified
+ * rule refuses with the "not observable" reason. An `[ok]` outcome goes
+ * stale on any later file change in the session. Refusals carry
+ * `PREREQUISITE_UNMET`, `OUT_OF_SCOPE`, `PLAN_NOT_APPROVED` and `OFF_PLAN`.
+ * The tiers run in one order in every family: deterministic refusals (the
+ * floor, the snapshot's block rules, `requires_outcome`, the MCP registry
+ * and allowlist), then holds, then trajectory (`scope_paths`,
+ * `plan_approval`), then decide; a decide allow never releases a hold. The
+ * classifier knows `action:run_tests`, `action:http_post`, `action:migrate`,
+ * `action:prod_write`, `action:destroy`, `action:payment` and the
+ * `action:force_push` compound. A v22 gate skips the records, refuses each
+ * fallback line's calls, and holds lane and revert holds through their
+ * `phrase` rules.
  */
-export const GATE_VERSION = 22
+export const GATE_VERSION = 23
+
+/**
+ * Whether each family of rendered gate evaluates each `@rule` kind. A family
+ * that does not keeps the kind's fallback lines in force, so it refuses what
+ * the rule covers. The n8n workflow gate has no session, no tool results and
+ * no file targets, so it keeps every fallback line.
+ */
+export const GATE_EVALUATES_RULE_RECORDS: Readonly<Record<'js' | 'bash' | 'n8n', Readonly<Record<GateRuleKind, boolean>>>> = {
+  js: { requires_outcome: true, scope_paths: true, plan_approval: true },
+  bash: { requires_outcome: true, scope_paths: true, plan_approval: true },
+  n8n: { requires_outcome: false, scope_paths: false, plan_approval: false },
+}
+
+/**
+ * Whether a harness reports tool results a gate can read a test outcome
+ * from: only where the post-tool payload was captured from
+ * the harness itself and carries an exit code or a structured error flag.
+ * The fixtures are `__tests__/fixtures/post-tool/<harness>.json`.
+ *
+ * - `claude-code`: `PostToolUse` (Bash `tool_response.stdout`/`stderr`, no
+ *   exit code) and `PostToolUseFailure` (`error`, first line `Exit code N`);
+ *   captured from Claude Code 2.1.233.
+ * - `gemini-cli` (the bash gate the antigravity writer installs): `AfterTool`
+ *   (`tool_response.llmContent` carrying `Exit Code: N` when non-zero);
+ *   captured from Gemini CLI 0.36.0.
+ *
+ * Every other harness is `false`: no payload was captured, so a qualified
+ * `requires_before` there refuses with the "not observable" reason.
+ */
+export const POST_TOOL_OBSERVABLE: Readonly<Record<HookGateHarness, boolean>> = {
+  'claude-code': true,
+  'gemini-cli': true,
+  cursor: false,
+  windsurf: false,
+  codex: false,
+  'muse-code': false,
+  'github-copilot': false,
+  cline: false,
+  grok: false,
+  antigravity: false,
+  goose: false,
+  openhands: false,
+  hermes: false,
+  openclaw: false,
+  pi: false,
+  opencode: false,
+}
+
+/**
+ * The approved-plans cache the daemon writes (§4.3, `approvedPlans.ts`), in
+ * the same directory as the policy snapshot. Its `#expires` header is three
+ * sync intervals after it was written; a gate reads a cache that is missing,
+ * past it, or fails its digest or workspace check as "no plan approved".
+ */
+export const APPROVED_PLANS_FILE = 'approved-plans.jsonl'
 
 /**
  * Whether each family of rendered gate evaluates the decide rules a snapshot
@@ -363,6 +461,13 @@ export const GATE_EVALUATES_DECIDE: Readonly<Record<'js' | 'bash' | 'n8n', boole
  * - `DECIDE_REFUSED`, `DECIDE_ESCALATED`, `GOVERNANCE_UNAVAILABLE`: a decide
  *   rule refused, could not be decided where the harness cannot ask, or its
  *   engine was unavailable while it enforces.
+ * - `PREREQUISITE_UNMET`: a `requires_before: action:run_tests[ok] -> X` rule
+ *   is not met (no run, a failed or unreadable one, a stale one, no session,
+ *   or a harness whose results cannot be observed);
+ * - `OUT_OF_SCOPE`: a file change outside `scope_paths` under
+ *   `scope_paths_mode: enforce`;
+ * - `PLAN_NOT_APPROVED`, `OFF_PLAN`: `plan_approval:` and no approved plan
+ *   for the session, or (`strict`) a tool that is not one of its steps.
  *
  * A fault a chaos run injects into an allowed call is not a refusal by
  * governance: its JSON decision carries `code: null` and `ruleId: null`, or
@@ -373,6 +478,10 @@ export const HOOK_REFUSAL_CODES = [
   'SNAPSHOT',
   'SSO_GROUP',
   'HELD',
+  'PREREQUISITE_UNMET',
+  'OUT_OF_SCOPE',
+  'OFF_PLAN',
+  'PLAN_NOT_APPROVED',
   'SERVER_BLOCKED',
   'SERVER_HELD',
   'SERVER_NOT_APPROVED',
@@ -404,7 +513,31 @@ export const ACTION_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]>
   ['action:publish', ['npm publish', 'pnpm publish', 'yarn publish', 'cargo publish', 'twine upload', 'poetry publish', 'gem push', 'docker manifest push']],
   ['action:release', ['gh release create', 'git tag', 'npm version', 'cargo release', 'goreleaser release', 'semantic-release']],
   ['action:db_write', ['insert into', 'update ', 'delete from', 'drop table', 'drop database', 'drop schema', 'truncate ', 'alter table']],
+  ['action:run_tests', ['npm test', 'npm run test', 'pnpm test', 'pnpm run test', 'yarn test', 'cargo test', 'go test', 'pytest', 'python -m pytest', 'vitest', 'jest', 'mocha', 'rspec', 'phpunit', 'make test', 'gradle test', 'mvn test', 'dotnet test', 'bazel test', 'tox']],
+  ['action:http_post', ['curl -x post', 'curl --request post', 'curl -d ', 'curl --data', 'wget --post', 'http post']],
+  ['action:migrate', ['prisma migrate deploy', 'prisma db push', 'alembic upgrade', 'alembic downgrade', 'rails db:migrate', 'rake db:migrate', 'manage.py migrate', 'flyway migrate', 'liquibase update', 'knex migrate:latest', 'sequelize db:migrate']],
+  ['action:prod_write', ['--prod', 'rails_env=production', 'node_env=production', '--context prod', '--namespace production', '-n production', '--environment production', '--stage prod']],
+  ['action:destroy', ['terraform destroy', 'kubectl delete', 'helm uninstall', 'helm delete', 'drop table', 'drop database', 'drop schema', 'truncate ', 'aws s3 rb', 'aws s3 rm']],
+  ['action:payment', ['api.stripe.com/v1/charges', 'api.stripe.com/v1/payment_intents', 'api.stripe.com/v1/transfers', 'api.stripe.com/v1/payouts', 'api.stripe.com/v1/refunds', 'stripe charges create', 'stripe payment_intents create', 'stripe transfers create', 'stripe payouts create', 'api-m.paypal.com/v2/payments', 'api.paypal.com/v1/payments']],
 ]
+
+/**
+ * `action:force_push` is a compound, not a needle list (§5.1): the `git push`
+ * phrase AND a whole-word ` --force ` or ` -f ` in the space-padded,
+ * whitespace-collapsed, lower-cased command. ` --force-with-lease` does not
+ * match.
+ */
+export const FORCE_PUSH_TOKEN = 'action:force_push'
+export const FORCE_PUSH_FLAGS = [' --force ', ' -f '] as const
+
+/**
+ * `action:destroy` also covers a recursive, forced `rm` whose target is
+ * outside the working tree (absolute, under `~`, or containing `..`; Q3).
+ * No phrase can say "outside the tree", so both classifiers run the
+ * predicate `removesOutsideTree` of `@intutic/gate` (`actions.ts`) after the
+ * needles; `rm -rf build/` stays unclassified.
+ */
+export const DESTROY_TOKEN = 'action:destroy'
 
 /**
  * The (lower-cased) tool names whose `command` the classifier reads: every
@@ -435,9 +568,283 @@ export const REVIEW_REQUESTS_LOG = `.intutic/events/${REVIEW_REQUESTS_BASENAME}`
 export const REVIEW_REQUEST_VERSION = 1
 
 /**
+ * The rule-record tiers of a bash gate, in Python over the shared
+ * ports ({@link TEST_OUTCOME_PY_SOURCE}, {@link SCOPE_MATCH_PY_SOURCE},
+ * {@link RULE_RECORD_PY_SOURCE}, {@link REFUSAL_DETAIL_PY_SOURCE}): the
+ * fallback lines a decoded record names, the `requires_outcome` check with
+ * its state bookkeeping, the trajectory check (`scope_paths`,
+ * `plan_approval`), and the post-tool recorder. A decoded record is flat:
+ * its payload fields beside `kind`, `fallbackId` and `rollout`. Each check
+ * returns "" to continue, or verdict, code, rule id, reason and the
+ * retry-scope line (§6.2; empty when the refusal names no paths or tools)
+ * joined by tabs, the verdict `block` or `shadow`.
+ */
+const GATE_RULE_TIERS_PY = String.raw`
+
+def _intutic_records(records_text, kind):
+    out = []
+    for line in str(records_text or "").split("\n"):
+        r = decode_gate_rule_record(line) if line else None
+        if r is not None and r["kind"] == kind:
+            out.append(r)
+    return out
+
+
+def intutic_rule_skip(records_text, kinds_csv):
+    # The fallback line ids a decoded, enforcing record names, one per line,
+    # for the kinds this gate evaluates. Any other fallback line stays.
+    kinds = [k for k in str(kinds_csv).split(",") if k]
+    out = []
+    for line in str(records_text or "").split("\n"):
+        r = decode_gate_rule_record(line) if line else None
+        if r is not None and r["fallbackId"] and r["kind"] in kinds:
+            out.append(r["fallbackId"])
+    return "\n".join(out)
+
+
+def _intutic_now_ms():
+    import time
+    return int(time.time() * 1000)
+
+
+def _intutic_state_path(harness, session):
+    import hashlib, os
+    base = os.environ.get("INTUTIC_OUTCOME_STATE_DIR") or os.path.join(
+        os.path.expanduser("~"), ".intutic", "hooks", "state", "outcomes")
+    return os.path.join(base, outcome_state_file_name(str(harness), str(session),
+                                                      lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()))
+
+
+def _intutic_state_read(path):
+    # (exists, state): a missing file is an empty state; one that does not
+    # read is None, which leaves every qualified rule unmet.
+    import os
+    if not os.path.exists(path):
+        return False, empty_outcome_state()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return True, parse_outcome_state(fh.read())
+    except Exception:
+        return True, None
+
+
+def _intutic_state_write(path, state):
+    import json, os
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp." + str(os.getpid())
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, separators=(",", ":"))
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _intutic_verdict(r, code, rid, reason, scope):
+    return "\t".join(["block" if r["rollout"] == "enforce" else "shadow", code, rid, " ".join(reason.split()),
+                      retry_scope_line("TRANSPARENT", scope) or ""])
+
+
+def intutic_outcome_check(harness, observable, tool, actions, session, records_text, tool_input_json):
+    import json
+    try:
+        ti = json.loads(tool_input_json or "{}")
+    except ValueError:
+        ti = {}
+    recs = _intutic_records(records_text, "requires_outcome")
+    path = _intutic_state_path(harness, session) if session else None
+    exists, state = _intutic_state_read(path) if path else (False, empty_outcome_state())
+    shadow = ""
+    for r in recs:
+        then = r["then"]
+        if (" " + then + " ") not in str(actions) and then.lower() != str(tool).lower():
+            continue
+        why = None
+        if observable != "1":
+            case = "not_observable"
+        elif not session:
+            case = "no_session"
+        else:
+            case, why = prerequisite_case(state, r["first"], r["adjacent"], _intutic_now_ms())
+        if case == "met":
+            continue
+        rid = "requires_before." + r["first"] + "[ok]" + ("~>" if r["adjacent"] else "->") + then
+        line = _intutic_verdict(r, "PREREQUISITE_UNMET", rid, prerequisite_unmet_reason(r["first"], then, case, why, harness),
+                                {"tools": [then], "step": r["first"]})
+        if r["rollout"] == "enforce":
+            return line
+        shadow = shadow or line
+    # Bookkeeping, on a call this tier lets through: no outcome is adjacent
+    # to what comes next any more, and a call that changes files (a mutation
+    # tool, or a shell write such as sed -i or git checkout) makes a pass
+    # before it stale (Q1).
+    if path and exists and state is not None:
+        _intutic_state_write(path, note_completed_call(state, is_file_write_call(tool, ti)))
+    return shadow
+
+
+def intutic_post_record(harness, payload_text):
+    # A post-tool payload: a shell call that ran tests records its outcome;
+    # a file change marks an earlier [ok] stale. Never refuses.
+    import json
+    try:
+        d = json.loads(payload_text or "{}")
+    except ValueError:
+        return ""
+    if not isinstance(d, dict):
+        return ""
+    session = str(d.get("session_id") or d.get("sessionId") or "")
+    if not session:
+        return ""
+    tool = str(d.get("tool_name") or d.get("toolName") or "")
+    ti = d.get("tool_input") if isinstance(d.get("tool_input"), dict) else {}
+    command = ""
+    for k in ("command", "cmd", "script", "shell_command"):
+        if isinstance(ti.get(k), str) and ti.get(k):
+            command = ti[k]
+            break
+    actions = intutic_actions(tool, command)
+    path = _intutic_state_path(harness, session)
+    exists, state = _intutic_state_read(path)
+    if " action:run_tests " in actions:
+        resp = d.get("tool_response")
+        output = ""
+        if isinstance(resp, dict):
+            v = resp.get("llmContent")
+            output = v if isinstance(v, str) else json.dumps(v)
+            # Gemini CLI prefixes the command's output with "Output: ".
+            if output.startswith("Output: "):
+                output = output[len("Output: "):]
+        elif isinstance(resp, str):
+            output = resp
+        decision = decide_test_outcome({"exitCode": extract_exit_code(output), "output": output})
+        _intutic_state_write(path, record_test_outcome(state if state is not None else empty_outcome_state(),
+                                                       "action:run_tests", decision, _intutic_now_ms()))
+    elif exists and state is not None and is_file_write_call(tool, ti):
+        _intutic_state_write(path, note_completed_call(state, True))
+    return ""
+
+
+def _intutic_real(path):
+    import os
+    return os.path.realpath(path)
+
+
+def _intutic_repo_root(cwd):
+    import os
+    d = _intutic_real(cwd or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return _intutic_real(cwd or os.getcwd())
+        d = parent
+
+
+def _intutic_approved_plan(session, workspace_id):
+    import hashlib, json, os, datetime
+    path = os.environ.get("INTUTIC_APPROVED_PLANS") or os.path.join(
+        os.path.expanduser("~"), ".intutic", "hooks", "${APPROVED_PLANS_FILE}")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+    except Exception:
+        return None
+    digest = ws = expires = ""
+    body = []
+    for line in lines:
+        if line.startswith("#digest "):
+            digest = line[8:].strip()
+        elif line.startswith("#workspace "):
+            ws = line[11:].strip()
+        elif line.startswith("#expires "):
+            expires = line[9:].strip()
+        elif line and not line.startswith("#"):
+            body.append(line)
+    if hashlib.sha256("\n".join(body).encode("utf-8")).hexdigest()[:32] != digest:
+        return None
+    if ws and workspace_id and ws != workspace_id:
+        return None
+    try:
+        exp = datetime.datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if datetime.datetime.now(datetime.timezone.utc) >= exp:
+        return None
+    tools = None
+    for line in body:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict) or e.get("sessionId") != session or e.get("state") not in ("APPROVED", "EXECUTING"):
+            continue
+        tools = (tools or []) + [str(t).lower() for t in (e.get("tools") or []) if isinstance(t, str)]
+    return None if tools is None else {"tools": tools}
+
+
+def intutic_trajectory_check(harness, tool, session, records_text, tool_input_json, payload_cwd, workspace_id):
+    import json, os
+    try:
+        ti = json.loads(tool_input_json or "{}")
+    except ValueError:
+        ti = {}
+    shadow = ""
+    scopes = _intutic_records(records_text, "scope_paths")
+    targets = [t["target"] for t in change_targets(tool, ti)] if scopes else []
+    if targets:
+        cwd = payload_cwd or os.getcwd()
+        root = _intutic_repo_root(cwd)
+        rels = []
+        for t in targets:
+            absolute = _intutic_real(os.path.join(_intutic_real(cwd), t))
+            rel = os.path.relpath(absolute, root)
+            rels.append((t, None if rel == ".." or rel.startswith(".." + os.sep) or os.path.isabs(rel) else rel.replace(os.sep, "/")))
+        for rollout in ("enforce", "shadow"):
+            group = [r for r in scopes if r["rollout"] == rollout]
+            if not group:
+                continue
+            union = [s for r in group for s in r["scopePaths"]]
+            bad = [t for t, rel in rels if rel is None or not is_within_scope(rel, union)]
+            if bad:
+                r = group[0]
+                line = _intutic_verdict(r, "OUT_OF_SCOPE", "scope_paths." + r["sopTitle"],
+                                        ", ".join(bad) + " is outside scope_paths (" + ", ".join(union) + ")", {"paths": bad})
+                if rollout == "enforce":
+                    return line
+                shadow = shadow or line
+    plans = _intutic_records(records_text, "plan_approval")
+    if plans and not is_plan_exempt_tool(str(tool)):
+        for rollout in ("enforce", "shadow"):
+            group = [r for r in plans if r["rollout"] == rollout]
+            if not group:
+                continue
+            strict = [r for r in group if r["mode"] == "strict"]
+            r = strict[0] if strict else group[0]
+            level = r["mode"]
+            rid = "plan_approval." + r["sopTitle"]
+            line = ""
+            if not session:
+                line = _intutic_verdict(r, "PLAN_NOT_APPROVED", rid, "plan_approval: " + level + " - " + harness + " sent no session id, so no approved plan can be found for this call", {"tools": [str(tool)]})
+            else:
+                plan = _intutic_approved_plan(session, workspace_id)
+                if plan is None:
+                    line = _intutic_verdict(r, "PLAN_NOT_APPROVED", rid, "plan_approval: " + level + " - this session has no APPROVED or EXECUTING plan; get its plan approved, then retry", {"tools": [str(tool)]})
+                elif level == "strict" and str(tool).lower() not in plan["tools"]:
+                    line = _intutic_verdict(r, "OFF_PLAN", rid, "plan_approval: strict - " + str(tool) + " is not a step of the approved plan", {"tools": [str(tool)]})
+            if line and rollout == "enforce":
+                return line
+            shadow = shadow or line
+    return shadow
+`
+
+/**
  * The Python the bash gates run, defined once per gate script: the phrase
  * matcher ({@link PHRASES_PY_SOURCE}), the MCP registry decision
- * ({@link MCP_REGISTRY_PY_SOURCE}) and four entry points over them.
+ * ({@link MCP_REGISTRY_PY_SOURCE}), the shared rule-record ports (test
+ * outcomes, scope match, the `@rule` decoder and refusal detail, emitted
+ * from `intutic_clawde/gate/`), and entry points over them.
  *
  * - `intutic_actions(tool, command)` — the hold classifier, called by
  *   {@link SHELL_EXTRACT}'s Python, which already reads the raw tool input:
@@ -459,8 +866,56 @@ export const GATE_PY_LIB = `${PHRASES_PY_SOURCE}
 
 ${MCP_REGISTRY_PY_SOURCE}
 
+${TEST_OUTCOME_PY_SOURCE}
+
+${SCOPE_MATCH_PY_SOURCE}
+
+# The lane phrases rule_record.py names (lanes.ts LANE_PHRASES).
+LANE_PHRASES = ${JSON.stringify(LANE_PHRASES)}
+
+${RULE_RECORD_PY_SOURCE}
+
+${REFUSAL_DETAIL_PY_SOURCE}
+
 _INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)}
 _INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)}
+_INTUTIC_FORCE_FLAGS = ${JSON.stringify(FORCE_PUSH_FLAGS)}
+
+_INTUTIC_RM_SEGMENT = re.compile(r"[;&|()\\n]")
+_INTUTIC_RM_GAP = re.compile(r"[ \\t\\r\\f\\v]+")
+
+
+def _intutic_removes_outside_tree(args):
+    # removes_outside_tree (intutic_clawde actions.py, gate-js actions.ts):
+    # rm -rf / -fr / -r -f / --recursive --force with a target that is
+    # absolute, under ~, or contains "..". rm -rf build/ is not one.
+    for segment in _INTUTIC_RM_SEGMENT.split(args):
+        words = [w for w in _INTUTIC_RM_GAP.split(segment) if w != ""]
+        at = next((i for i, w in enumerate(words) if w == "rm" or w.endswith("/rm")), -1)
+        if at == -1:
+            continue
+        recursive = force = False
+        flags = True
+        targets = []
+        for w in words[at + 1:]:
+            if flags and w == "--":
+                flags = False
+            elif flags and w.startswith("--"):
+                if w == "--recursive":
+                    recursive = True
+                if w == "--force":
+                    force = True
+            elif flags and w.startswith("-") and len(w) > 1:
+                lower = w.lower()
+                if "r" in lower:
+                    recursive = True
+                if "f" in lower:
+                    force = True
+            else:
+                targets.append(w.strip("\\"'"))
+        if recursive and force and any(t.startswith("/") or t.startswith("~") or ".." in t for t in targets):
+            return True
+    return False
 
 
 def intutic_actions(tool, command):
@@ -471,8 +926,17 @@ def intutic_actions(tool, command):
     for action, needles in _INTUTIC_ACTION_NEEDLES:
         if any(has_phrase(words, n) for n in needles):
             out += action + " "
+    # A recursive, forced remove outside the working tree is destroy too
+    # (Q3); no phrase can say "outside the tree", so it is a predicate.
+    if " ${DESTROY_TOKEN} " not in out and _intutic_removes_outside_tree(str(command or "")):
+        out += "${DESTROY_TOKEN} "
+    # The force-push compound: the git push phrase and a whole-word flag.
+    if has_phrase(words, "git push"):
+        padded = " " + " ".join(str(command or "").lower().split()) + " "
+        if any(f in padded for f in _INTUTIC_FORCE_FLAGS):
+            out += "${FORCE_PUSH_TOKEN} "
     return out
-
+${GATE_RULE_TIERS_PY}
 
 def intutic_phrase_rule(source, command):
     words = phrase_text(command)
@@ -596,12 +1060,19 @@ def intutic_decide_check(harness, tool, budget_ms, session_id, enforce, tool_inp
 export const SNAPSHOT_STALE_AFTER_DAYS = 7
 
 /**
+ * The newest snapshot format a v23 gate reads: 3, the `@rule` records' (LLD
+ * #75). The shared `SNAPSHOT_FORMAT` names the decide records' 2 until the
+ * shared modules move it.
+ */
+export const GATE_READS_FORMAT = Math.max(SNAPSHOT_FORMAT, RULE_SNAPSHOT_FORMAT)
+
+/**
  * What a gate reports, once per call, on a snapshot in a format newer than it
  * reads (`snapshot_format_newer`); `{n}` is the snapshot's format. It still
  * enforces every line it reads, and a fallback line of a rule it cannot read.
  */
 export const FORMAT_NEWER_MESSAGE =
-  `Policy snapshot format {n} is newer than this gate reads (${SNAPSHOT_FORMAT}) — records it does not know are skipped and their fallback lines enforced`
+  `Policy snapshot format {n} is newer than this gate reads (${GATE_READS_FORMAT}) — records it does not know are skipped and their fallback lines enforced`
 
 /**
  * How a gate refuses a call.
@@ -804,6 +1275,12 @@ export function emitShellFailClosed(harness: HookGateHarness): string {
 # "hook errored" and run the tool anyway, so a crash is converted into a block.
 # EXIT rather than ERR: ERR is unreliable across shells for set -u deaths, and
 # it fires on benign non-zero intermediates; the final status cannot lie.
+# A post-tool invocation (--event post, gate body v23) records a tool's result
+# and never refuses: the tool has already run, and some harnesses read a
+# post-tool exit 2 as text to feed back to the model. So in post mode every
+# exit, a crash and the deadline included, is 0.
+INTUTIC_POST_MODE=0
+if [ "\${1:-}" = "--event" ] && [ "\${2:-}" = "post" ]; then INTUTIC_POST_MODE=1; fi
 intutic_fail_closed() {
   _intutic_exit_rc=$?
   # The trap must not itself die on an unset variable or a failed command —
@@ -811,6 +1288,7 @@ intutic_fail_closed() {
   set +eu
   trap - EXIT
   [ -n "\${INTUTIC_WATCHDOG_PID:-}" ] && kill "$INTUTIC_WATCHDOG_PID" 2>/dev/null
+  if [ "\${INTUTIC_POST_MODE:-0}" = "1" ]; then exit 0; fi
   # A chaos run's record of a call the gate refused, held or crashed on (the
   # gate body records an allowed one where it ends). It cannot change the
   # exit status: everything it prints is discarded.
@@ -837,6 +1315,7 @@ trap intutic_fail_closed EXIT
 # linear; a workspace's own WHERE pattern need not be.
 intutic_deadline() {
   trap - USR1
+  if [ "\${INTUTIC_POST_MODE:-0}" = "1" ]; then exit 0; fi
   echo "[Intutic Governance] BLOCKED: GATE_DEADLINE — the gate did not finish evaluating this call within ${deadlineS} s, and refuses it rather than let the hook timeout allow it." >&2
   if command -v log_event >/dev/null 2>&1; then
     log_event "tool_blocked" "\${TOOL:-unknown}" "GATE_DEADLINE — the gate did not finish within ${deadlineS} s" || true
@@ -891,6 +1370,46 @@ export function emitJsActionClassifier(): string {
 ${PHRASES_JS_SOURCE}
 const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
 const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
+const INTUTIC_FORCE_FLAGS = ${JSON.stringify(FORCE_PUSH_FLAGS)};
+
+/**
+ * removesOutsideTree (@intutic/gate actions.ts): rm -rf / -fr / -r -f /
+ * --recursive --force with a target that is absolute, under ~, or contains
+ * "..". Segments split at ; & | ( ) and newlines; linear in the command.
+ */
+function intuticRemovesOutsideTree(args) {
+  var segments = args.split(/[;&|()\\n]/);
+  for (var s = 0; s < segments.length; s++) {
+    var words = segments[s].split(/[ \\t\\r\\f\\v]+/).filter(function (w) { return w !== ''; });
+    var at = -1;
+    for (var i = 0; i < words.length; i++) {
+      if (words[i] === 'rm' || words[i].slice(-3) === '/rm') { at = i; break; }
+    }
+    if (at === -1) continue;
+    var recursive = false, force = false, flags = true, targets = [];
+    for (var j = at + 1; j < words.length; j++) {
+      var w = words[j];
+      if (flags && w === '--') flags = false;
+      else if (flags && w.indexOf('--') === 0) {
+        if (w === '--recursive') recursive = true;
+        if (w === '--force') force = true;
+      } else if (flags && w.charAt(0) === '-' && w.length > 1) {
+        var lower = w.toLowerCase();
+        if (lower.indexOf('r') !== -1) recursive = true;
+        if (lower.indexOf('f') !== -1) force = true;
+      } else {
+        var a = 0, b = w.length;
+        while (a < b && (w.charAt(a) === '"' || w.charAt(a) === "'")) a++;
+        while (b > a && (w.charAt(b - 1) === '"' || w.charAt(b - 1) === "'")) b--;
+        targets.push(w.slice(a, b));
+      }
+    }
+    for (var t = 0; t < targets.length; t++) {
+      if (recursive && force && (targets[t].charAt(0) === '/' || targets[t].charAt(0) === '~' || targets[t].indexOf('..') !== -1)) return true;
+    }
+  }
+  return false;
+}
 
 /** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
 function intuticActions(toolName, command) {
@@ -900,6 +1419,15 @@ function intuticActions(toolName, command) {
     var needles = INTUTIC_ACTION_NEEDLES[i][1];
     for (var j = 0; j < needles.length; j++) {
       if (hasPhrase(words, needles[j])) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
+    }
+  }
+  // A recursive, forced remove outside the working tree is destroy too (Q3).
+  if (out.indexOf(' ${DESTROY_TOKEN} ') === -1 && intuticRemovesOutsideTree(String(command == null ? '' : command))) out += '${DESTROY_TOKEN} ';
+  // The force-push compound: the git push phrase and a whole-word flag.
+  if (hasPhrase(words, 'git push')) {
+    var padded = ' ' + String(command == null ? '' : command).toLowerCase().split(/\\s+/).filter(Boolean).join(' ') + ' ';
+    for (var f = 0; f < INTUTIC_FORCE_FLAGS.length; f++) {
+      if (padded.indexOf(INTUTIC_FORCE_FLAGS[f]) !== -1) { out += '${FORCE_PUSH_TOKEN} '; break; }
     }
   }
   return out;
@@ -1102,6 +1630,36 @@ function shellDecideFallbackSkip(evaluatesDecide: boolean): string {
 }
 
 /**
+ * The bash gate's handling of `<kind>-fallback:` lines (gate body v23): the
+ * extractor's Python decodes the `@rule` records and names the fallback
+ * lines of the decoded, enforcing ones whose kind this gate evaluates; those
+ * are dropped. Any other fallback line is enforced.
+ */
+function shellRuleFallbackSkip(kindsCsv: string): string {
+  return `  # A <kind>-fallback: line stands in for a rule record a gate cannot
+  # evaluate. This gate evaluates ${kindsCsv || 'none'}, so it drops the fallback line a
+  # decoded record of those kinds names. A python3 that cannot say keeps them all.
+  if [ \${#INTUTIC_RULE_RECORDS[@]} -gt 0 ] && [ -n ${shq(kindsCsv)} ]; then
+    _intutic_rskip="$(python3 -c 'import os, sys
+lib = {}
+exec(os.environ.get("INTUTIC_PY_LIB", ""), lib)
+sys.stdout.write(lib["intutic_rule_skip"](sys.stdin.read(), sys.argv[1]))' ${shq(kindsCsv)} <<< "$(printf '%s\\n' "\${INTUTIC_RULE_RECORDS[@]}")" 2>/dev/null || true)"
+    if [ -n "$_intutic_rskip" ] && [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+      _intutic_rskip=$'\\n'"$_intutic_rskip"$'\\n'
+      _intutic_kept=()
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        case "$_intutic_rskip" in *$'\\n'"\${_rec%%$'\\t'*}"$'\\n'*) continue ;; esac
+        _intutic_kept+=("$_rec")
+      done
+      INTUTIC_DYNAMIC=()
+      if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
+    fi
+  fi
+
+`
+}
+
+/**
  * The bash gate's decide tier, after every deterministic tier allowed the
  * call: a call whose tool an `@decide` record names (column 4) goes to
  * `intutic decide check --stdin` through `intutic_decide_check` in
@@ -1196,6 +1754,10 @@ fi
 export function emitShellGate(opts: ShellGateOptions): string {
   const log = opts.logFn ?? 'log_event'
   const floor = staticFloorPatterns()
+  const observable = POST_TOOL_OBSERVABLE[opts.harness] ? '1' : '0'
+  const ruleKinds = (Object.keys(GATE_EVALUATES_RULE_RECORDS.bash) as GateRuleKind[]).filter((k) => GATE_EVALUATES_RULE_RECORDS.bash[k]).join(',')
+  const pyCall = (fn: string, args: string): string =>
+    `python3 -c 'import os, sys\nlib = {}\nexec(os.environ.get("INTUTIC_PY_LIB", ""), lib)\nsys.stdout.write(lib["${fn}"](${args}))'`
   return `
 # ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
 # Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
@@ -1203,6 +1765,18 @@ export function emitShellGate(opts: ShellGateOptions): string {
 # The harness name and version are stamped so this file identifies itself. Both
 # were previously passed in and dropped on the floor: opts.harness was declared
 # on the option type, supplied by all thirteen writers, and read nowhere.
+
+# ── Post-tool outcome (gate body v23) ────────────────────────────────────────
+# A post-tool invocation (--event post) records a test run's outcome for this
+# session, or marks an earlier passing run stale after a file change, and
+# always allows: the call has already run. Only where ${opts.harness}'s post-tool
+# payload was captured and carries an exit code (POST_TOOL_OBSERVABLE: ${observable}).
+if [ "\${INTUTIC_POST_MODE:-0}" = "1" ]; then
+  if [ "${observable}" = "1" ]; then
+    ${pyCall('intutic_post_record', 'sys.argv[1], sys.stdin.read()')} ${shq(opts.harness)} <<< "\${INPUT:-}" >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
 
 # ── Agent fault injection (intutic chaos run) ────────────────────────────────
 # Only when INTUTIC_CHAOS_PLAN is set: a chaos experiment's runner sets it, with
@@ -1327,6 +1901,9 @@ INTUTIC_OPAQUE_MESSAGE=${shq(OPAQUE_REFUSAL_MESSAGE)}
 # none of them, the CLI does.
 INTUTIC_SNAPSHOT_FORMAT=1
 INTUTIC_DECIDE_RECORDS=()
+# The @rule records (gate body v23), kept whole: the extractor's Python decodes
+# them for the rule-record tiers below.
+INTUTIC_RULE_RECORDS=()
 if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
   INTUTIC_SNAPSHOT_STATE="ok"
   while IFS= read -r _line || [ -n "$_line" ]; do
@@ -1349,12 +1926,13 @@ if [ -f "$INTUTIC_SNAPSHOT_RULES" ]; then
         case "\${_line#*$'\\t'}" in ''|*[!0-9]*) : ;; *) INTUTIC_SNAPSHOT_FORMAT="\${_line#*$'\\t'}" ;; esac
         ;;
       '${DECIDE_RECORD_TAG}'$'\\t'*) INTUTIC_DECIDE_RECORDS+=("$_line") ;;
+      '${RULE_RECORD_TAG}'$'\\t'*) INTUTIC_RULE_RECORDS+=("$_line") ;;
       '#'*|'') : ;;
       *) INTUTIC_DYNAMIC+=("$_line") ;;
     esac
   done < "$INTUTIC_SNAPSHOT_RULES"
 
-${shellDecideFallbackSkip(GATE_EVALUATES_DECIDE.bash)}  # Integrity, in the order that fails cheapest first.
+${shellDecideFallbackSkip(GATE_EVALUATES_DECIDE.bash)}${shellRuleFallbackSkip(ruleKinds)}${SHELL_SHADOWED_PHRASE_SKIP}  # Integrity, in the order that fails cheapest first.
   #
   # All three of these were parsed and then ignored. A digest nobody recomputes
   # is not integrity, it is a comment; and a workspace id nobody compares means a
@@ -1400,8 +1978,9 @@ ${shellDecideFallbackSkip(GATE_EVALUATES_DECIDE.bash)}  # Integrity, in the orde
     # never set: the snapshot admits no MCP server (the refusal below).
     INTUTIC_MCP_REGISTRY=""
     INTUTIC_MCP_ALLOWLIST=0
-    # The decide records go with the rest of the dynamic tier.
+    # The decide and rule records go with the rest of the dynamic tier.
     INTUTIC_DECIDE_RECORDS=()
+    INTUTIC_RULE_RECORDS=()
   fi
 fi
 
@@ -1426,7 +2005,7 @@ case "$INTUTIC_SNAPSHOT_STATE" in
   empty)   ${log} "snapshot_empty" "\${TOOL:-}" "Policy snapshot contains no rules — the compile produced nothing" || true ;;
   stale)   ${log} "snapshot_stale" "\${TOOL:-}" "Policy snapshot is \${_intutic_age_days} days old and still enforced" || true ;;
 esac
-if [ "$INTUTIC_SNAPSHOT_FORMAT" -gt ${SNAPSHOT_FORMAT} ]; then
+if [ "$INTUTIC_SNAPSHOT_FORMAT" -gt ${GATE_READS_FORMAT} ]; then
   ${log} "snapshot_format_newer" "\${TOOL:-}" "${FORMAT_NEWER_MESSAGE.replace('{n}', '$INTUTIC_SNAPSHOT_FORMAT')}" || true
 fi
 
@@ -1650,6 +2229,13 @@ intutic_apply() {
       destructive.*) return 0 ;;
     esac
   fi
+  # The tier order (gate body v23): every refusal first, the holds after the
+  # rule records and the MCP checks. A hold is only ever decided on a call
+  # nothing deterministic refused.
+  case "\${_intutic_pass:-all}" in
+    det) [ "$rsev" = "hold" ] && return 0 ;;
+    hold) [ "$rsev" = "hold" ] || return 0 ;;
+  esac
   intutic_rule_fires "$rec"
   [ "$_intutic_fires" = "1" ] || return 0
   if [ "$rsev" = "shadow" ]; then
@@ -1754,11 +2340,50 @@ for _rec in "\${INTUTIC_FLOOR[@]}"; do
   intutic_apply "$_rec"
 done
 
+_intutic_pass=det
 if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
   for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
     intutic_apply "$_rec"
   done
 fi
+
+# ── Rule records (gate body v23) ─────────────────────────────────────────────
+# A rule record's verdict, as the Python check returns it: verdict, code, rule
+# id and reason, tab-separated; empty to continue. shadow records the finding;
+# block refuses.
+intutic_rule_verdict() {
+  [ -n "$1" ] || return 0
+  local verdict code rid reason retry
+  IFS=$'\t' read -r verdict code rid reason retry <<< "$1"
+  if [ "$verdict" = "shadow" ]; then
+    intutic_chaos_note "$rid"
+    ${log} "tool_would_block" "\${TOOL:-}" "\${reason} [\${rid}]" || true
+    return 0
+  fi
+  _intutic_chaos_rule="$rid"; _intutic_chaos_hit=1
+  intutic_shown "\${reason} [\${rid}]"
+  echo "[Intutic Governance] BLOCKED: \${_intutic_shown} (refusal code \${code})" >&2
+  # Where to retry: the paths or tools the refusal names. An
+  # OPAQUE workspace drops it, as it drops the rule.
+  if [ -n "$retry" ] && [ "$INTUTIC_OPAQUE" != "1" ]; then echo "$retry" >&2; fi
+  ${log} "tool_blocked" "\${TOOL:-}" "\${reason} [\${rid}]"
+  exit 2
+}
+_intutic_rr_text=""
+if [ \${#INTUTIC_RULE_RECORDS[@]} -gt 0 ]; then
+  _intutic_rr_text="$(printf '%s\n' "\${INTUTIC_RULE_RECORDS[@]}")"
+fi
+# requires_outcome: a call whose action token (or tool) a qualified
+# requires_before gates is refused unless this session's last test run passed,
+# and no file changed since (PREREQUISITE_UNMET). The check also keeps the
+# session's state: a file change marks a passing run stale. A check that
+# cannot run refuses.
+case "$_intutic_rr_text" in
+  *$'\t'requires_outcome$'\t'*)
+    _intutic_rr="$(${pyCall('intutic_outcome_check', '*(sys.argv[1:7] + [sys.stdin.read()])')} ${shq(opts.harness)} ${observable} "\${TOOL:-}" "\${INTUTIC_ACTIONS:- }" "\${SESSION_ID:-}" "$_intutic_rr_text" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || printf 'block\tPREREQUISITE_UNMET\trequires_before\tthe requires_before check could not run')"
+    intutic_rule_verdict "$_intutic_rr"
+    ;;
+esac
 
 # ── Unverified snapshot (gate body v17) ──────────────────────────────────────
 # A snapshot that failed its digest or workspace check admits no MCP server:
@@ -1849,6 +2474,26 @@ case "\${TOOL:-}" in
     ;;
 esac
 
+# ── Holds (gate body v8; after every refusal since v23) ──────────────────────
+_intutic_pass=hold
+if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+  for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+    intutic_apply "$_rec"
+  done
+fi
+
+# ── Trajectory: scope_paths and plan_approval (gate body v23) ────────────────
+# A file change outside the union of scope_paths (OUT_OF_SCOPE), and a call
+# before the session's plan is approved (PLAN_NOT_APPROVED) or, under strict,
+# off its steps (OFF_PLAN). After the holds, before the decide tier. A check
+# that cannot run refuses.
+case "$_intutic_rr_text" in
+  *$'\t'scope_paths$'\t'*|*$'\t'plan_approval$'\t'*)
+    _intutic_tr="$(${pyCall('intutic_trajectory_check', '*(sys.argv[1:4] + [sys.argv[4], sys.stdin.read(), sys.argv[5], sys.argv[6]])')} ${shq(opts.harness)} "\${TOOL:-}" "\${SESSION_ID:-}" "$_intutic_rr_text" "$PWD" "\${INTUTIC_WORKSPACE_ID:-}" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || printf 'block\tOUT_OF_SCOPE\tscope_paths\tthe scope and plan check could not run')"
+    intutic_rule_verdict "$_intutic_tr"
+    ;;
+esac
+
 ${shellDecideTier(opts)}
 # ── Agent fault injection: the call is allowed ───────────────────────────────
 # Recorded as allowed, then the fault that is due, if any. A permission delay
@@ -1926,6 +2571,88 @@ const JS_DECIDE_FALLBACK_KEPT = `  // A fallback line stands in for a decide rul
 `
 
 /**
+ * A hold token's rules share one id (`laneHoldPatterns`, `@intutic/shared-types`):
+ * a `phrase` rule, which a gate whose classifier predates the token holds
+ * by, and for force_push and destroy an `action` rule. A v23 gate classifies
+ * every token, so it skips a `phrase` rule that shares its id with an
+ * `action` rule and holds by the action rule alone: the partial phrase
+ * `git push --force` also matches `--force-with-lease`, which is no force
+ * push. One id means one approval releases the call at every gate, old or
+ * new.
+ */
+const JS_SHADOWED_PHRASE_SKIP = `  // A phrase rule that shares its id with an action rule is the partial form a
+  // gate older than v23 holds by; this one holds by the action rule.
+  {
+    const actionIds = out.rules.filter(function (r) { return r.subject === 'action'; }).map(function (r) { return r.id; });
+    if (actionIds.length > 0) out.rules = out.rules.filter(function (r) { return r.subject !== 'phrase' || actionIds.indexOf(r.id) === -1; });
+  }
+`
+
+/** {@link JS_SHADOWED_PHRASE_SKIP} in a bash gate. Fields are cut by expansion: an empty flags column must not shift the subject. */
+const SHELL_SHADOWED_PHRASE_SKIP = `  # A phrase rule that shares its id with an action rule is the partial form a
+  # gate older than v23 holds by; this one holds by the action rule.
+  if [ \${#INTUTIC_DYNAMIC[@]} -gt 0 ]; then
+    _intutic_aids=$'\\n'
+    for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+      _r="\${_rec#*$'\\t'}"; _r="\${_r#*$'\\t'}"; _r="\${_r#*$'\\t'}"
+      if [ "\${_r%%$'\\t'*}" = "action" ]; then _intutic_aids+="\${_rec%%$'\\t'*}"$'\\n'; fi
+    done
+    if [ "$_intutic_aids" != $'\\n' ]; then
+      _intutic_kept=()
+      for _rec in "\${INTUTIC_DYNAMIC[@]}"; do
+        _r="\${_rec#*$'\\t'}"; _r="\${_r#*$'\\t'}"; _r="\${_r#*$'\\t'}"
+        if [ "\${_r%%$'\\t'*}" = "phrase" ]; then
+          case "$_intutic_aids" in *$'\\n'"\${_rec%%$'\\t'*}"$'\\n'*) continue ;; esac
+        fi
+        _intutic_kept+=("$_rec")
+      done
+      INTUTIC_DYNAMIC=()
+      if [ \${#_intutic_kept[@]} -gt 0 ]; then INTUTIC_DYNAMIC=("\${_intutic_kept[@]}"); fi
+    fi
+  fi
+
+`
+
+/** A JS gate that evaluates rule records skips each fallback line a decoded, enforcing record of those kinds names. */
+function jsRuleFallbackSkip(kinds: readonly GateRuleKind[]): string {
+  return `  // A <kind>-fallback: line stands in for a rule record a gate cannot
+  // evaluate. This gate evaluates ${kinds.join(', ')}, so it skips the line a
+  // decoded record of those kinds names; any other fallback line is enforced.
+  if (out.gateRecords.length > 0) {
+    const kinds = ${JSON.stringify(kinds)};
+    const rskip = out.gateRecords.filter(function (r) { return r.fallbackId && kinds.indexOf(r.kind) !== -1; })
+      .map(function (r) { return r.fallbackId; });
+    out.rules = out.rules.filter(function (r) { return rskip.indexOf(r.id) === -1; });
+  }
+`
+}
+
+/**
+ * The shared rule-record ports from `@intutic/shared-types`, in a scope of
+ * their own: the test outcome decision and its state
+ * ({@link TEST_OUTCOME_JS_SOURCE}), the scope match
+ * ({@link SCOPE_MATCH_JS_SOURCE}), the `@rule` decoder
+ * ({@link RULE_RECORD_JS_SOURCE}) and the refusal detail
+ * ({@link REFUSAL_DETAIL_JS_SOURCE}). The scope match calls the phrase
+ * matcher (`PHRASES_JS_SOURCE`), which the classifier emits at the top level
+ * of every JS gate; it is read at call time, after both are defined.
+ */
+const JS_RULE_LIB = `// Rule records, test outcomes, scope matching and refusal detail, emitted
+// from @intutic/shared-types (testOutcome.ts, scopeMatch.ts, gateRuleRecord.ts,
+// refusalDetail.ts).
+const intuticRuleLib = (function () {
+${TEST_OUTCOME_JS_SOURCE}
+${SCOPE_MATCH_JS_SOURCE}
+${RULE_RECORD_JS_SOURCE}
+${REFUSAL_DETAIL_JS_SOURCE}
+  return { decode: decodeGateRuleRecord, exitCode: extractExitCode, outcome: decideTestOutcome,
+    emptyState: emptyOutcomeState, parseState: parseOutcomeState, recordOutcome: recordTestOutcome,
+    noteCall: noteCompletedCall, prerequisite: prerequisiteCase, unmetReason: prerequisiteUnmetReason,
+    withinScope: isWithinScope, changeTargets: changeTargets, isFileWrite: isFileWriteCall,
+    planExempt: isPlanExemptTool, detail: refusalDetailForMode, retryLine: retryScopeLine };
+})();`
+
+/**
  * The snapshot loader every JS-family gate embeds, defined once.
  *
  * Extracted from {@link emitJsGate}'s template when the n8n workflow gate
@@ -1940,7 +2667,7 @@ const JS_DECIDE_FALLBACK_KEPT = `  // A fallback line stands in for a decide rul
  * line, and only when a decoded record names it; any other gate keeps every
  * fallback line in force.
  */
-function jsSnapshotLoader(evaluatesDecide: boolean): string {
+function jsSnapshotLoader(evaluatesDecide: boolean, ruleKinds: readonly GateRuleKind[] = [], skipShadowedPhrases = false): string {
   return `function intuticLoadSnapshot(INTUTIC_WORKSPACE_ID) {
   const fs = require('fs'), os = require('os'), path = require('path');
   const p = process.env.INTUTIC_SNAPSHOT_RULES ||
@@ -1950,7 +2677,7 @@ function jsSnapshotLoader(evaluatesDecide: boolean): string {
   // opaque: an OPAQUE workspace (the @intervention_mode record). Kept on a
   // snapshot that fails its digest: it only ever hides text, never allows.
   const out = { rules: [], digest: 'none', state: 'absent', workspaceId: '', generatedAt: '', ageDays: 0,
-    mcpAllowlist: null, mcpRegistry: null, opaque: false, format: 1, decideRules: [] };
+    mcpAllowlist: null, mcpRegistry: null, opaque: false, format: 1, decideRules: [], gateRecords: [] };
   let text;
   try { text = fs.readFileSync(p, 'utf8'); } catch (e) { return out; }
   out.state = 'ok';
@@ -1969,6 +2696,16 @@ function jsSnapshotLoader(evaluatesDecide: boolean): string {
       // rule's fallback line below then stays in force and refuses.
       const rec = intuticDecideLib.record(line);
       if (rec) out.decideRules.push(rec);
+      continue;
+    }
+    if (line.startsWith('${RULE_RECORD_TAG}\\t')) {
+${ruleKinds.length > 0
+    ? `      // A rule record (gate body v23). One that does not decode is skipped, and
+      // its fallback line below stays in force and refuses.
+      const rr = intuticRuleLib.decode(line);
+      if (rr) out.gateRecords.push(rr);`
+    : `      // A rule record (gate body v23). This gate evaluates no kind, so each
+      // record's fallback line stays in force and refuses.`}
       continue;
     }
     if (line.startsWith('${MCP_ALLOWLIST_RECORD_TAG}\\t')) {
@@ -2000,6 +2737,7 @@ function jsSnapshotLoader(evaluatesDecide: boolean): string {
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\\t');
     if (f.length < 6 || !f[5]) continue;
+
     let re, seq = null;
     // A snapshot rule that will not compile is dropped, not fatal. The floor
     // above is compiled in and unaffected, so this degrades to "today's
@@ -2021,10 +2759,13 @@ function jsSnapshotLoader(evaluatesDecide: boolean): string {
       try { argRe = new RegExp(Buffer.from(f[6], 'base64').toString('utf8')); }
       catch (e) { argDowngraded = true; }
     }
-    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, seq: seq, reason: f[4],
+    // src: the source as written. A phrase rule reads it, never re.source,
+    // which escapes a slash ('api.stripe.com/v1/charges' read back as
+    // 'api.stripe.com\\/v1\\/charges' matched nothing).
+    out.rules.push({ id: f[0], severity: f[1], subject: f[3] || 'any', re: re, seq: seq, reason: f[4], src: f[5],
       argRe: argRe, argDowngraded: argDowngraded });
   }
-${evaluatesDecide ? JS_DECIDE_FALLBACK_SKIP : JS_DECIDE_FALLBACK_KEPT}
+${evaluatesDecide ? JS_DECIDE_FALLBACK_SKIP : JS_DECIDE_FALLBACK_KEPT}${ruleKinds.length > 0 ? jsRuleFallbackSkip(ruleKinds) : ''}${skipShadowedPhrases ? JS_SHADOWED_PHRASE_SKIP : ''}
   // Integrity. A digest nobody recomputes is a comment, and a workspace id
   // nobody compares means a snapshot from workspace A dropped onto workspace B's
   // machine is enforced verbatim, with B's events attributing A's rules to B.
@@ -2054,8 +2795,9 @@ ${evaluatesDecide ? JS_DECIDE_FALLBACK_SKIP : JS_DECIDE_FALLBACK_KEPT}
     // never set: the gate admits no MCP server on this snapshot at all.
     out.mcpRegistry = null;
     out.mcpAllowlist = null;
-    // The decide records go with the rest of the dynamic tier.
+    // The decide and rule records go with the rest of the dynamic tier.
     out.decideRules = [];
+    out.gateRecords = [];
   }
 
   if (out.state === 'ok' && out.generatedAt) {
@@ -2156,6 +2898,245 @@ function intuticChaosKey(toolName, command, target) {
     .update(intuticNormalise(toolName) + '\\u0000' + intuticNormalise(command) + '\\u0000' + intuticNormalise(target))
     .digest('hex');
 }`
+
+/**
+ * The rule-record tiers of a JS gate, emitted once per gate: the
+ * `requires_outcome` check and its state, the trajectory check
+ * (`scope_paths`, `plan_approval`) and the post-tool recorder
+ * (`intuticRecordOutcome`). Needs {@link JS_RULE_LIB} and the classifier in
+ * scope.
+ */
+function jsRuleTiers(harness: HookGateHarness): string {
+  return `// ── Rule records (gate body v23) ─────────────────────────────────────────────
+// The @rule records' tiers: requires_outcome among the deterministic refusals,
+// scope_paths and plan_approval after the holds (the trajectory tier), and
+// the post-tool recorder a writer calls with a tool's result. A record
+// stamped shadow records its finding and refuses nothing.
+const INTUTIC_HARNESS = ${JSON.stringify(harness)};
+// Whether this harness's post-tool payload was captured and carries an exit
+// code or an error flag (POST_TOOL_OBSERVABLE in gateBody.ts).
+const INTUTIC_POST_OBSERVABLE = ${POST_TOOL_OBSERVABLE[harness] ? 'true' : 'false'};
+// The working directory of the call, when the writer knows it (cwd in the
+// payload); the process's otherwise.
+var _intuticCallCwd = null;
+
+/** ~/.intutic/hooks/state/outcomes/<sha256(harness NUL session)[:32]>.json */
+function intuticOutcomeStatePath(sessionId) {
+  var path = require('path'), os = require('os');
+  var base = process.env.INTUTIC_OUTCOME_STATE_DIR || path.join(os.homedir(), '.intutic', 'hooks', 'state', 'outcomes');
+  var h = require('crypto').createHash('sha256').update(INTUTIC_HARNESS + '\\u0000' + String(sessionId), 'utf8').digest('hex').slice(0, 32);
+  return path.join(base, h + '.json');
+}
+
+/** { exists, state }: a missing file is an empty state; one that does not read is null, which leaves every rule unmet. */
+function intuticOutcomeStateRead(file) {
+  var fs = require('fs');
+  if (!fs.existsSync(file)) return { exists: false, state: intuticRuleLib.emptyState() };
+  try { return { exists: true, state: intuticRuleLib.parseState(fs.readFileSync(file, 'utf8')) }; }
+  catch (e) { return { exists: true, state: null }; }
+}
+
+/** Written atomically; a write that fails changes no decision. */
+function intuticOutcomeStateWrite(file, state) {
+  try {
+    var fs = require('fs'), path = require('path');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    var tmp = file + '.tmp.' + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.renameSync(tmp, file);
+  } catch (e) {}
+}
+
+/** Why a qualified prerequisite is not met (the shared reason), or null when it is. */
+function intuticOutcomeUnmet(r, sessionId, state) {
+  var c, why = null;
+  if (!INTUTIC_POST_OBSERVABLE) c = 'not_observable';
+  else if (!sessionId) c = 'no_session';
+  else { var got = intuticRuleLib.prerequisite(state, r.first, r.adjacent, Date.now()); c = got.case; why = got.why; }
+  return c === 'met' ? null : intuticRuleLib.unmetReason(r.first, r.then, c, why, INTUTIC_HARNESS);
+}
+
+/** A rule record's finding; scope is where the refusal applies (§6.2). */
+function intuticRuleVerdict(r, code, ruleId, reason, scope) {
+  return { verdict: r.rollout === 'enforce' ? 'block' : 'shadow', code: code, ruleId: ruleId, reason: reason, scope: scope };
+}
+
+/**
+ * The requires_outcome tier: a call whose action token (or tool name) a
+ * qualified requires_before gates, unless this session's last test run
+ * passed and nothing changed since. Then the session's bookkeeping: a call
+ * that changes files (a mutation tool, or a shell write such as sed -i or
+ * git checkout: isFileWriteCall, Q1) marks a passing run stale, and every
+ * call ends adjacency for ~> rules.
+ */
+function intuticOutcomeTier(snap, toolName, nActions, toolInput, sessionId) {
+  var recs = snap.gateRecords.filter(function (r) { return r.kind === 'requires_outcome'; });
+  var file = sessionId ? intuticOutcomeStatePath(sessionId) : null;
+  var read = file ? intuticOutcomeStateRead(file) : { exists: false, state: intuticRuleLib.emptyState() };
+  var shadow = null;
+  for (var i = 0; i < recs.length; i++) {
+    var r = recs[i];
+    if (nActions.indexOf(' ' + r.then + ' ') === -1 && String(r.then).toLowerCase() !== String(toolName).toLowerCase()) continue;
+    var why = intuticOutcomeUnmet(r, sessionId, read.state);
+    if (why === null) continue;
+    var v = intuticRuleVerdict(r, 'PREREQUISITE_UNMET', 'requires_before.' + r.first + '[ok]' + (r.adjacent ? '~>' : '->') + r.then,
+      why, { tools: [r.then], step: r.first });
+    if (v.verdict === 'block') return v;
+    if (!shadow) shadow = v;
+  }
+  if (file && read.exists && read.state) {
+    intuticOutcomeStateWrite(file, intuticRuleLib.noteCall(read.state, intuticRuleLib.isFileWrite(toolName, toolInput)));
+  }
+  return shadow;
+}
+
+/**
+ * Records a tool's result, from the writer's post-tool handler: a shell call
+ * that ran tests records its outcome for the session; a call that changed
+ * files marks an earlier passing run stale. result: { exitCode?, isError?,
+ * output? }. Never throws and never refuses.
+ */
+function intuticRecordOutcome(sessionId, toolName, toolInput, result) {
+  if (!INTUTIC_POST_OBSERVABLE || !sessionId) return;
+  try {
+    var input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+    var command = String(input.command || input.cmd || input.script || input.shell_command || '');
+    var actions = intuticActions(toolName, command);
+    var file = intuticOutcomeStatePath(sessionId);
+    var read = intuticOutcomeStateRead(file);
+    if (actions.indexOf(' action:run_tests ') !== -1) {
+      var output = String(result && result.output != null ? result.output : '');
+      var exitCode = result && typeof result.exitCode === 'number' ? result.exitCode : intuticRuleLib.exitCode(output);
+      var d = intuticRuleLib.outcome({ exitCode: exitCode, isError: result ? result.isError : null, output: output });
+      intuticOutcomeStateWrite(file, intuticRuleLib.recordOutcome(read.state || intuticRuleLib.emptyState(), 'action:run_tests', d, Date.now()));
+    } else if (read.exists && read.state && intuticRuleLib.isFileWrite(toolName, input)) {
+      intuticOutcomeStateWrite(file, intuticRuleLib.noteCall(read.state, true));
+    }
+  } catch (e) {}
+}
+
+/** The real path of p, resolving its deepest existing ancestor when p does not exist yet. */
+function intuticRealPath(p) {
+  var fs = require('fs'), path = require('path');
+  var abs = path.resolve(p);
+  try { return fs.realpathSync(abs); } catch (e) {}
+  var rest = [], dir = abs;
+  for (;;) {
+    var parent = path.dirname(dir);
+    rest.unshift(path.basename(dir));
+    if (parent === dir) return abs;
+    dir = parent;
+    try { return path.join.apply(path, [fs.realpathSync(dir)].concat(rest)); } catch (e) {}
+  }
+}
+
+/** The workspace root of a call: its cwd walked up to the nearest .git, else the cwd. */
+function intuticRepoRoot(cwd) {
+  var fs = require('fs'), path = require('path');
+  var d = intuticRealPath(cwd);
+  for (;;) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    var parent = path.dirname(d);
+    if (parent === d) return intuticRealPath(cwd);
+    d = parent;
+  }
+}
+
+/**
+ * The session's approved plan from the daemon's cache, { tools }, or null:
+ * missing, past its #expires, failing its digest or workspace check, or no
+ * APPROVED or EXECUTING plan for the session.
+ */
+function intuticApprovedPlan(sessionId, workspaceId) {
+  var fs = require('fs'), os = require('os'), path = require('path');
+  var file = process.env.INTUTIC_APPROVED_PLANS || path.join(os.homedir(), '.intutic', 'hooks', ${JSON.stringify(APPROVED_PLANS_FILE)});
+  var raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch (e) { return null; }
+  var digest = '', ws = '', expires = '', body = [];
+  raw.split('\\n').forEach(function (line) {
+    if (line.indexOf('#digest ') === 0) digest = line.slice(8).trim();
+    else if (line.indexOf('#workspace ') === 0) ws = line.slice(11).trim();
+    else if (line.indexOf('#expires ') === 0) expires = line.slice(9).trim();
+    else if (line && line.charAt(0) !== '#') body.push(line);
+  });
+  if (require('crypto').createHash('sha256').update(body.join('\\n')).digest('hex').slice(0, 32) !== digest) return null;
+  if (ws && workspaceId && ws !== workspaceId) return null;
+  var exp = Date.parse(expires);
+  if (!exp || isNaN(exp) || Date.now() >= exp) return null;
+  var tools = null;
+  for (var i = 0; i < body.length; i++) {
+    var e;
+    try { e = JSON.parse(body[i]); } catch (x) { continue; }
+    if (!e || e.sessionId !== sessionId || (e.state !== 'APPROVED' && e.state !== 'EXECUTING')) continue;
+    tools = (tools || []).concat((Array.isArray(e.tools) ? e.tools : [])
+      .filter(function (t) { return typeof t === 'string'; }).map(function (t) { return t.toLowerCase(); }));
+  }
+  return tools === null ? null : { tools: tools };
+}
+
+/**
+ * The trajectory tier: a file change outside the union of scope_paths
+ * (OUT_OF_SCOPE), and under plan_approval a call before the session's plan is
+ * approved (PLAN_NOT_APPROVED) or, strict, off its steps (OFF_PLAN).
+ */
+function intuticTrajectoryTier(snap, toolName, toolInput, sessionId, workspaceId) {
+  var path = require('path');
+  var shadow = null;
+  var scopes = snap.gateRecords.filter(function (r) { return r.kind === 'scope_paths'; });
+  var targets = scopes.length > 0 ? intuticRuleLib.changeTargets(toolName, toolInput).map(function (t) { return t.target; }) : [];
+  if (targets.length > 0) {
+    var cwd = _intuticCallCwd || process.cwd();
+    var root = intuticRepoRoot(cwd);
+    var rels = targets.map(function (t) {
+      var rel = path.relative(root, intuticRealPath(path.resolve(intuticRealPath(cwd), t)));
+      var outside = rel === '..' || rel.indexOf('..' + path.sep) === 0 || path.isAbsolute(rel);
+      return { t: t, rel: outside ? null : rel.split(path.sep).join('/') };
+    });
+    var rollouts = ['enforce', 'shadow'];
+    for (var k = 0; k < rollouts.length; k++) {
+      var group = scopes.filter(function (r) { return r.rollout === rollouts[k]; });
+      if (group.length === 0) continue;
+      var union = [];
+      group.forEach(function (r) { union = union.concat(r.scopePaths); });
+      var bad = rels.filter(function (x) { return x.rel === null || !intuticRuleLib.withinScope(x.rel, union); })
+        .map(function (x) { return x.t; });
+      if (bad.length === 0) continue;
+      var v = intuticRuleVerdict(group[0], 'OUT_OF_SCOPE', 'scope_paths.' + group[0].sopTitle,
+        bad.join(', ') + ' is outside scope_paths (' + union.join(', ') + ')', { paths: bad });
+      if (v.verdict === 'block') return v;
+      if (!shadow) shadow = v;
+    }
+  }
+  var plans = snap.gateRecords.filter(function (r) { return r.kind === 'plan_approval'; });
+  if (plans.length > 0 && !intuticRuleLib.planExempt(String(toolName))) {
+    var prolls = ['enforce', 'shadow'];
+    for (var j = 0; j < prolls.length; j++) {
+      var pg = plans.filter(function (r) { return r.rollout === prolls[j]; });
+      if (pg.length === 0) continue;
+      var strict = pg.filter(function (r) { return r.mode === 'strict'; });
+      var r = strict.length > 0 ? strict[0] : pg[0];
+      var level = r.mode;
+      var rid = 'plan_approval.' + r.sopTitle;
+      var pscope = { tools: [String(toolName)] };
+      var pv = null;
+      if (!sessionId) {
+        pv = intuticRuleVerdict(r, 'PLAN_NOT_APPROVED', rid, 'plan_approval: ' + level + ' - ' + INTUTIC_HARNESS + ' sent no session id, so no approved plan can be found for this call', pscope);
+      } else {
+        var plan = intuticApprovedPlan(sessionId, workspaceId);
+        if (plan === null) {
+          pv = intuticRuleVerdict(r, 'PLAN_NOT_APPROVED', rid, 'plan_approval: ' + level + ' - this session has no APPROVED or EXECUTING plan; get its plan approved, then retry', pscope);
+        } else if (level === 'strict' && plan.tools.indexOf(String(toolName).toLowerCase()) === -1) {
+          pv = intuticRuleVerdict(r, 'OFF_PLAN', rid, 'plan_approval: strict - ' + String(toolName) + ' is not a step of the approved plan', pscope);
+        }
+      }
+      if (pv && pv.verdict === 'block') return pv;
+      if (pv && !shadow) shadow = pv;
+    }
+  }
+  return shadow;
+}
+`
+}
 
 /**
  * The JavaScript gate body.
@@ -2264,6 +3245,11 @@ export function emitJsGate(opts: JsGateOptions): string {
           ? `      throw new Error(${code === 'null' ? `'[Intutic Governance] ' + reason` : 'reason'});`
           : `      process.exit(2);`)
 
+  /** An exit-code harness's retry-scope line (§6.2), after the reason; none in OPAQUE. */
+  const retryScopeStderr =
+    `    const _retry = intuticRuleLib.retryLine(_mode, v.scope);\n` +
+    `    if (_retry) { try { console.error(_retry); } catch (e) {} }\n`
+
   return `
 // ── Intutic gate body v${GATE_VERSION} — harness: ${opts.harness} ────────────
 // Generated by harness/gateBody.ts. Do not edit here; every harness regenerates.
@@ -2280,9 +3266,13 @@ ${NORMALISE_CONTRACT.jsSource}
 
 ${JS_DECIDE_LIB}
 
-${jsSnapshotLoader(GATE_EVALUATES_DECIDE.js)}
+${JS_RULE_LIB}
+
+${jsSnapshotLoader(GATE_EVALUATES_DECIDE.js, (Object.keys(GATE_EVALUATES_RULE_RECORDS.js) as GateRuleKind[]).filter((k) => GATE_EVALUATES_RULE_RECORDS.js[k]), true)}
 
 ${jsHoldHelpers(opts.reviewRequestFile)}
+
+${jsRuleTiers(opts.harness)}
 
 ${JS_CHAOS_HELPERS}
 
@@ -2568,6 +3558,7 @@ ${refuseWith('dec.code', 'dec.ruleId', '', 'toolName', '(snap.opaque ? null : de
 async function intuticGateWithDecide(toolName, target, command, record, workspaceId, toolInput, sessionId, opts) {
   opts = opts || {};
   var _started = Date.now();
+  _intuticCallCwd = opts.cwd || null;
   var _d = intuticGateDeterministic(toolName, target, command, record, workspaceId, toolInput, sessionId);
   if (typeof opts.before === 'function') opts.before();
   var _dec = await intuticDecideTier(_d.toolName, toolInput, _d.snap, record, _started, opts, workspaceId, sessionId);
@@ -2583,6 +3574,7 @@ async function intuticGateWithDecide(toolName, target, command, record, workspac
  * line would have refused. \`more\` as {@link intuticGateAllowed}.
  */
 function intuticGate(toolName, target, command, record, workspaceId, toolInput, sessionId, more) {
+  _intuticCallCwd = null;
   var _d = intuticGateDeterministic(toolName, target, command, record, workspaceId, toolInput, sessionId);
   if (!more) {
     var _dec = intuticDecideLib.unavailable(_d.snap.decideRules, _d.toolName, 'this gate entry cannot evaluate the decide rules on ' + _d.toolName);
@@ -2602,7 +3594,7 @@ function intuticRuleSubjects(rule, c) {
   // the raw command — never as a regex, which backtracks on crafted input.
   if (rule.subject === 'phrase') {
     if (c.words === null) c.words = phraseText(c.command);
-    return intuticPhraseRule(rule.re.source, c.words) ? [c.nCommand] : [];
+    return intuticPhraseRule(rule.src != null ? rule.src : rule.re.source, c.words) ? [c.nCommand] : [];
   }
   // Each field is tested separately rather than concatenated — joining them
   // lets a pattern match across the seam between two innocuous values.
@@ -2667,7 +3659,7 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
     try { record('snapshot_' + snap.state, toolName, _msg); } catch (e) {}
   }
-  if (snap.format > ${SNAPSHOT_FORMAT}) {
+  if (snap.format > ${GATE_READS_FORMAT}) {
     try { record('snapshot_format_newer', toolName, ${JSON.stringify(FORMAT_NEWER_MESSAGE)}.replace('{n}', String(snap.format))); } catch (e) {}
   }
   // A chaos run's no_destructive_attempt probe reads every destructive.* rule,
@@ -2698,7 +3690,31 @@ function _intuticGateRules(toolName, target, command, record, workspaceId, toolI
     }
   }
   const rules = INTUTIC_FLOOR.concat(snap.rules);
+  // A rule record's verdict (gate body v23): shadow records the finding,
+  // block refuses through this harness's contract.
+  const _intuticRuleAct = function (v) {
+    if (!v) return;
+    if (v.verdict === 'shadow') {
+      intuticChaosNote(v.ruleId, false);
+      try { record('tool_would_block', toolName, v.reason + ' [' + v.ruleId + ']'); } catch (e) {}
+      return;
+    }
+    const _full = v.reason + ' [' + v.ruleId + ']';
+    const reason = intuticShown(snap, _full);
+    // Where the refusal applies: bounded, and dropped in an
+    // OPAQUE workspace, as the rule is.
+    const _mode = snap.opaque ? 'OPAQUE' : 'TRANSPARENT';
+    const _detail = intuticRuleLib.detail(_mode, v.scope, null);
+    try { console.error('[Intutic Governance] BLOCKED: ' + reason + ' (refusal code ' + v.code + ')'); } catch (e) {}
+${opts.contract === 'exit2' ? retryScopeStderr : ''}    try { record('tool_blocked', toolName, _full); } catch (e) {}
+${refuseWith('v.code', 'v.ruleId', 'scope: _detail.scope, evidence: _detail.evidence', 'toolName', '(snap.opaque ? null : v.ruleId)')}
+  };
+  // The tier order (gate body v23): every refusal first ('det'), the holds
+  // after the rule records and the MCP checks ('hold'). A hold is only ever
+  // decided on a call nothing deterministic refused.
+  const _intuticApplyRules = function (pass) {
   for (const rule of rules) {
+    if (pass === 'det' ? rule.severity === 'hold' : rule.severity !== 'hold') continue;
     for (const subject of intuticRuleSubjects(rule, ctx)) {
       // The argument condition of a WHERE rule: the tool-name half has
       // matched, and the rule fires only if the argPattern also matches the
@@ -2742,7 +3758,7 @@ ${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId', 'toolName', '(snap.opaq
         // The rollback rung's storage half: this call was flagged and is about
         // to proceed, which is the only instant the prior bytes still exist.
         // No-op unless the workspace opted in.
-        try { _intuticCapturePreImage(toolName, toolInput, rule.id); } catch (e) {}
+        try { _intuticCapturePreImage(toolName, toolInput, rule.id, nActions); } catch (e) {}
         continue;
       }
       // The rule's own reason, not a generic one: hookEvents.resolveSeverity
@@ -2754,6 +3770,10 @@ ${refuseWith("'HELD'", 'rule.id', 'holdId: held.holdId', 'toolName', '(snap.opaq
 ${refuseWith('intuticRuleCode(rule)', 'rule.id', '', 'toolName', '(snap.opaque ? null : rule.id)')}
     }
   }
+  };
+  _intuticApplyRules('det');
+  // requires_outcome (gate body v23), among the deterministic refusals.
+  _intuticRuleAct(intuticOutcomeTier(snap, toolName, nActions, toolInput, sessionId));
 
   // An unverified snapshot admits no MCP server (gate body v17): neither
   // record in it can be vouched for, and a deleted one looks like one never
@@ -2811,6 +3831,9 @@ ${refuseWith('_mcp.code', '_mcp.ruleId', '', 'toolName', '(snap.opaque ? null : 
       }
     }
   }
+  // The holds, after every refusal; then the trajectory tier (gate body v23).
+  _intuticApplyRules('hold');
+  _intuticRuleAct(intuticTrajectoryTier(snap, toolName, toolInput, sessionId, workspaceId || ''));
   // Allowed by every deterministic tier: the decide tier reads the tool name
   // as the rules did, and the snapshot's decide rules.
   return { toolName: toolName, snap: snap };
@@ -2893,7 +3916,7 @@ function _intuticTargetPath(input) {
  * convenience layered on top of it, and inverting that would make the feature
  * a new way to break the user's workflow.
  */
-function _intuticCapturePreImage(toolName, input, ruleId) {
+function _intuticCapturePreImage(toolName, input, ruleId, actions) {
   try {
     if (!_intuticRollbackEnabled()) return;
     const rel = _intuticTargetPath(input);
@@ -2959,6 +3982,11 @@ function _intuticCapturePreImage(toolName, input, ruleId) {
       ruleId: ruleId || '',
       workspaceId: _intuticWsId,
     };
+    // The action tokens the gate classified this call to:
+    // intutic rollback sends them on tool_reverted, so a revert counts
+    // against the action and not only the tool.
+    var _acts = String(actions || '').split(' ').filter(function (t) { return t.indexOf('action:') === 0; });
+    if (_acts.length > 0) entry.actions = _acts;
     fs.appendFileSync(
       path.join(_INTUTIC_ROLLBACK_DIR, 'manifest.jsonl'),
       JSON.stringify(entry) + '\\n',
@@ -3040,7 +4068,11 @@ export function emitJsFailClosedPrelude(opts: JsGateOptions): string {
 // stdout-cancel harnesses, also an allow. Everything that executes after this
 // line is covered; a SyntaxError in this file itself is the one thing that is
 // not, because no statement in a file that does not parse ever runs.
+// A post-tool invocation (--event post, gate body v23) records a tool's result
+// and never refuses: the tool has already run. Every exit is 0 there.
+var _intuticPostMode = process.argv[2] === '--event' && process.argv[3] === 'post';
 function _intuticCrash(err) {
+  if (_intuticPostMode) process.exit(0);
 ${crashBody}
 }
 process.on('uncaughtException', _intuticCrash);
@@ -3063,6 +4095,8 @@ process.on('unhandledRejection', _intuticCrash);`
  */
 export const SHELL_EXTRACT = `
 if ! command -v python3 >/dev/null 2>&1; then
+  # A post-tool invocation records nothing without python3, and never refuses.
+  if [ "\${INTUTIC_POST_MODE:-0}" = "1" ]; then exit 0; fi
   echo "[Intutic Governance] BLOCKED: python3 is required to evaluate tool calls and was not found on PATH." >&2
   echo "[Intutic Governance] Install python3, or unset the Intutic hooks to run ungoverned." >&2
   exit 2
@@ -3465,7 +4499,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
           : 'Policy snapshot is ' + snap.ageDays + ' days old and still enforced';
     try { record('snapshot_' + snap.state, 'n8n:' + wfName, _msg); } catch (e) {}
   }
-  if (snap.format > ${SNAPSHOT_FORMAT}) {
+  if (snap.format > ${GATE_READS_FORMAT}) {
     try { record('snapshot_format_newer', 'n8n:' + wfName, ${JSON.stringify(FORMAT_NEWER_MESSAGE)}.replace('{n}', String(snap.format))); } catch (e) {}
   }
   if (disabled) snap.rules = snap.rules.filter(function (r) { return r.id.indexOf('destructive.') !== 0; });
@@ -3549,7 +4583,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
       // parameter string — never as a regex, which backtracks on crafted input.
       if (rule.subject === 'phrase') {
         if (leafWords === null) leafWords = _leaves.map(phraseText);
-        var _phrases = rule.re.source.split('|');
+        var _phrases = (rule.src != null ? rule.src : rule.re.source).split('|');
         if (!leafWords.some(function (w) { return _phrases.some(function (p) { return hasPhrase(w, p, true); }); })) continue;
       }
       // A node has no separate command/target — its parameters are both. A
