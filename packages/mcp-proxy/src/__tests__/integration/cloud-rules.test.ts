@@ -66,6 +66,11 @@ function nativeRule(code: 0 | 1 | 3, tag: string): Buffer {
   ])
 }
 
+// Compiling a real rule on a loaded CI runner (the whole workspace's tests at
+// once) has run past the production 3 s, dropping it from the loaded list;
+// these tests are about which rules load and in what order.
+const SLOW_RUNNER_COMPILE_MS = 60_000
+
 const sha = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex')
 
 function descriptor(ruleId: string, bytes: Uint8Array, priority = 100, mode: 'ENFORCE' | 'SHADOW' = 'ENFORCE'): WasmRuleDescriptor {
@@ -122,7 +127,7 @@ function setUp(local: Record<string, Buffer> = {}): { store: Store; reports: Clo
   const store = new Store()
   const reports: CloudRuleRefusalReport[] = []
   const cloud = new CloudRuleSet(store.fetch, (r) => reports.push(r))
-  runner = new WasmRunner(dir, cloud)
+  runner = new WasmRunner(dir, cloud, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
   return { store, reports, cloud, runner }
 }
 
