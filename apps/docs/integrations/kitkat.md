@@ -16,6 +16,8 @@ The skill also tells the agent what to do when Intutic refuses or holds a call: 
 `intutic connect` writes it to `.agents/skills/intutic-governance-kitkat/SKILL.md` in the workspace when it is missing, next to the [Rule Author skill](/integrations/rule-author), and never overwrites a copy that is already there. `intutic disconnect` deletes the copy connect wrote, unless you have edited it. The steps below are for a workspace that does not run `intutic connect`.
 <!-- ENTERPRISE_ONLY_END -->
 
+[`intutic gates install`](/reference/cli#intutic-gates-install) writes it to `.agents/skills/intutic-governance-kitkat/SKILL.md` in the workspace when it is missing, with no control plane needed, next to the [Rule Author skill](/integrations/rule-author), and never overwrites a copy that is already there (`--dry-run` names it and writes nothing). `intutic disconnect` deletes the copy it wrote, unless you have edited it.
+
 The steps below add it to a workspace by hand.
 
 ---

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`intutic gates install` installs the bundled agent skills** (Kitkat and
+  rule authoring) where the workspace has none, so an agent learns how to work
+  under governance without a control plane. Before, only `intutic connect`
+  wrote them. `--dry-run` lists them, and `intutic disconnect` removes them.
+
+### Changed
+
+- **The hook gates refuse an agent switching governance off.**
+  `intutic decide disable`, `intutic decide configure` (and `judge
+  configure`), `intutic disconnect`, setting `INTUTIC_GUARD_DISABLE`, and any
+  read or write under `~/.intutic/decide/` are refused when an agent runs
+  them. You can still run them yourself.
+- **The Kitkat skill is current for 3.0.** It covers working with no control
+  plane, the 3.0 refusals (`PREREQUISITE_UNMET`, `OUT_OF_SCOPE`,
+  `PLAN_NOT_APPROVED`, lane holds, `NODE_KIND_DENIED`, decide escalations and
+  outages) and what to do about each, and it tells an agent never to get past a
+  refusal by changing governance. It no longer says the hook gates block
+  destructive commands: they flag them.
+
 ### Fixed
 
 - **Saving a SOP warns about gateways too old for its keys.** 3.0.0 said the

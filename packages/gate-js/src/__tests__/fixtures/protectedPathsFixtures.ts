@@ -34,7 +34,8 @@
  * (`buildSnapshotRules` in `services/sync-daemon/src/lib/policySnapshot.ts`
  * only ships SOP-authored rules, the destructive tier, and the tier-promoted
  * skill-surface rules — never the floor's secret-content patterns). Copied
- * as of 2026-10-08, when the sequence rules (`sequence: true`) arrived.
+ * as of 2026-10-08, when the sequence rules (`sequence: true`) arrived;
+ * the decide, disconnect and INTUTIC_GUARD_DISABLE guards added 2026-10-19.
  * `UNIVERSAL_PROTECTED_PATHS` is held equal to the source by
  * `services/sync-daemon/__tests__/harness/protectedPathCopies.test.ts`.
  */
@@ -91,6 +92,44 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
     reason: 'Governance bypass pattern: setting a harness environment variable that disables its hooks',
     matches: [' CLAUDE_CODE_HOOKS=0 x ', ' PI_PRE_TOOL_HOOK= x ', ' ANTIGRAVITY_PRE_TOOL_HOOK=/dev/null x '],
     notMatches: [' WEBHOOKS=1 x ', ' GITHOOKS=off x ', ' export PATH=/usr/bin '],
+  },
+  {
+    id: 'bypass.guard_disable_env',
+    source: 'INTUTIC_GUARD_DISABLE=',
+    severity: 'block',
+    reason: 'Governance bypass pattern: setting INTUTIC_GUARD_DISABLE, which turns off the policy snapshot guards',
+    matches: [' INTUTIC_GUARD_DISABLE=1 claude -p x ', ' export INTUTIC_GUARD_DISABLE=1 ', ' env INTUTIC_GUARD_DISABLE=1 node agent.js '],
+    notMatches: [' echo $INTUTIC_GUARD_DISABLE ', ' unset INTUTIC_GUARD_DISABLE ', ' export INTUTIC_API_URL=http://x '],
+  },
+  {
+    id: 'bypass.intutic_decide_disable',
+    source: ' decide disable[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic decide disable turns every decide rule on this machine to shadow. ' +
+      'Run it yourself, not through an agent.',
+    matches: [' intutic decide disable ', ' npx -y @intutic/cli@3.0.1 decide disable && echo ok ', ' node tools/cli/dist/cli.js decide disable;'],
+    notMatches: [' intutic decide enable ', ' intutic decide test r --state s.json ', ' intutic decide lint --json '],
+  },
+  {
+    id: 'bypass.intutic_decide_configure',
+    source: ' (decide|judge) configure[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic decide configure (or judge configure) repoints the decide engine. ' +
+      'Run it yourself, not through an agent.',
+    matches: [' intutic decide configure --model x ', ' npx @intutic/cli decide configure --url http://127.0.0.1:9 ', ' intutic judge configure --engine-url http://127.0.0.1:1 '],
+    notMatches: [' intutic decide models ', ' ./configure --prefix=/usr ', ' intutic decide eval r --labels l.jsonl '],
+  },
+  {
+    id: 'bypass.intutic_disconnect',
+    source: 'intutic(/cli)?(@[0-9A-Za-z.-]*)? disconnect[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic disconnect removes the governance gates and rules files. ' +
+      'Run it yourself, not through an agent.',
+    matches: [' intutic disconnect ', ' npx -y @intutic/cli@latest disconnect --keep-login ', ' intutic disconnect --harness cursor '],
+    notMatches: [' intutic disconnects ', ' warp-cli disconnect ', ' docker network disconnect bridge web '],
   },
 ]
 
@@ -307,6 +346,7 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.intutic/integrity.json',
   '.intutic/events',
   '.intutic/env',
+  '.intutic/decide',
   '.claude/settings.json',
   '.claude/settings.local.json',
   '.cursor/hooks.json',

@@ -866,7 +866,8 @@ gatesCmd
   .command('install')
   .description(
     'Install the tool-call gate and rules file for each recorded harness, from this machine alone: ' +
-      'the built-in protections, the local .intutic/sops, and review_before: tokens (refused, as nothing can approve a hold)',
+      'the built-in protections, the local .intutic/sops, and review_before: tokens (refused, as nothing can approve a hold). ' +
+      'Also writes the bundled agent skills (Kitkat, rule authoring) where the workspace has none',
   )
   .option('--harness <id>', 'Only this harness (it must be recorded by `intutic init`, or pass --add)')
   .option('--add', 'With --harness: record the harness in ~/.intutic/config.json if it is not')

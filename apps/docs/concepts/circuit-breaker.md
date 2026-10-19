@@ -5,7 +5,7 @@ description: How Intutic's circuit breaker evaluates every tool call in-process 
 
 # Circuit Breaker <Badge type="tip" text="Open-Core" />
 
-The **circuit breaker** is the decision engine that evaluates every AI agent tool call and returns an [enforcement action](/concepts/enforcement-actions) — BYPASS, ENHANCE, HIJACK, REASK, or KILL. It operates on the hot path between the proxy and the LLM provider, so every millisecond matters.
+The **circuit breaker** is the decision engine that evaluates every AI agent tool call and returns an [enforcement action](/concepts/enforcement-actions) — BYPASS, ENHANCE (from a control plane's evaluator), HIJACK, REASK, or KILL. It operates on the hot path between the proxy and the LLM provider, so every millisecond matters.
 
 **Design goals:**
 - Evaluation is in-process with no model call. Cost is measured per payload size in `packages/proxy/benches` — there is no single figure, because it is dominated by request size.
@@ -19,18 +19,40 @@ The **circuit breaker** is the decision engine that evaluates every AI agent too
 
 Two different paths evaluate a request, and it is worth keeping them apart.
 
-**Model requests** go through the proxy, which calls `POST /api/v1/policy/check` on the control
-plane (`routes/evaluate.ts`) — the budget and loop-governance gates below.
+**Model requests** go through the proxy. A standalone proxy (no control-plane URL, the open-core
+default) applies its own daily spend cap and makes no policy call. With a control plane, the proxy
+calls `POST /api/v1/policy/check` on it (`routes/evaluate.ts`) — the budget and loop-governance
+gates below.
 
-**Tool calls** are evaluated at the [hook gate](/concepts/enforcement-actions#how-a-verdict-is-decided),
-a separate endpoint with its own order of checks. That is where SSO-group
-clearance runs on the server (see [§3](#_3-sso-group-clearance) below), and the
-local gates apply the same decision from the policy snapshot; neither is part of
-the model-request path. Loop *detection* is different again: it
+**Tool calls** are decided by the [gates](/concepts/enforcement-actions#how-a-verdict-is-decided),
+with their own order of checks: locally from the policy snapshot, and with a
+control plane also at its hook gate endpoint, where SSO-group clearance runs on
+the server (see [§3](#_3-sso-group-clearance) below). Neither is part of the
+model-request path. Loop *detection* is different again: it
 is an anomaly detector running in-process in the proxy, not a control-plane
 call.
 
-The proxy-side model-request sequence:
+The proxy-side model-request sequence, standalone:
+
+```
+Model request arrives at proxy (:4000)
+              │
+              ▼
+     ┌────────────────┐
+     │ Daily spend    │ ◀── maxDailyBudgetUsd in ~/.intutic/config.json
+     │ cap (local)    │     (default $10) less today's spend on this machine
+     └────────┬───────┘
+              ├── over the cap ──▶ 429 OVERAGE_HARD_CAP_EXCEEDED
+              │ pass
+              ▼
+     On to the proxy's own checks (DLP, rules, detectors); no policy pre-check
+```
+
+The cap refuses a request whose estimated cost exceeds what is left of the day's budget; see
+[Budgets](/guide/budgets). With no control plane the workspace hard-cap check answers clear, so
+this is the only spend cap a standalone proxy applies.
+
+With a control plane, the sequence is:
 
 ```
 Model request arrives at proxy (:4000)

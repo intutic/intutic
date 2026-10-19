@@ -5,25 +5,46 @@ Intutic is a **transparent governance layer** that sits between your AI agents a
 ## Architecture Overview
 
 ```
-┌──────────────┐  LLM calls  ┌────────────────────────┐        ┌───────────────┐
-│  Claude Code │────────────▶│     Proxy Gateway      │───────▶│  LLM Provider │
-│  Cursor      │             │  DLP · detectors ·     │        │  (Anthropic,  │
-│  Aider       │             │  SOP rules · budgets   │        │   OpenAI, …)  │
-│  Windsurf    │             └───────────┬────────────┘        └───────────────┘
-│  Antigravity │                         │ policy check, key context,
-│  Codex       │                         │ SOP snapshot, traces
-│  OpenHands   │ hook events ┌───────────▼──────────────────────────────────┐
-│  n8n         │────────────▶│            Intutic Control Plane             │
-└──────────────┘             │  ┌───────────┐  ┌──────┐  ┌───────────────┐  │
-                             │  │  Circuit  │──│ PCAS │  │  SOP Registry │  │
-                             │  │  Breaker  │  │      │  │               │  │
-                             │  └───────────┘  └──────┘  └───────────────┘  │
-                             │  ┌───────────┐  ┌──────┐                     │
-                             │  │  FinOps   │  │  ARE │                     │
-                             │  │  Ledger   │  │      │                     │
-                             │  └───────────┘  └──────┘                     │
-                             └──────────────────────────────────────────────┘
+┌──────────────────┐  re-read every 30 s
+│ .intutic/sops/   │────────────────────────────────────────────┐
+└────────┬─────────┘                                            │
+         │ intutic gates install, and                           │
+         │ intutic start on each change                         ▼
+         ▼                                         ┌───────────────────────┐      ┌───────────────┐
+┌──────────────────┐ ┌──────────────┐  LLM calls   │     Proxy :4000       │─────▶│  LLM Provider │
+│ Gates, rules     │ │  Claude Code │─────────────▶│ DLP · WASM/Rego       │      │  (Anthropic,  │
+│ files and policy │ │  Cursor      │              │ SOP rules · detectors │◀─────│   OpenAI, …)  │
+│ snapshot         │ │  Aider       │◀─────────────│ daily cap             │      └───────────────┘
+└────────┬─────────┘ │  Codex  …    │  response,   │ response gate         │
+         │ read by   └──────┬───────┘  or refusal  └───────────┬───────────┘
+         ▼                  │                                  │
+┌──────────────────┐        │ each tool call                   │ decide: rules on tool
+│ Hook / SDK gate: │◀───────┘                                  │ calls, on: response
+│ allow or refuse  │                                           │
+└────────┬─────────┘                                           ▼
+         │ decide: rules               ┌───────────────────────────────────────┐
+         └────────────────────────────▶│ Decide engine: your self-hosted model │
+                                       └───────────────────────────────────────┘
+
+┌──────────────┐  /v1/systemone   ┌───────────────────────┐  DLP · egress ·    ┌────────────────┐
+│   Your app   │─────────────────▶│     Proxy :4000       │───────────────────▶│ Decision model │
+│              │  /v1/decisions   │                       │  version pin · log │                │
+└──────────────┘                  └───────────────────────┘                    └────────────────┘
+
+┌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐
+┆ Optional, not part of open core: a control plane (intutic login, then intutic connect).         ┆
+┆ It syncs SOPs into the same files and adds the proxy's policy pre-check, workspace budgets,     ┆
+┆ the hook-gate endpoint the gate SDKs call, and trace storage for review. Without one,           ┆
+┆ everything above runs as drawn.                                                                 ┆
+└╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘
 ```
+
+Everything above the dashed box works with no account and no control plane:
+
+- **Tool calls.** `intutic gates install` compiles `.intutic/sops/` into a gate and a rules file for each harness and into the policy snapshot every gate reads (`~/.intutic/hooks/policy-snapshot.rules`); `intutic start` writes them again whenever `.intutic/sops/` changes. Before each tool call runs, the harness's hook gate, or a [gate SDK](/reference/gate-sdk) in your agent's code, decides it locally from the snapshot.
+- **Model calls.** The proxy on `:4000` checks each request (DLP, WASM/Rego rules, the SOPs it re-reads from `.intutic/sops/` every 30 seconds, anomaly detectors, the machine's daily spend cap) before forwarding it, and its response gate checks the tool calls in each response before the agent sees them.
+- **`decide:` rules.** A SOP rule that needs judgement is asked of a decide engine you host, on this machine or your own network. The gates ask it about a tool call every deterministic check allowed; the proxy asks it about a response's tool calls and, for `on: response` rules, its text. See [Decide](/guide/decide).
+- **Decision traffic.** Your own app's calls to a decision model (`/v1/systemone`, `/v1/decisions`) go through the proxy too: DLP on the state, the egress policy, a version pin and a local log. See [Decision Traffic](/guide/decision-traffic).
 
 ## The Proxy Gateway
 
@@ -65,12 +86,12 @@ When a streaming response from an LLM provider finishes (not on the OpenAI Respo
 
 ## Enforcement Actions (PCAS)
 
-**PCAS** (Policy-Controlled Agent Sandbox) evaluates every request against your SOPs and applies one of five enforcement actions:
+**PCAS** (Policy-Controlled Agent Sandbox) evaluates every request against your SOPs and applies one of these enforcement actions. The proxy decides BYPASS, HIJACK, REASK and KILL itself; ENHANCE comes only from a control plane's evaluator:
 
 | Action | What happens | When it's used |
 |--------|--------------|----------------|
 | **BYPASS** | Request passes through unmodified | Compliant with all SOPs |
-| **ENHANCE** | Request passes through with governance annotations or warnings attached | SOP suggests improvements |
+| **ENHANCE** | Request passes through with governance annotations or warnings attached | A control plane's evaluator suggests improvements |
 | **HIJACK** | Request is modified or steered rather than stopped: an advisory finding is recorded and the request goes ahead | Findings that should redirect the agent, not stop it |
 | **REASK** | Request is refused with the reason, so the agent can correct course and retry; repeated trips escalate to KILL | Structural thresholds (repeats, cycles, depth, fan-out) |
 | **KILL** | Request is blocked entirely | Policy violation, budget breach, deterministic anomaly (loop, forbidden succession, credential sweep) |

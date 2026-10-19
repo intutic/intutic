@@ -6,8 +6,9 @@
  * control plane. This writes them from this machine alone: the gate per
  * recorded harness, the rules files from the local `.intutic/sops`, and a
  * policy snapshot with the built-in tiers and the local `review_before:`
- * tokens, which refuse rather than hold (nothing could approve a hold). The
- * harnesses' LLM traffic is routed through the local proxy only with
+ * tokens, which refuse rather than hold (nothing could approve a hold), and
+ * the bundled agent skills (Kitkat and the rule author) where missing, as
+ * connect does. The harnesses' LLM traffic is routed through the local proxy only with
  * `--route`. See lib/localGates.ts.
  *
  * Refused while this machine has a login: connect owns the gates then.
@@ -21,7 +22,7 @@ import * as node_path from 'node:path'
 import { createHash } from 'node:crypto'
 import pc from 'picocolors'
 import { DECIDE_RECORD_TAG, decideRuleHash, decodeDecideRecord, HarnessType, validateDecideRule } from '@intutic/shared-types'
-import { SNAPSHOT_RULES } from '@intutic/sync-daemon'
+import { SNAPSHOT_RULES, writeBundledSkills } from '@intutic/sync-daemon'
 import { log } from '../lib/logger.js'
 import { loadConfig, loadCredentials, saveConfig } from '../config/store.js'
 import { installLocalGates, type LocalGate } from '../lib/localGates.js'
@@ -140,6 +141,9 @@ export async function runGatesInstall(opts: GatesInstallOptions): Promise<void> 
     dryRun: opts.dryRun,
     warn: (line) => log.warn(line),
   })
+  // The agent skills connect writes, so an agent here knows what a refusal
+  // means; only missing ones, and disconnect takes back the ones it wrote.
+  const skills = await writeBundledSkills(workspaceRoot, { dryRun: opts.dryRun })
 
   log.header(opts.dryRun ? 'intutic gates install would write:' : 'Intutic — local gates installed')
   log.field('Workspace', workspaceRoot)
@@ -150,7 +154,7 @@ export async function runGatesInstall(opts: GatesInstallOptions): Promise<void> 
       : 'off (add --route to also send the harnesses\' LLM traffic through the local proxy)',
   )
   console.log('')
-  for (const file of result.files) console.log(`  ${opts.dryRun ? 'would write' : 'wrote'} ${show(file)}`)
+  for (const file of [...result.files, ...skills]) console.log(`  ${opts.dryRun ? 'would write' : 'wrote'} ${show(file)}`)
   console.log('')
   log.info(
     `Policy snapshot: ${result.snapshot.ruleCount} rule(s)` +

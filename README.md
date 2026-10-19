@@ -43,24 +43,32 @@ flowchart TD
     subgraph Dev[" 💻 Developer machine "]
         Agent["🤖 AI coding agent<br><i>(Claude Code, Cursor, Codex, Aider, LangGraph, …)</i>"]
         SOP["📝 SOP rules<br><i>(.intutic/sops/)</i>"]
+        Installer["🧩 Gate installer<br><i>(intutic gates install · intutic start)</i>"]
         Gate["🚦 Tool-call gate<br><i>(harness hook; runs before each tool call)</i>"]
     end
 
     subgraph Proxy[" ⚡ Intutic proxy (:4000) "]
-        Checks["🔒 Checks on each request and response<br><i>SOP rules · WASM/Rego rules · DLP · anomaly detectors</i>"]
-        Verdicts["Verdicts<br><code>BYPASS</code> | <code>ENHANCE</code> | <code>HIJACK</code> | <code>REASK</code> | <code>KILL</code>"]
+        Checks["🔒 Checks on each request and response<br><i>SOP rules · WASM/Rego rules · DLP · anomaly detectors · daily budget</i>"]
+        Verdicts["Verdicts<br><code>BYPASS</code> | <code>HIJACK</code> | <code>REASK</code> | <code>KILL</code>"]
     end
 
     Providers["🌐 LLM providers<br><i>Anthropic · OpenAI · Gemini · Bedrock · Vertex · Azure · OpenRouter · …</i>"]
-    Installer["🧩 Gate installer<br><i>(intutic gates install)</i>"]
+    Decide["🧠 Decide engine<br><i>(your self-hosted model; only for <code>decide:</code> rules)</i>"]
+    App["🧾 Your app"]
+    DecisionModels["⚖️ Decision models<br><i>(System One · OpenAI Decisions)</i>"]
 
-    Agent -->|1. Model request| Proxy
-    Proxy -->|2. Allowed request| Providers
-    Providers -->|3. Response with tool calls| Proxy
-    Proxy -->|4. Response, or refusal| Agent
-    Agent -->|5. Each tool call| Gate
+    Agent -->|1 · Model request| Proxy
+    Proxy -->|2 · Allowed request| Providers
+    Providers -->|3 · Response with tool calls| Proxy
+    Proxy -->|4 · Response, or refusal| Agent
+    Agent -->|5 · Each tool call| Gate
     SOP -->|Reloaded every 30 s| Checks
-    Installer -->|Writes gates and rules files| Gate
+    SOP -->|Compiled| Installer
+    Installer -->|Writes gates, rules files and the policy snapshot| Gate
+    Gate -.->|"decide: rules"| Decide
+    Checks -.->|"decide: rules on tool calls and on: response"| Decide
+    App -->|"/v1/systemone · /v1/decisions"| Proxy
+    Proxy -->|DLP · egress policy · version pin · log| DecisionModels
 ```
 
 ---
@@ -117,25 +125,26 @@ That's it! Your agent is now governed by real-time safety guardrails.
 
 ---
 
-## 🛡️ The 5 PCAS Primitives
+## 🛡️ The PCAS Primitives
 
-Every tool call and prompt evaluated by Intutic produces one of five **PCAS Action Primitives**:
+Every request the proxy evaluates gets one of four **PCAS Action Primitives**:
 
 ```
- ┌──────────┐  ┌───────────┐  ┌────────────┐  ┌──────────┐  ┌──────────┐
- │  BYPASS  │  │  ENHANCE  │  │   HIJACK   │  │  REASK   │  │   KILL   │
- └────┬─────┘  └─────┬─────┘  └─────┬──────┘  └────┬─────┘  └────┬─────┘
-      │              │              │              │              │
-      ▼              ▼              ▼              ▼              ▼
- Direct Pass    Inject Safety  Redact Secrets    Refuse &      Hard-Abort
- (In-Process)    Context SOP    or Swap Args    Bounded Retry  Runaway Loop
+ ┌──────────┐  ┌────────────┐  ┌──────────┐  ┌──────────┐
+ │  BYPASS  │  │   HIJACK   │  │  REASK   │  │   KILL   │
+ └────┬─────┘  └─────┬──────┘  └────┬─────┘  └────┬─────┘
+      │              │              │              │
+      ▼              ▼              ▼              ▼
+ Direct Pass   Redact Secrets    Refuse &      Hard-Abort
+ (In-Process)   or Swap Args    Bounded Retry  Runaway Loop
 ```
 
 1. **`BYPASS`**: Standard safe execution passes through natively (in-process, no added network hop).
-2. **`ENHANCE`**: Inject contextual SOP prompt rules or architectural guidelines.
-3. **`HIJACK`**: Substitute dangerous tool parameters or redact secrets on the fly.
-4. **`REASK`**: Refuse the attempt and hand the reason back to the agent, which may retry a bounded number of times before the finding escalates to a block.
-5. **`KILL`**: Refuse the request outright, for example when a model's code-execution tool call carries a destructive operation (`rm -rf /`, `mkfs`, `dd if=`) or a session hits its loop caps.
+2. **`HIJACK`**: Substitute dangerous tool parameters or redact secrets on the fly.
+3. **`REASK`**: Refuse the attempt and hand the reason back to the agent, which may retry a bounded number of times before the finding escalates to a block.
+4. **`KILL`**: Refuse the request outright, for example when a model's code-execution tool call carries a destructive operation (`rm -rf /`, `mkfs`, `dd if=`) or a session hits its loop caps.
+
+A fifth, **`ENHANCE`**, is not a proxy verdict: a control plane's evaluator scores a sample ENHANCE, and open core ships no control plane. See [Enforcement Actions](https://docs.intutic.ai/concepts/enforcement-actions#enhance).
 
 ---
 

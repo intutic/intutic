@@ -113,6 +113,11 @@ describe('gates install, offline', () => {
     expect(commands).toContain(`node "${claudeGate}"`)
   })
 
+  it('writes the Kitkat skill, so an agent here can read what a refusal means', async () => {
+    const skill = await fs.readFile(join(ws, '.agents', 'skills', 'intutic-governance-kitkat', 'SKILL.md'), 'utf-8')
+    expect(skill).toContain('PREREQUISITE_UNMET')
+  })
+
   it("registers the Cursor gate beside the user's own hook", async () => {
     const hooks = JSON.parse(await fs.readFile(join(home, '.cursor', 'hooks.json'), 'utf-8'))
     expect(hooks.hooks.afterFileEdit).toEqual([{ command: './format.sh' }])
@@ -219,10 +224,14 @@ describe('intutic disconnect afterwards', () => {
       join(hooksDir, 'policy-snapshot.json'),
       join(hooksDir, 'verified', 'policy-snapshot.rules'),
       join(hooksDir, 'verified', 'policy-snapshot.json'),
+      join(ws, '.agents', 'skills', 'intutic-governance-kitkat', 'SKILL.md'),
+      join(ws, '.agents', 'skills', 'intutic-rule-author', 'SKILL.md'),
     ]) {
       expect(existsSync(file), file).toBe(false)
     }
     expect(existsSync(join(hooksDir, 'verified'))).toBe(false)
+    // The skill directories gates install created for them go too.
+    expect(existsSync(join(ws, '.agents'))).toBe(false)
   })
 
   it("keeps the user's SOPs", () => {

@@ -24,21 +24,26 @@ Intutic defends against three categories of threat:
 
 ## Data Flow
 
-Intutic runs in one of two modes, and they differ in exactly one respect: whether anything leaves your machine.
+Intutic runs in one of two modes, and they differ in one respect: whether anything is sent to Intutic.
 
 ### Standalone (open-core default)
 
 ```
 Developer → AI Agent → Intutic Proxy (:4000) → LLM Provider
-                            │
-                      ┌─────▼──────┐
-                      │  Policy    │
-                      │  Engine    │
-                      │  (WASM +   │
-                      │   SOPs)    │
-                      └────────────┘
-                       (nothing leaves
-                        this machine)
+               │            │
+               │      ┌─────▼──────┐
+               │      │  Policy    │
+               │      │  Engine    │
+               │      │  (WASM +   │
+               │      │   SOPs)    │
+               │      └─────┬──────┘
+               ▼            │ decide: rules
+         ┌───────────┐      ▼
+         │ Hook gate │──▶ Decide engine (optional: your own
+         │ (policy   │    model, on this machine or your network)
+         │ snapshot) │
+         └───────────┘
+   (nothing is sent to Intutic; telemetry stays on this machine)
 ```
 
 1. Every LLM request from an AI agent is routed through the **local Intutic proxy** on port 4000
