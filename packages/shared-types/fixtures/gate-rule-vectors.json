@@ -549,7 +549,7 @@
       "id": "bypass.intutic_disconnect",
       "subject": "any",
       "flags": "-",
-      "line": "bypass.intutic_disconnect\tblock\t-\tany\tGovernance bypass pattern: intutic disconnect removes the governance gates and rules files. Run it yourself, not through an agent.\tintutic(/cli)?(@[0-9A-Za-z.-]*)? disconnect[^a-zA-Z0-9_-]",
+      "line": "bypass.intutic_disconnect\tblock\t-\tany\tGovernance bypass pattern: intutic disconnect removes the governance gates and rules files. Run it yourself, not through an agent.\t(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) disconnect[^a-zA-Z0-9_-]",
       "argPattern": false,
       "held": [
         {
@@ -567,7 +567,7 @@
         {
           "tool": "Bash",
           "input": {
-            "command": " intutic disconnect --harness cursor "
+            "command": " node tools/cli/dist/cli.js disconnect --harness cursor "
           }
         }
       ],
@@ -610,6 +610,156 @@
           "prefix": " echo",
           "unit": " x",
           "suffix": " intutic disconnect",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "bypass.intutic_daemon_stop",
+      "subject": "any",
+      "flags": "-",
+      "line": "bypass.intutic_daemon_stop\tblock\t-\tany\tGovernance bypass pattern: intutic daemon stop and daemon uninstall take down the sync-daemon, which keeps the gates and policy snapshot in place, or with --proxy the governing proxy. Run it yourself, not through an agent.\t(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) (daemon (stop|uninstall)|uninstall-daemon)[^a-zA-Z0-9_-]",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic daemon stop "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npx @intutic/cli@3.0.2 daemon uninstall --proxy "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " node tools/cli/dist/cli.js uninstall-daemon;"
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic daemon status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic daemon start --proxy "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " turbo daemon stop "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "daemon and less than stop, repeated",
+          "prefix": " intutic",
+          "unit": " daemon sto",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "stop after a long command",
+          "prefix": " echo",
+          "unit": " x",
+          "suffix": " intutic daemon stop",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "bypass.intutic_logout",
+      "subject": "any",
+      "flags": "-",
+      "line": "bypass.intutic_logout\tblock\t-\tany\tGovernance bypass pattern: intutic logout clears the credentials the gates and sync-daemon use to fetch policy and upload the audit trail. Run it yourself, not through an agent.\t(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) logout[^a-zA-Z0-9_-]",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic logout "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npx -y @intutic/cli@latest logout && echo ok "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " node tools/cli/dist/cli.js logout;"
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " docker logout ghcr.io "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " gh auth logout "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic login "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "version tags, never the command",
+          "prefix": " npx ",
+          "unit": "intutic@1.",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "logout after a long command",
+          "prefix": " echo",
+          "unit": " x",
+          "suffix": " intutic logout",
           "length": 262144,
           "held": true,
           "tool": "Bash",
@@ -3677,6 +3827,81 @@
           "prefix": " cat",
           "unit": " x",
           "suffix": " .intutic/decide",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.intutic_credentials",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.intutic_credentials\tblock\t-\tany\tShell command references the governance-protected path .intutic/credentials\t\\.intutic/credentials",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .intutic/credentials "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .intutic/credentials "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .intutic/credentials /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .intutic/credential",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .intutic/credentials",
           "length": 262144,
           "held": true,
           "tool": "Bash",

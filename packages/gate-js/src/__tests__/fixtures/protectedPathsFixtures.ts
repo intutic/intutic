@@ -123,13 +123,34 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly FixturePattern[] = [
   },
   {
     id: 'bypass.intutic_disconnect',
-    source: 'intutic(/cli)?(@[0-9A-Za-z.-]*)? disconnect[^a-zA-Z0-9_-]',
+    source: '(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) disconnect[^a-zA-Z0-9_-]',
     severity: 'block',
     reason:
       'Governance bypass pattern: intutic disconnect removes the governance gates and rules files. ' +
       'Run it yourself, not through an agent.',
-    matches: [' intutic disconnect ', ' npx -y @intutic/cli@latest disconnect --keep-login ', ' intutic disconnect --harness cursor '],
+    matches: [' intutic disconnect ', ' npx -y @intutic/cli@latest disconnect --keep-login ', ' node tools/cli/dist/cli.js disconnect --harness cursor '],
     notMatches: [' intutic disconnects ', ' warp-cli disconnect ', ' docker network disconnect bridge web '],
+  },
+  {
+    id: 'bypass.intutic_daemon_stop',
+    source: '(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) (daemon (stop|uninstall)|uninstall-daemon)[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic daemon stop and daemon uninstall take down the sync-daemon, ' +
+      'which keeps the gates and policy snapshot in place, or with --proxy the governing proxy. ' +
+      'Run it yourself, not through an agent.',
+    matches: [' intutic daemon stop ', ' npx @intutic/cli@3.0.2 daemon uninstall --proxy ', ' node tools/cli/dist/cli.js uninstall-daemon;'],
+    notMatches: [' intutic daemon status ', ' intutic daemon start --proxy ', ' turbo daemon stop '],
+  },
+  {
+    id: 'bypass.intutic_logout',
+    source: '(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) logout[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic logout clears the credentials the gates and sync-daemon use to ' +
+      'fetch policy and upload the audit trail. Run it yourself, not through an agent.',
+    matches: [' intutic logout ', ' npx -y @intutic/cli@latest logout && echo ok ', ' node tools/cli/dist/cli.js logout;'],
+    notMatches: [' docker logout ghcr.io ', ' gh auth logout ', ' intutic login '],
   },
 ]
 
@@ -347,6 +368,7 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   '.intutic/events',
   '.intutic/env',
   '.intutic/decide',
+  '.intutic/credentials',
   '.claude/settings.json',
   '.claude/settings.local.json',
   '.cursor/hooks.json',

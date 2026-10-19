@@ -95,6 +95,11 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // for the other `.intutic` entries — `intutic decide lint` and `intutic
   // status` report its state instead.
   '.intutic/decide',
+  // The workspace credentials `intutic login` saves. Deleting them is
+  // `intutic logout` by another route: the daemon stops refreshing the policy
+  // snapshot and uploading the audit trail. A bare mention refuses reading
+  // them too, which keeps the API key out of an agent's context.
+  '.intutic/credentials',
 
   // Claude Code / Claude Desktop. `settings.local.json` loads at higher
   // precedence than `settings.json`, so protecting only the latter leaves the
@@ -728,7 +733,7 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly GuardPattern[] = assertGuardTa
   },
   {
     id: 'bypass.intutic_disconnect',
-    source: 'intutic(/cli)?(@[0-9A-Za-z.-]*)? disconnect[^a-zA-Z0-9_-]',
+    source: '(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) disconnect[^a-zA-Z0-9_-]',
     severity: 'block',
     reason:
       'Governance bypass pattern: intutic disconnect removes the governance gates and rules files. ' +
@@ -736,15 +741,58 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly GuardPattern[] = assertGuardTa
     rationale:
       'Needs the CLI\'s name before the word, unlike the decide rules, because `disconnect` is a ' +
       'subcommand of many tools (`docker network disconnect`, `warp-cli disconnect`). Matches `intutic`, ' +
-      '`@intutic/cli` and a version tag on either; `intutic disconnects`, the history listing, stays ' +
-      'usable. Refuses `--dry-run` too, which changes nothing — a regex cannot tell it apart wherever ' +
-      'it falls on the line. Does not catch `node .../cli.js disconnect`, an alias, a shell function, or ' +
-      'the words split by a quote or a line continuation.',
-    matches: [' intutic disconnect ', ' npx -y @intutic/cli@latest disconnect --keep-login ', ' intutic disconnect --harness cursor '],
+      '`@intutic/cli` and a version tag on either, and `node .../cli.js`; `intutic disconnects`, the ' +
+      'history listing, stays usable. Refuses `--dry-run` too, which changes nothing — a regex cannot ' +
+      'tell it apart wherever it falls on the line. Does not catch an alias, a shell function, or the ' +
+      'words split by a quote or a line continuation.',
+    matches: [' intutic disconnect ', ' npx -y @intutic/cli@latest disconnect --keep-login ', ' node tools/cli/dist/cli.js disconnect --harness cursor '],
     notMatches: [' intutic disconnects ', ' warp-cli disconnect ', ' docker network disconnect bridge web '],
     adversarial: [
       { name: 'version tags, never the command', prefix: ' npx ', unit: 'intutic@1.', held: false },
       { name: 'disconnect after a long command', prefix: ' echo', unit: ' x', suffix: ' intutic disconnect', held: true },
+    ],
+  },
+  {
+    id: 'bypass.intutic_daemon_stop',
+    source: '(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) (daemon (stop|uninstall)|uninstall-daemon)[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic daemon stop and daemon uninstall take down the sync-daemon, ' +
+      'which keeps the gates and policy snapshot in place, or with --proxy the governing proxy. ' +
+      'Run it yourself, not through an agent.',
+    rationale:
+      'The sync-daemon\'s drift guard rewrites a gate or rules file an agent removed, and its sync keeps ' +
+      'the policy snapshot current; `--mcp` and `--proxy` take down the other two governed paths. Needs ' +
+      'the CLI\'s name, as `bypass.intutic_disconnect` does, because `turbo daemon stop` and `nx daemon ' +
+      '--stop` are everyday commands. `daemon status`, `daemon start` and `install-daemon` stay usable. ' +
+      'Does not catch `launchctl` or `systemctl` run on the service directly, an alias, or the words split ' +
+      'by a quote or a line continuation.',
+    matches: [' intutic daemon stop ', ' npx @intutic/cli@3.0.2 daemon uninstall --proxy ', ' node tools/cli/dist/cli.js uninstall-daemon;'],
+    notMatches: [' intutic daemon status ', ' intutic daemon start --proxy ', ' turbo daemon stop '],
+    adversarial: [
+      { name: 'daemon and less than stop, repeated', prefix: ' intutic', unit: ' daemon sto', held: false },
+      { name: 'stop after a long command', prefix: ' echo', unit: ' x', suffix: ' intutic daemon stop', held: true },
+    ],
+  },
+  {
+    id: 'bypass.intutic_logout',
+    source: '(intutic(/cli)?(@[0-9A-Za-z.-]*)?|cli\\.js) logout[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic logout clears the credentials the gates and sync-daemon use to ' +
+      'fetch policy and upload the audit trail. Run it yourself, not through an agent.',
+    rationale:
+      'Without credentials the daemon stops refreshing the policy snapshot and stops uploading local ' +
+      'traces, so the workspace no longer sees what the agent does. Needs the CLI\'s name, as ' +
+      '`bypass.intutic_disconnect` does, because `docker logout`, `npm logout` and `gh auth logout` are ' +
+      'everyday commands. Deleting `~/.intutic/credentials.json` directly is the `.intutic/credentials` ' +
+      'path rule. Credentials kept in the OS keychain are not refused there. ' +
+      'Does not catch an alias, a shell function, or the words split by a quote or a line continuation.',
+    matches: [' intutic logout ', ' npx -y @intutic/cli@latest logout && echo ok ', ' node tools/cli/dist/cli.js logout;'],
+    notMatches: [' docker logout ghcr.io ', ' gh auth logout ', ' intutic login '],
+    adversarial: [
+      { name: 'version tags, never the command', prefix: ' npx ', unit: 'intutic@1.', held: false },
+      { name: 'logout after a long command', prefix: ' echo', unit: ' x', suffix: ' intutic logout', held: true },
     ],
   },
 ])
