@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.3] - 2026-10-19
+
 ### Changed
 
 - **The hook gates refuse more ways for an agent to switch governance off.**
