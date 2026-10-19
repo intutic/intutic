@@ -345,11 +345,50 @@ jobs:
           name: cli-standalone-binaries
           path: dist-cli/*
 
+  # pkg signs a macOS binary only where it finds `ldid`, which Ubuntu does not
+  # package, so the binaries above come out unsigned ("Unable to sign the macOS
+  # executable"), and Apple silicon kills an unsigned arm64 binary at launch
+  # (exit 137): every cli-macos-arm64 through 3.0.0 shipped that way. An
+  # ad-hoc signature is all it needs, and macOS's own codesign makes one.
+  # Running the arm64 binary here is the macOS smoke test the release lacked.
+  sign-macos-cli:
+    name: Sign and smoke-test the macOS CLI binaries
+    needs: build-cli-binaries
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/cli/package.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: cli-standalone-binaries
+          path: dist-cli/
+      - name: Ad-hoc sign, then run the arm64 binary
+        run: |
+          set -euo pipefail
+          for b in dist-cli/cli-macos-arm64 dist-cli/cli-macos-x64; do
+            codesign --sign - --force "$b"
+            codesign --verify --verbose "$b"
+          done
+          [ "$(uname -m)" = arm64 ] || { echo "::error::this check needs an Apple silicon runner"; exit 1; }
+          chmod +x dist-cli/cli-macos-arm64
+          want="$(node -p "require('./tools/cli/package.json').version")"
+          got="$(HOME="$(mktemp -d)" dist-cli/cli-macos-arm64 --version)"
+          echo "cli-macos-arm64 --version: $got"
+          [ "$got" = "$want" ] || { echo "::error::cli-macos-arm64 reports '$got', expected $want"; exit 1; }
+      # Same name, so the release downloads the signed copies.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cli-standalone-binaries
+          path: dist-cli/*
+          overwrite: true
+
   github-release:
     name: Create GitHub Release & Upload Assets
     # Deliberately does NOT depend on publish-npm — the dependency runs the
     # other way now, so the release assets land before the CLI is installable.
-    needs: [build-rust-proxy, build-cli-binaries]
+    needs: [build-rust-proxy, sign-macos-cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write
