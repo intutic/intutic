@@ -600,7 +600,7 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
 
     let requires = parse_rules(front, "requires_before:");
     let forbids = parse_rules(front, "forbid_after:");
-    // 3.1 keys. Modifier keys that strengthen are read at any
+    // 3.0 keys. Modifier keys that strengthen are read at any
     // indentation (`enum_value`); the two that weaken — `open_actions:` and
     // `node_kind_allow:` — at the top level only, like `mode:`.
     let mut lld75_errors: Vec<String> = Vec::new();
@@ -2118,7 +2118,7 @@ pub fn governance_fields_with_lanes(
     }
 }
 
-/// The action tokens closed reversibility lanes hold for `role` (3.1
+/// The action tokens closed reversibility lanes hold for `role` (3.0
 /// §5.2), once each, in the class table's order:
 ///
 /// 1. each applicable SOP that declares `closed_lanes:` holds the tokens of
@@ -5281,7 +5281,7 @@ mod workspace_cache_version_tests {
 
 #[cfg(test)]
 mod lld75_key_tests {
-    //! The front-matter keys 3.1 added (§1.4): defaults, strongest-wins,
+    //! The front-matter keys 3.0 added (§1.4): defaults, strongest-wins,
     //! unknown values enforcing, the two top-level-only keys, and lanes.
     use super::*;
     use crate::plugins::anomaly::actions::LaneClass;
@@ -5459,7 +5459,7 @@ mod lld75_key_tests {
 
 #[cfg(test)]
 mod lld75_sops_vectors {
-    //! 3.1's shared vectors that need the front-matter parser:
+    //! 3.0's shared vectors that need the front-matter parser:
     //! `lane-vectors.json` (`laneHoldTokens`, `frontMatter`) and
     //! `scope-plan-vectors.json` (`collectScopePaths`, `collectPlanSteps`).
     use super::*;

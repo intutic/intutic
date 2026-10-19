@@ -237,7 +237,7 @@ export const ServedGateRecordResponse = z.object({
 })
 export type ServedGateRecordResponse = z.infer<typeof ServedGateRecordResponse>
 
-/** `GET /api/v1/policy/resolve`, with the 3.1 fields. */
+/** `GET /api/v1/policy/resolve`, with the 3.0 fields. */
 export const PolicyResolveGatesResponse = PolicyResolveResponse.extend({
   gateRecords: z.array(ServedGateRecordResponse).describe('Qualified `requires_before`, enforced `scope_paths` and `plan_approval` of the enforced SOPs with no `roles:`.'),
   holdRules: z.array(ServedHoldRuleResponse).describe('Closed-lane holds (SOP `closed_lanes:` and the workspace `closedLanes`) and revert holds.'),

@@ -172,7 +172,7 @@ pub struct PrerequisiteDenial {
     pub prerequisite: String,
     /// `requires_before.<first>-><then>`.
     pub rule: String,
-    /// Why it is unmet, in 3.1's words.
+    /// Why it is unmet, in 3.0's words.
     pub reason: String,
 }
 
@@ -682,7 +682,7 @@ pub async fn gate_response_decide(
     None
 }
 
-/// The argument-level checks 3.1 added to the response gate: qualified
+/// The argument-level checks 3.0 added to the response gate: qualified
 /// prerequisites (§2.4), the enforced path scope (§4.1) and the node kind's
 /// tool limits (§9.2). Each is inert until declared; with none declared the
 /// gate never looks at a response.

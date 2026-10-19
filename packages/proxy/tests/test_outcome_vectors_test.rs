@@ -1,4 +1,4 @@
-//! `packages/shared-types/fixtures/test-outcome-vectors.json` (the 3.1
+//! `packages/shared-types/fixtures/test-outcome-vectors.json` (the 3.0
 //! test outcome), run against the proxy's port in `plugins::anomaly::outcome`. The
 //! TypeScript (`testOutcome.ts`) and Python (`test_outcome.py`) ports run the
 //! same file. `parseState` is the hook gates' state-file format, which the

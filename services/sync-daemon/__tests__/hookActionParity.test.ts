@@ -56,7 +56,7 @@ describe('hook and proxy classify the same commands', () => {
     expect(hookNeedles('action:deploy').length).toBeGreaterThan(5)
   })
 
-  // 3.1: the gate classifies run_tests (for requires_before [ok])
+  // 3.0: the gate classifies run_tests (for requires_before [ok])
   // and every reversibility-lane token with phrases, so a lane hold holds
   // before the call runs. The Rust lists for the new tokens land with the
   // proxy's half of that batch; until then these rows are red on this branch.

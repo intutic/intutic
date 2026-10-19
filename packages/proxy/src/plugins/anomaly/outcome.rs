@@ -137,7 +137,7 @@ pub struct Summary {
     pub no_tests: bool,
 }
 
-/// 3.1, in order: a non-zero integer exit code, `isError` or
+/// 3.0, in order: a non-zero integer exit code, `isError` or
 /// `success: false` fails; a summary with failures fails; no test passing
 /// while a summary says none ran fails (`no_tests`); exit 0 passes; a summary
 /// with a pass passes; anything else is unknown.
@@ -679,7 +679,7 @@ pub fn qualified_rules(requires_before: &[(String, String, bool)]) -> Vec<(Strin
         .collect()
 }
 
-/// 3.1's shared vector files, for the unit tests that hold this crate to
+/// 3.0's shared vector files, for the unit tests that hold this crate to
 /// them. A missing file fails the test: the vectors are the contract.
 #[cfg(test)]
 pub(crate) fn lld75_fixture(name: &str) -> Option<serde_json::Value> {

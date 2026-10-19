@@ -1561,7 +1561,7 @@ mod coverage_tests {
         assert!(DetectorRegistry::corroborated_finding(&[steer]).is_none());
     }
 
-    /// 3.1: `context_overlap` is advisory and never corroborates —
+    /// 3.0: `context_overlap` is advisory and never corroborates —
     /// it neither counts toward the two-detector threshold nor is escalated.
     #[test]
     fn context_overlap_never_corroborates() {

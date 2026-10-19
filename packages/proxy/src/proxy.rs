@@ -10273,7 +10273,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         );
     }
     let response_denial = response_denial.or(hook_denial);
-    // 3.1's argument checks — qualified prerequisites, the enforced path
+    // 3.0's argument checks — qualified prerequisites, the enforced path
     // scope, the node kind's tool limits — after every deterministic gate
     // above and before the decide rules (§14's order of evidence).
     let response_denial = response_denial.or_else(|| {
@@ -15287,7 +15287,7 @@ mod lld75_proxy_tests {
         assert!(long.len() <= 512 && long.is_char_boundary(long.len()));
     }
 
-    /// 3.1: an OPAQUE workspace's agent is told the run is held and
+    /// 3.0: an OPAQUE workspace's agent is told the run is held and
     /// how to release it, never which rule held it.
     #[test]
     fn the_pending_review_message_hides_the_rule_under_opaque() {

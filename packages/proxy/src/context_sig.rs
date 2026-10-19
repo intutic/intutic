@@ -126,8 +126,9 @@ impl ContextSig {
             return None;
         }
         let mut bins = [EMPTY_BIN; SIG_BINS];
-        for (bin, chunk) in bins.iter_mut().zip(raw.chunks_exact(8)) {
-            *bin = u64::from_be_bytes(chunk.try_into().ok()?);
+        let (chunks, _) = raw.as_chunks::<8>();
+        for (bin, chunk) in bins.iter_mut().zip(chunks) {
+            *bin = u64::from_be_bytes(*chunk);
         }
         Some(ContextSig { bins, bytes })
     }

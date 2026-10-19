@@ -288,7 +288,13 @@ function scopeDiffPath(raw: string, prefix: string): string | null {
   let p = raw
   const tab = p.indexOf('\t')
   if (tab !== -1) p = p.slice(0, tab)
-  p = p.replace(/^[ ]+/, '').replace(/[ ]+$/, '')
+  // Spaces only (not tabs), trimmed by index: a `/[ ]+$/` backtracks
+  // quadratically on a long run of spaces that is not at the end.
+  let start = 0
+  let end = p.length
+  while (start < end && p.charCodeAt(start) === 32) start++
+  while (end > start && p.charCodeAt(end - 1) === 32) end--
+  p = p.slice(start, end)
   if (p.length >= 2 && p.charAt(0) === '"' && p.charAt(p.length - 1) === '"') p = p.slice(1, -1)
   if (p === '/dev/null' || p === '') return null
   if (prefix !== '' && p.slice(0, prefix.length) === prefix) p = p.slice(prefix.length)

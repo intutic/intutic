@@ -179,7 +179,7 @@ pub struct NodeIdentity {
     pub graph_node_count: Option<u32>,
 }
 
-/// The 3.1 switches that turn an advisory check into an enforcing one,
+/// The 3.0 switches that turn an advisory check into an enforcing one,
 /// resolved from the SOPs in force for the node's role.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EnforceModes {
@@ -411,7 +411,7 @@ pub struct RequestContext {
     #[serde(flatten)]
     pub node: NodeIdentity,
 
-    // ── 3.1 inputs ───────────────────────────────────────────────────
+    // ── 3.0 inputs ───────────────────────────────────────────────────
     //
     // All `#[serde(skip)]`: not exposed to WASM rules in this batch (Q4), and
     // absent from a stored snapshot, so a replayed context reads them empty.

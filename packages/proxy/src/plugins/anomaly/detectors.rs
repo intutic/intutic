@@ -4876,7 +4876,7 @@ mod sop_key_replay_vectors {
 
 #[cfg(test)]
 mod lld75_detector_tests {
-    //! 3.1: the qualified prerequisite (§2.4), the enforce modes (§4.1)
+    //! 3.0: the qualified prerequisite (§2.4), the enforce modes (§4.1)
     //! and the scope every finding now carries (§6.2).
     use super::test_support::{base_ctx, ctx_with_changes};
     use super::*;

@@ -806,13 +806,13 @@ regardless of what it claims to be.
 
 ### Reversibility lanes
 
-<!-- 3.1: the review-hold text for closed_lanes: / open_actions: and the
+<!-- 3.0: the review-hold text for closed_lanes: / open_actions: and the
 reversibility class of each action token goes here (sent by WS1, added by the
 integrator). -->
 
 ### Learning from reverts
 
-<!-- 3.1: the learning-edge text for revert and rejection rates and the
+<!-- 3.0: the learning-edge text for revert and rejection rates and the
 revertLane setting goes here (sent by WS5, added by the integrator). It needs a
 connected workspace: add the Cloud badge to this heading and update the intro's
 count of Cloud-badged sections with it. -->

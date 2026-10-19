@@ -315,7 +315,7 @@ export interface ResolvedPolicy {
    */
   gateRecords?: ServedGateRecord[]
   /**
-   * The workspace's lane holds (3.1: `sop.lane.<class>.<token>`,
+   * The workspace's lane holds (3.0: `sop.lane.<class>.<token>`,
    * from its SOPs' `closed_lanes:` and its `closedLanes` setting) and revert
    * holds (§7.3: `revert.<token>`), compiled by resolve (`holdRules`,
    * `laneHoldPatterns` in `@intutic/shared-types`) in the snapshot's rule

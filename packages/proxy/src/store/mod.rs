@@ -1194,7 +1194,7 @@ pub trait ControlPlaneCache: Send + Sync + 'static {
     async fn transition_baseline(&self, workspace_id: &str) -> Option<String>;
 
     /// The workspace's revert and rejection rates (`v2:revert:{workspace}`,
-    /// 3.1): a JSON object `{"<role>|<subject>": {"r": revert_rate,
+    /// 3.0): a JSON object `{"<role>|<subject>": {"r": revert_rate,
     /// "j": rejection_rate}}` the control plane's daily sweep publishes.
     /// `None` when there is none — a local deployment, or no sweep yet —
     /// which holds nothing.

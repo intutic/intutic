@@ -43,7 +43,7 @@ export const SNAPSHOT_FORMAT_RECORD_TAG = '@format'
 export const SNAPSHOT_FORMAT = 3
 /**
  * The format a snapshot carrying decide lines and no `@rule` record is
- * written in, so such a snapshot stays byte-identical to what 3.0 wrote. One
+ * written in, so such a snapshot stays byte-identical to one written before rule records existed. One
  * with any `@rule` record is format 3 (`RULE_SNAPSHOT_FORMAT`).
  */
 export const DECIDE_SNAPSHOT_FORMAT = 2

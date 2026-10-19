@@ -1303,7 +1303,7 @@ pub struct StreamHold {
     policies: Vec<SqlGuardPolicy>,
     hook_rules: crate::plugins::hook_rules::HookRuleSet,
     decide_tools: std::collections::BTreeSet<String>,
-    /// 3.1's argument checks — qualified prerequisites, the enforced
+    /// 3.0's argument checks — qualified prerequisites, the enforced
     /// path scope and node-kind tool limits — whose blocks are held whole
     /// like the SQL guard's.
     arg_gates: crate::plugins::response_gate::ArgGates,
@@ -1348,7 +1348,7 @@ pub struct HoldStep {
     /// names: ask the engine, then release it or refuse it. Nothing more may
     /// be pushed until it is released.
     pub decide: Option<DecideCall>,
-    /// Withhold the block: a 3.1 argument check refuses it (only when
+    /// Withhold the block: a 3.0 argument check refuses it (only when
     /// neither a SQL refusal nor a hook rule already does).
     pub refuse_gate: Option<(crate::plugins::response_gate::DenialReason, u64)>,
 }

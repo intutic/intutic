@@ -16,7 +16,7 @@
  */
 
 /** The proxy release that first reads the newer keys. */
-export const LOOP_GRAPH_GATE_PROXY_VERSION = '3.1.0'
+export const LOOP_GRAPH_GATE_PROXY_VERSION = '3.0.0'
 
 /**
  * Each key, as written at the start of its line, and the proxy version that

@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.1.0] - Unreleased
+## [Unreleased]
 
 ### Added
 
@@ -51,25 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and hooks), `OFF_PLAN`, `PLAN_NOT_APPROVED` (gates and hooks),
   `NODE_KIND_DENIED` (gateway, 403) and `LOOP_RUN_PENDING_REVIEW` for a
   paused run.
-
-### Changed
-
-- **Hook gate body v23.** A policy snapshot that carries any of the new rule
-  records is written in format 3; one without them is byte-identical to
-  3.0's.
-- **Older gates fail closed.** A gate older than v23 (and the 3.0 SDKs) cannot
-  evaluate the new rules, so it refuses what each covers through a
-  `<kind>-fallback:` line in the snapshot: the gated call for a qualified
-  `requires_before`, every file change for `scope_paths_mode: enforce`, every
-  call for `plan_approval:`. Lane holds use phrase rules every gate since v12
-  reads, so older gates hold them too (a force push by the partial phrase
-  `git push --force`); one approval releases a held call at every gate. A
-  gateway older than 3.1.0 ignores the new keys; the control plane warns when
-  a SOP uses a key the workspace's gateway is too old to read.
-
-## [Unreleased]
-
-### Added
 
 - **Decide rules: decision guardrails on a self-hosted model.** SOP front
   matter accepts `decide:` lines, one JSON rule per line. A rule asks a
@@ -130,6 +111,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     tell the app to abstain or ask a person.
   - **Records:** each call is one Governed Request and gets a record in the
     decision-traffic log.
+
+### Changed
+
+- **Hook gate body v23.** A policy snapshot that carries any of the new rule
+  records is written in format 3; one without them is unchanged.
+- **Older gates fail closed.** A gate older than v23 (and the 2.9 SDKs) cannot
+  evaluate the new rules, so it refuses what each covers through a
+  `<kind>-fallback:` line in the snapshot: the gated call for a qualified
+  `requires_before`, every file change for `scope_paths_mode: enforce`, every
+  call for `plan_approval:`. Lane holds use phrase rules every gate since v12
+  reads, so older gates hold them too (a force push by the partial phrase
+  `git push --force`); one approval releases a held call at every gate. A
+  gateway older than 3.0.0 ignores the new keys; the control plane warns when
+  a SOP uses a key the workspace's gateway is too old to read.
 
 ### Deprecated
 

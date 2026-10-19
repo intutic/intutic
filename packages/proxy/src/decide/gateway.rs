@@ -1338,7 +1338,7 @@ mod lld75_lane_tests {
         );
     }
 
-    /// 3.1: a decide `allow` never releases a hold. Lane holds are
+    /// 3.0: a decide `allow` never releases a hold. Lane holds are
     /// `review_before:` entries the request path holds on before and whatever
     /// any decide rule says — `GatewayRules` has no input from, or output to,
     /// the hold set — so a rule pinned to allow everything leaves a closed

@@ -139,7 +139,7 @@ export interface GateEntry {
   /** Detail behind `mcpCalls` — what was confirmed, how, and what was not. */
   mcpNote: string
   /**
-   * How this gate honours an approved bypass of a hold it refused (3.1
+   * How this gate honours an approved bypass of a hold it refused (3.0
    * §10):
    *
    * - `'file'` — the shared gate body's bypass check reads the daemon's

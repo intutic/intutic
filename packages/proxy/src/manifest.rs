@@ -917,7 +917,7 @@ mod tests {
         );
     }
 
-    /// 3.1: a result pairs with its call by id, in each wire shape.
+    /// 3.0: a result pairs with its call by id, in each wire shape.
     #[test]
     fn results_pair_with_their_calls_by_id_in_every_wire_shape() {
         // Anthropic: tool_use.id / tool_result.tool_use_id, with is_error.

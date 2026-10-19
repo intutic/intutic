@@ -432,7 +432,7 @@ impl FindingWire {
             wire.tool_name = Some(d.tool.clone());
             return Some(wire);
         }
-        // 3.1's argument checks, each under its own detector id.
+        // 3.0's argument checks, each under its own detector id.
         let lld75 = match &denial.reason {
             crate::plugins::response_gate::DenialReason::Prerequisite(p) => Some((
                 "requires_before",

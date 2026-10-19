@@ -37,7 +37,7 @@ describe('versions', () => {
 describe('sopKeysNeedingNewerProxy', () => {
   const front = '\nrequires_before: action:run_tests[ok] -> action:deploy\nscope_paths_mode: enforce\nplan_approval: strict\n  closed_lanes: irreversible\nnode_kind_allow: spawn\n'
   it('lists the keys an older proxy ignores', () => {
-    expect(sopKeysNeedingNewerProxy(front, '3.0.0')).toEqual([
+    expect(sopKeysNeedingNewerProxy(front, '2.9.1')).toEqual([
       { key: 'requires_before:[ok]', since: LOOP_GRAPH_GATE_PROXY_VERSION },
       { key: 'scope_paths_mode:', since: LOOP_GRAPH_GATE_PROXY_VERSION },
       { key: 'closed_lanes:', since: LOOP_GRAPH_GATE_PROXY_VERSION },

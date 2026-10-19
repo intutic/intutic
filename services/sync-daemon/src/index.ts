@@ -108,7 +108,7 @@ export {
 export type { LocalHoldMode, ServedDecideRule, ServedHoldRule, ServedRevertHold } from './lib/policySnapshot.js'
 export { compileGateRecords, parseServedGateRecords } from './lib/policySnapshot.js'
 export type { CompiledGateRecords } from './lib/policySnapshot.js'
-// 3.1 — the approved-plans cache. The rule records, test outcomes, scope
+// 3.0 — the approved-plans cache. The rule records, test outcomes, scope
 // match and lanes are @intutic/shared-types' (gateRuleRecord.ts,
 // testOutcome.ts, scopeMatch.ts, lanes.ts); import them from there.
 export {

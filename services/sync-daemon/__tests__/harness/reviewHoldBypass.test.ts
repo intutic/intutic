@@ -18,7 +18,7 @@
  *      the original hold and who approved it;
  *  (d) a different command under the same rule gets its own hash and is held.
  *
- * And since 3.1: the in-process gates (OpenCode's plugin, Pi's
+ * And since 3.0: the in-process gates (OpenCode's plugin, Pi's
  * extension, OpenClaw's plugin) hold and honour a bypass the same way, driven
  * through `inProcessGates.ts`; and the hold ids that batch adds — lane holds
  * `sop.lane.<class>.<token>` and revert holds `revert.<subject>`, both on the
@@ -368,12 +368,12 @@ describe('lane and revert holds: held and bypassed at every gate', () => {
 })
 
 /**
- * A force push is held by two rules under ONE id (3.1,
+ * A force push is held by two rules under ONE id (3.0,
  * `laneHoldPatterns`): the `action` rule a v23 classifier matches (the
  * `git push` phrase and a whole-word --force or -f), and the partial
  * `phrase` rule `git push --force|git push -f` a gate older than v23 holds
  * by. The batch first shipped the phrase rule as `<id>.legacy`, which v23
- * gates skipped; the 3.1 SDKs (gate-js, intutic-clawde) read the same
+ * gates skipped; the 3.0 SDKs (gate-js, intutic-clawde) read the same
  * snapshot without skipping it, so approving the action-rule hold left the
  * retry held again under `.legacy`. With one id:
  *  (i)   a v23 gate evaluates only the action rule (it skips a phrase rule
