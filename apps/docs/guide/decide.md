@@ -130,9 +130,14 @@ A rule enforces on a call only when all of these hold. Otherwise it runs as shad
 | :--- | :--- |
 | Its `rollout` is `enforce` | `rollout` |
 | `intutic decide disable` is not in force on this machine | `local-disable` |
+| Its SOP is not in `mode: shadow` | `server-shadow` |
 | The workspace's intervention mode is not silent logging | `silent-log` |
 | It has at least one pin | `no-pins` |
 | The engine's model digest on this call matches a pin | `not_evaluated` |
+
+<!-- ENTERPRISE_ONLY_START -->
+With a control plane, `server-shadow` is also the reason when the rule comes from a guardrail approved for shadow, or when the server's switch is `INTUTIC_DECIDE=shadow` ([configuration](/reference/configuration)).
+<!-- ENTERPRISE_ONLY_END -->
 
 The engine must also pass its [canary](#the-canary). A failed canary does not drop a rule to shadow: it makes the engine unavailable.
 

@@ -264,9 +264,10 @@ func (r *guardrailResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"tokens":           irList("`review_before` (required, 1 to 16): tool names or action tokens."),
 			"arg_contains":     irList("`hook_rule`: fire only when the serialised tool input contains every one of these literals (at most 4, each 1 to 64 characters, no tab, newline, double quote or backslash)."),
 			"arg_not_contains": irList("`hook_rule`: fire only when the tool input contains none of these literals (same limits as `arg_contains`)."),
-			"first":            irString("`requires_before`, `forbid_after` (required): the first token; differs from `then`."),
-			"then":             irString("`requires_before`, `forbid_after` (required): the second token."),
-			"token":            irString("`max_calls`, `forbid_with` (required): the tool name or action token."),
+			"first": irString("`requires_before`, `forbid_after` (required): the first token; differs from `then`. " +
+				"`requires_before` also accepts `action:run_tests[ok]`: `then` needs a passing test run in the session, not just any run."),
+			"then":  irString("`requires_before`, `forbid_after` (required): the second token."),
+			"token": irString("`max_calls`, `forbid_with` (required): the tool name or action token."),
 			"limit": schema.Int64Attribute{
 				Optional:    true,
 				Description: "`max_calls` (required): the most calls allowed, 1 to 1000.",

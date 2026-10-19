@@ -353,6 +353,7 @@ An SOP that a live guardrail cites is never written back to its source: the prod
 
 ## Related
 
-- [SOP Format Reference](/reference/sop-format) — detailed field-by-field specification
+- [SOP Front Matter](/reference/sop-front-matter) — every enforceable key, the YAML block at the top of a SOP
+- [SOP Format Reference](/reference/sop-format) — the registry's fields, risk tiers and lifecycle
 - [How It Works](/guide/how-it-works) — architecture of the SOP registry and sync daemon
 - [Review Queue](/guide/decisions) — approve or reject enforcement decisions that SOPs trigger

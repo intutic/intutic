@@ -39,7 +39,7 @@ Tick **This key is for automation (CI, scripts, a service)** when you create the
 
 Two things narrow this:
 
-- **Virtual keys are per member.** `intutic_virtual_key` creates keys for the member who owns the provider's key, and the API shows a member only their own keys. A plan run with another member's key sees none of them and proposes to create them all again. If the configuration manages virtual keys, plan and apply with keys of the same member.
+- **Virtual keys are per member.** `intutic_virtual_key` creates keys for the member who owns the provider's key. A key already in state stays visible to another member's key with the OWNER, ADMIN or EM role, since the API lists every live key in the workspace to those roles (`GET /api/v1/budget/keys`, which needs the `billing:read` scope), and an OWNER or ADMIN revokes it on destroy. Below EM, the API shows a member only their own keys, so a plan run with such a member's key proposes to create the others again. Importing a virtual key needs a key of the member who owns it.
 
 <!-- UNRELEASED:cloud
 - **Some resources depend on the workspace's Intutic plan.** Member budgets, SIEM destinations, custom filters and self-hosted gateways are refused on a plan without them, whatever the role; the reference page of each names the plans.
@@ -62,7 +62,7 @@ terraform {
   required_providers {
     intutic = {
       source  = "intutic/intutic"
-      version = "~> 0.4"
+      version = "~> 0.7"
     }
     time = {
       source  = "hashicorp/time"

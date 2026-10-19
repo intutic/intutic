@@ -19,7 +19,7 @@ intutic init
 #   …
 ```
 
-Each path is where `intutic connect` will write that harness's rule sets; `intutic init` itself writes none of them.
+Each path is where that harness's rule sets are written: by [`intutic gates install`](/reference/cli#intutic-gates-install) (or `intutic init` when you accept the gates) with no login, and by `intutic connect` with one. `intutic init` without the gates writes none of them.
 
 Every harness connects through the same governance pipeline — proxy interception, SOP evaluation, and real-time enforcement — regardless of the underlying agent.
 
@@ -174,7 +174,9 @@ What each one compiles into the policy snapshot every gate reads:
 | | `intutic gates install` | `intutic connect` |
 |---|---|---|
 | Built-in protections, destructive-command and skill tiers | Yes | Yes |
-| `review_before:` tokens from `.intutic/sops/` | Refused outright: with no control plane, nothing could approve a hold | Held for approval |
+| `review_before:` tokens and `closed_lanes:` lane holds from `.intutic/sops/` | Refused outright: with no control plane, nothing could approve a hold | Held for approval |
+| Rule records from `.intutic/sops/` (qualified `requires_before:`, `scope_paths:` under `scope_paths_mode: enforce`, `plan_approval:`) | Yes; `plan_approval:` refuses every gated call that is not a read, since no plan can be approved | Yes |
+| `decide:` rules | From `.intutic/sops/`, with the pins `intutic decide eval` wrote | From the control plane only |
 | Workspace policy (`BLOCK:` SOPs, guardrails, MCP allowlist and registry, group rules) | No | Yes |
 | Proxy routing for each harness (base URLs, proxy settings) | Only with `--route` | Yes |
 | Kept in sync | Re-run it after editing `.intutic/sops/`, or keep `intutic start` running, which refreshes the gates when they change | On every config sync |

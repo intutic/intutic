@@ -284,10 +284,14 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
   // `INTUTIC_CONTROL_PLANE_URL`, which nothing writes there, so every
   // per-session proxy on a connected machine fetched policy from
   // localhost:3001 unless the shell happened to export the variable.
+  //
+  // A blank value is unset: `intutic gates install` with no login writes
+  // `INTUTIC_HOST=` and `INTUTIC_WORKSPACE_ID=` (sync-daemon `runtimeEnv.ts`).
+  const set = (v: string | undefined): string | undefined => v?.trim() || undefined
   const controlPlaneUrl =
-    process.env['INTUTIC_CONTROL_PLANE_URL'] ??
-    runtimeEnv['INTUTIC_CONTROL_PLANE_URL'] ??
-    runtimeEnv['INTUTIC_HOST'] ??
+    set(process.env['INTUTIC_CONTROL_PLANE_URL']) ??
+    set(runtimeEnv['INTUTIC_CONTROL_PLANE_URL']) ??
+    set(runtimeEnv['INTUTIC_HOST']) ??
     'http://localhost:3001'
 
   const apiKey =
@@ -297,8 +301,8 @@ export async function loadConfig(argv: string[] = process.argv.slice(2)): Promis
 
   const workspaceId =
     cli.workspaceId ??
-    process.env['INTUTIC_WORKSPACE_ID'] ??
-    runtimeEnv['INTUTIC_WORKSPACE_ID'] ??
+    set(process.env['INTUTIC_WORKSPACE_ID']) ??
+    set(runtimeEnv['INTUTIC_WORKSPACE_ID']) ??
     'unknown'
 
   const eventsFilePath =

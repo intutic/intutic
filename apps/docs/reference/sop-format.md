@@ -21,7 +21,7 @@ An SOP consists of:
 
 ## Writing SOPs
 
-SOPs are written in markdown. The content is synced to harness config files and used by the circuit breaker for enforcement decisions.
+SOPs are written in markdown. The content is synced to harness config files and used by the circuit breaker for enforcement decisions. The keys in a SOP's front matter (the YAML block between the `---` lines at the top), which the proxy, hook gates and SDKs enforce, are documented in [SOP Front Matter](/reference/sop-front-matter).
 
 ### Example SOP: Code Quality
 

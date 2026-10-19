@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import * as http from 'node:http'
+import { loadCredentials } from './credentials'
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
@@ -40,37 +41,16 @@ function formatSpendSuffix(spend: LocalSpendResponse | null): string {
 // ── Status bar registration ───────────────────────────────────────────────────
 
 /**
- * Fetch from the control plane using the credentials `intutic connect` wrote.
- * Separate from the proxy's /healthz probe above: the proxy (127.0.0.1:4000)
+ * Fetch from the control plane the credentials name (see credentials.ts).
+ * Separate from the proxy's /health probe above: the proxy (127.0.0.1:4000)
  * reports local governance liveness, while incidents live in the control plane.
  */
 async function fetchControlPlane<T>(reqPath: string): Promise<T | null> {
   try {
-    const os = await import('node:os')
-    const fsp = await import('node:fs/promises')
-    const nodePath = await import('node:path')
-    const override = vscode.workspace
-      .getConfiguration('intutic')
-      .get<string>('controlPlaneUrl')
-    let base = override
-    let apiKey: string | undefined
-    let workspaceId: string | undefined
-    try {
-      const raw = await fsp.readFile(
-        nodePath.join(os.homedir(), '.intutic', 'credentials.json'),
-        'utf-8',
-      )
-      const creds = JSON.parse(raw) as {
-        controlPlaneUrl?: string
-        apiKey?: string
-        workspaceId?: string
-      }
-      base = override || creds.controlPlaneUrl
-      apiKey = creds.apiKey
-      workspaceId = creds.workspaceId
-    } catch {
-      // No credentials yet — fall through with the override (if any).
-    }
+    const creds = await loadCredentials(vscode.workspace.getConfiguration('intutic').get<string>('controlPlaneUrl'))
+    const base = creds?.controlPlaneUrl
+    const apiKey = creds?.apiKey
+    const workspaceId = creds?.workspaceId
     if (!base) return null
 
     const controller = new AbortController()
@@ -133,7 +113,7 @@ export function registerStatusBar(context: vscode.ExtensionContext) {
       // Proxy is offline
       statusBarItem.text = '$(warning) Intutic: Offline'
       statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground')
-      statusBarItem.tooltip = 'Intutic local governance proxy is offline.\nRun: intutic connect'
+      statusBarItem.tooltip = 'Intutic local governance proxy is offline.\nRun: intutic start'
       return
     }
 

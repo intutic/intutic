@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sop_key_needs_newer_gateway` warning naming each such key and each of the
   organization's registered gateways older than the key's release (or that has
   never reported its version). The save still succeeds.
+- **A `mode: shadow` SOP's decide rules run as shadow at a local proxy too.**
+  The hook gates and SDKs already did, as 3.0.0 said; the proxy ignored the
+  SOP's mode when no control plane served the rules, so a pinned rule in a
+  shadow SOP enforced there.
+- **dsh profiles get `@intutic/gate` 3.** A profile with no `@intutic/gate`
+  declaration was given `^2.0.0`, which cannot evaluate 3.0 rules and refuses
+  what they cover. A profile set up by an earlier version keeps its
+  declaration; upgrade it with `pnpm add @intutic/gate@^3` in the profile.
+- **`/intutic start` without `--sops` keeps every local SOP in the rules
+  files.** The empty selection it sends was read as "select nothing", so the
+  rules files left out every folder and flat file you wrote, while the daemon
+  logged "all". Enforcement was unaffected.
+- **The MCP governance proxy treats a blank `INTUTIC_HOST` or
+  `INTUTIC_WORKSPACE_ID` in `runtime.env` as unset**, so it falls back to the
+  documented default instead of an empty control-plane address.
+- **Terraform provider 0.7.1:** `intutic_workspace_settings` manages
+  `loop_review` field by field, as the API stores it, so a configuration
+  naming one field no longer shows a change on every plan.
 
 ## [3.0.1] - 2026-10-19
 

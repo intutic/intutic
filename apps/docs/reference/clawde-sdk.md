@@ -51,7 +51,7 @@ Cost per branch, per commit and per pull request is attributed through the sessi
 - A session id `resolveContext()` returns (`INTUTIC_SESSION_ID`, as `intutic exec` sets it) is the session that started the process, so its calls go under it unchanged.
 - Otherwise, when the working directory is a git repository and the key is an Intutic virtual key (`vk_…`), the client registers a session (`POST /api/v1/sessions`, harness `clawde_sdk`) carrying the `origin` remote as `host/path` (credentials, port and `.git` removed before it is sent), the branch and the HEAD commit. On a detached HEAD, as CI checks out a pull request, the branch comes from `GITHUB_HEAD_REF`, then from the branch `resolveContext()` returns. It always confirms the key with `GET /api/v1/auth/me` first, even when `INTUTIC_WORKSPACE_ID` or the sync daemon names a workspace, and registers the session in the workspace the key belongs to. The repository is sent only to a control plane that accepted the key, and a provider key is never sent there at all.
 
-The control plane is `controlPlaneUrl` (`control_plane_url`), then `INTUTIC_CONTROL_PLANE_URL`, then Intutic's hosted one; a self-hosted deployment sets one of the first two. Registration is best effort: if the control plane cannot be reached or refuses, the call goes ahead without a session and is filed under **No git context**, and the client does not try again. The session holds the repository, branch and commit as they were at the first call. Pass `autoContext: false` (`auto_context=False`) to register nothing and send no session. See [Cost per branch and commit](/guide/budgets#cost-per-branch-and-commit) for how the figures are built.
+The control plane is `controlPlaneUrl` (`control_plane_url`), then `INTUTIC_CONTROL_PLANE_URL`; this release has no default control plane. With neither set, the client registers no session and sends none, and its calls are filed under **No git context**. Registration is best effort: if the control plane cannot be reached or refuses, the call goes ahead without a session and is filed under **No git context**, and the client does not try again. The session holds the repository, branch and commit as they were at the first call. Pass `autoContext: false` (`auto_context=False`) to register nothing and send no session. See [Cost per branch and commit](/guide/budgets#cost-per-branch-and-commit) for how the figures are built.
 
 The TypeScript client sends the agent-graph headers the proxy uses for [graph guardrails](/guide/graph-guardrails) (`X-Intutic-Graph-Id`, `X-Intutic-Node-Id`, `X-Intutic-Parent-Session`, `X-Intutic-Depth`). They are inherited from `INTUTIC_GRAPH_ID`, `INTUTIC_NODE_ID` and `INTUTIC_DEPTH`, so an agent started by another agent is recorded as its child; pass `graphIdentity` to set them yourself.
 
@@ -112,6 +112,9 @@ Every other failure throws `ClawdeConnectionError` with the status and response 
 **Upstream retries.** When the proxy needed more than one provider call for an answer, the response carries `upstream`: `{ attempts, fallbackFrom? }` (`{"attempts", "fallback_from"}` in Python), read from the `x-intutic-upstream-attempts` and `x-intutic-upstream-fallback-from` headers. `fallbackFrom` names the model whose retries ran out when a fallback target answered; the response's `model` names the one that did. Absent on the ordinary single-call response. `UPSTREAM_ATTEMPTS_HEADER` and `UPSTREAM_FALLBACK_HEADER` are exported.
 
 `budgetRemainingUsd` and `budgetPctUsed` are deprecated and never set; the proxy does not report budget on responses. Use `checkBudget()` instead.
+
+### 6. Decide questions
+`decide(state, questions, opts)` (`decide(state, questions, when=..., ...)` in Python, from `intutic_clawde`) asks a self-hosted model a few narrow yes/no or pick-one questions about a piece of text, written as a [decide rule](/guide/decide)'s `questions`, and returns each answer's probability and its three-valued reading; with a `when` it also returns the outcome the rule would reach. The engine comes from `~/.intutic/decide/engine.json` and the `INTUTIC_DECIDE_*` variables unless the options name one, and its host must pass the self-hosted guard: a hosted decision API is refused before anything is sent. Questions a decide rule would refuse throw `TypeError` (`ValueError`); an engine that is not configured, is refused or cannot answer in time throws `DecideEngineError`, whose `code` says which. It needs no proxy and no control plane. See [In your own agent: `decide()`](/guide/decide#in-your-own-agent-decide).
 
 ---
 
@@ -185,7 +188,7 @@ except ClawdeConnectionError as e:
 
 Everything above (`ClawdeClient`) is a **data-plane** client: it wraps the local proxy for chat calls. `ControlPlaneClient` is a separate, optional class for the **operator** APIs the [CLI](/reference/cli) exposes: org and workspace setup, gateways, settings and provider credentials, the MCP registry, notification rules, SIEM destinations, usage, the AI inventory, compliance evidence, policy guardrails, held decisions and loop runs, incidents, findings, traces, trace integrity, WASM rules and SOPs. Both SDKs have the same methods, camelCase in TypeScript and snake_case in Python, so the same work can run from code (infra-as-code, a secrets-manager sync job, a nightly compliance export, provisioning a workspace per tenant in your own product built on Intutic).
 
-It talks to the **control plane** — the one you name with `baseUrl` — not the proxy: a different origin from `ClawdeClient`'s `baseUrl`, so it takes its own `baseUrl` (`base_url`). Every method is a direct HTTP call with no hosted-vs-self-hosted branching, so it works unmodified against either. It needs a control plane to talk to: an open-core deployment with no control plane configured simply won't have anything to call.
+It talks to the **control plane** — the one you name with `baseUrl` (`base_url`), else `INTUTIC_CONTROL_PLANE_URL` — not the proxy: a different origin from `ClawdeClient`'s `baseUrl`, so it takes its own. There is no default: without either, the constructor throws (Python raises `ValueError`). Every method is a direct HTTP call with no hosted-vs-self-hosted branching, so it works unmodified against either. It needs a control plane to talk to: an open-core deployment with no control plane configured simply won't have anything to call.
 
 Auth: the same `apiKey` you already pass to `ClawdeClient` — a `vk_...` virtual key or a login JWT. Each call needs the role the CLI command needs: approving an MCP server, writing a SIEM destination or collecting evidence takes OWNER or ADMIN, workspace-wide usage and the whole machine inventory take OWNER, ADMIN or EM, and a DEVELOPER sees only their own usage and machines.
 
@@ -196,7 +199,7 @@ import { ControlPlaneClient, verifyEvidenceArchive } from '@intutic/clawde';
 
 const cp = new ControlPlaneClient({
   apiKey: process.env.INTUTIC_API_KEY!,
-  baseUrl: process.env.INTUTIC_CONTROL_PLANE_URL, // defaults to Intutic's hosted control plane
+  baseUrl: process.env.INTUTIC_CONTROL_PLANE_URL, // required: without it (or the variable), the constructor throws
 });
 
 const { servers, pendingCount } = await cp.listMcpServers();
@@ -218,7 +221,8 @@ import os
 
 from intutic_clawde import ControlPlaneClient, verify_evidence_archive
 
-cp = ControlPlaneClient(api_key=os.environ["INTUTIC_API_KEY"])  # base_url defaults to Intutic's hosted control plane
+# base_url, else INTUTIC_CONTROL_PLANE_URL; with neither, ValueError (there is no default)
+cp = ControlPlaneClient(api_key=os.environ["INTUTIC_API_KEY"], base_url=os.environ.get("INTUTIC_CONTROL_PLANE_URL"))
 
 registry = cp.list_mcp_servers()
 cp.approve_mcp_server(registry["servers"][0]["serverId"])

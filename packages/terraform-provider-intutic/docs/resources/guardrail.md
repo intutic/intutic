@@ -84,7 +84,7 @@ resource "intutic_guardrail" "prod_data_export" {
 - `context` (List of String) `decide`, `on = "tool_call"` only: extra context the model reads, at most `["last_user_turn"]`.
 - `description` (String) What the rule is for, at most 480 characters. A hook rule's block message carries it where an extracted rule carries its quote (the `name` stands there when this is unset).
 - `escalate` (String) `decide`: what an unknown answer does: `ask` (the default; the harness asks the developer), `review` (the review queue) or `refuse`.
-- `first` (String) `requires_before`, `forbid_after` (required): the first token; differs from `then`.
+- `first` (String) `requires_before`, `forbid_after` (required): the first token; differs from `then`. `requires_before` also accepts `action:run_tests[ok]`: `then` needs a passing test run in the session, not just any run.
 - `hosts` (List of String) `egress_allow` (required, 1 to 32): hosts (`api.example.com`), suffixes (`.example.com`) or IPv4 addresses and CIDRs no wider than /8.
 - `limit` (Number) `max_calls` (required): the most calls allowed, 1 to 1000.
 - `models` (List of String) `allowed_models` (required, 1 to 32): model ids, compared exactly as the proxy compares them.

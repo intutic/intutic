@@ -80,7 +80,7 @@ Begins manual session cost attribution by listing the open tickets on the worksp
 
 ### 4. `/intutic start <option_number_or_ticket_key> [--sops=<names>] [--auto-judge]` (or `-j`)
 Binds all sequential LLM request costs and traces in the current session (identified by `x-session-id`) to the selected task key, overriding the default git branch/commit cascade.
-* **Local SOP scoping**: `--sops=` takes option numbers or folder names, comma-separated (`--sops=3` or `--sops=frontend-rules`), and limits the session to those local SOP folders; a local SOP folder's option number also works as the first argument. Without it, every folder is active.
+* **Local SOP scoping**: `--sops=` takes option numbers, folder names or single SOP file names, comma-separated (`--sops=3`, `--sops=frontend-rules` or `--sops=no-force-push`), and selects those local rule sets; a local rule set's option number also works as the first argument. The selection narrows only which local SOPs are written into the rules files as text. It does not change enforcement: the gates and the proxy still enforce every local SOP in `.intutic/sops/`.
 * **Auto Judging Option**: Appending `--auto-judge` (or `-j`) judges every later response in this session, as `/intutic judge` does, for 24 hours. `/intutic start` without it turns auto-judging off.
 * **Mechanism**: Resolves the selected option index or ticket key against the list `/intutic initialize` cached (a ticket key must be on that list), takes the ticket's metadata (story points, epic, sprint) from it, saves the manual override mapping in Postgres, and caches it in Valkey (24h TTL) for immediate Priority 0 cascade routing.
 * **Output**:

@@ -53,8 +53,11 @@ plane's hook gate cannot be reached, answers non-2xx, or answers
 group policy, the MCP server registry, image provenance, promoted findings)
 could not complete, there is no verdict, and the call is refused with
 `HOOK_GATE`. Pass `failClosed: false` to let calls through during such an
-outage. A request the hook gate cannot read (HTTP 400, `INVALID_REQUEST`) is
-refused whatever `failClosed` says. intutic-clawde's `GateClient` behaves the
+outage. A request the hook gate cannot read (HTTP 400, `INVALID_REQUEST`),
+and a key that lacks the scope the hook gate needs (HTTP 403,
+`INSUFFICIENT_SCOPE`), are refused whatever `failClosed` says. So is a call a
+`plan_approval:` SOP gates when the session's plan cannot be read: rule
+failures always fail closed. intutic-clawde's `GateClient` behaves the
 same way, held to it by `packages/shared-types/fixtures/hook-gate-response-vectors.json`.
 
 Each hook-gate answer names its decision (`decisionId`). The gate reports the
@@ -79,14 +82,19 @@ without a word. Both SDKs run
 
 | Export | From | What it is |
 |---|---|---|
-| `Gate`, `GateConfig` | `gate.ts` | The six-tier evaluator. `new Gate(cfg, client?)`, `await gate.guard(toolName, toolInput)`. |
+| `Gate`, `GateConfig` | `gate.ts` | The eight-tier evaluator (A0, A1, R, M, A3, A2, D, B). `new Gate(cfg, client?)`, `await gate.guard(toolName, toolInput)`. |
+| `Gate.recordOutcome(toolName, toolInput, outcome?)`, `ToolOutcome`, `toolOutcomeOf(result)` | `gate.ts`, `wrapTools.ts` | Records how a call that ran went (`{ exitCode, isError, output }`), per session, for Tier R. `toolOutcomeOf` reads one from a tool's return value. |
+| `READ_ONLY_TOOLS` | `gate.ts` | Tool names that cannot change anything: they get the snapshot check but skip the SOP rules (A3) and the hook gate (B). |
+| `CAN_EVALUATE_RULE_RECORDS`, `PLAN_CACHE_MS` | `gate.ts` | Whether this gate evaluates the snapshot's `@rule` records (Tier R; `true`), and how long it keeps a session's plan before reading it again (30,000 ms). |
 | `install(gate)`, `active()` | `gate.ts` | Process-wide default gate, so wrapped tools don't need the instance threaded through every call site. |
-| `IntuticGateRefusal`, `GateError`, `GateConnectionError` | `errors.ts` | Thrown on refusal. `.reason`, `.code` (a `GateRefusalCode`, listed in `GATE_REFUSAL_CODES`), `.incidentId` carry the structured verdict; `.message` carries the `[Intutic Governance] BLOCKED: ...` text. |
+| `IntuticGateRefusal`, `GateError`, `GateConnectionError` | `errors.ts` | Thrown on refusal. `.reason`, `.code` (a `GateRefusalCode`, listed in `GATE_REFUSAL_CODES`), `.incidentId` carry the structured verdict; `.scope` (paths, tools, step, detector, rule) and `.evidence` say what the refusal concerns, so a retry can stay out of it (undefined when it names none, and in an OPAQUE workspace); `.message` carries the `[Intutic Governance] BLOCKED: ...` text. |
+| `IntuticGateEscalation` | `errors.ts` | The `IntuticGateRefusal` (`code` `DECIDE_ESCALATED`) thrown when a decide rule could not decide the call; `.ruleId` names the rule. A caller that can ask its user asks with `.reason` and runs the call only on a yes. |
 | `IntuticGateHold` | `errors.ts` | The `IntuticGateRefusal` a hold rule throws (`code` `HELD`) after recording the hold for approval; `.holdId` names it. See `hold.ts`. |
 | `GateClient` | `client.ts` | Control-plane client (`hookGate`, `emit`, `localOnly`, `GateClient.fromEnv(...)`). |
 | `wrapTool(fn \| tool, opts?)`, `wrapTools(list \| record, gate?)` | `wrapTools.ts` | Generic wrapping for a plain async function or an `{ execute, ... }`-shaped tool object. **This is the integration point for any JS framework without a dedicated adapter — LangChain.js included.** |
 | `intuticHeaders(opts?)` | `headers.ts` | Headers for a proxy-pointed HTTP/OpenAI-compatible client (`x-session-id`, `x-workspace-id`, `x-intutic-harness`). |
-| `loadSnapshot`, `evaluate`, `Snapshot`, `guardDisabledFromEnv` | `snapshot.ts` | Tier A1: reads `~/.intutic/hooks/policy-snapshot.rules` (or the file `INTUTIC_SNAPSHOT_RULES` names). |
+| `loadSnapshot`, `evaluate`, `Snapshot`, `guardDisabledFromEnv` | `snapshot.ts` | Tier A1: reads `~/.intutic/hooks/policy-snapshot.rules` (or the file `INTUTIC_SNAPSHOT_RULES` names). `evaluate` returns the deciding match, with the shadow and warn matches it passed in `advisories`. |
+| `decide(state, questions, opts?)`, `DecideEngineError` | `decideApi.ts`, `decideEngine.ts` | Asks the self-hosted decide engine a few narrow questions about any text, outside a gate; throws `DecideEngineError` when the engine is not configured, its host is refused, or it cannot answer in time. See [Decide rules](https://docs.intutic.ai/guide/decide#in-your-own-agent-decide). |
 | `parseRules`, `firstMatch`, `fetchRules`, `fetchRegister`, `parseRegister`, `SopRule`, `SopRegister` | `soprules.ts` | Tier A3: SOP-authored `WHERE`-clause rules, and the register they come in (rules plus the workspace's intervention mode). |
 | `checkCommand`, `checkImages`, `checkWrittenManifest`, `ImageVerdict` | `imagecheck.ts` | Tier A2: container-image provenance on deploy commands. |
 | `McpRegistryRecord`, `McpAllowlistRecord` | `mcpRegistryRecord.ts` | Tier M: the snapshot's MCP server registry and allowlist (`Snapshot.mcpRegistry`, `Snapshot.mcpAllowlist`), decided as the hook gates and the MCP proxy decide them; a byte-identical copy of `@intutic/shared-types`' module. |
@@ -103,14 +111,23 @@ dropped, the SSO group policy still refuses, and every MCP call is refused with
 `POLICY_SNAPSHOT_UNVERIFIED`. A hand-written snapshot for a test needs the line
 too.
 
+A SOP's `requires_before: action:run_tests[ok] -> …` is met only by a passing
+test run this gate recorded for the session, with no file changed since.
+`wrapTool` and `wrapTools` record every call they run. A caller that calls
+`gate.guard()` itself must call `gate.recordOutcome(toolName, toolInput,
+outcome)` after each call it runs, or the prerequisite is never met and the
+gated tool is refused with `PREREQUISITE_UNMET`. With no session id
+(`GateClient.sessionId`) nothing is recorded.
+
 Full reference: [Gate SDK](https://docs.intutic.ai/reference/gate-sdk). Every export, with its signature and defaults: [API reference](https://docs.intutic.ai/reference/sdk/gate/).
 
 ### A note for sibling adapter phases
 
 `Gate.guard()` is **async** (`Promise<void>`), unlike the Python SDK's
 synchronous `Gate.guard()` — the network-backed tiers (SOP-rule fetch,
-`POST /hook-gate`) use `fetch` here rather than Python's blocking
-`urllib.request`. Every adapter built on this package must `await` it.
+`POST /hook-gate`) use `fetch` here rather than Python's blocking calls
+(`urllib.request` for the SOP rules, `requests` for the hook gate). Every
+adapter built on this package must `await` it.
 
 ### What Tier A1 does and does not cover
 
@@ -123,7 +140,10 @@ tables) the way the shipped shell/JS gate emitters do (`INTUTIC_FLOOR`,
 concatenated ahead of the snapshot's own rules in `gateBody.ts`'s
 `intuticGate()`). Only what actually flows through the `.rules` file —
 SOP-authored rules, the destructive-command tier, and the tier-promoted
-skill-surface rules — is enforced by Tier A1 here. This gap already exists in
+skill-surface rules — is enforced by Tier A1 here. The same file also carries
+the `@rule` and `@decide` records that Tiers R and D evaluate, each with a
+fallback line that refuses its tools in a gate that cannot evaluate the
+record; this gate skips a fallback line only when its record decoded. This gap already exists in
 `intutic_clawde`; it is preserved, not introduced, by this port. See
 `src/__tests__/fidelity.test.ts` for exactly which parts of the shipped
 contract Tier A1 DOES reproduce, verified against the real pattern tables.

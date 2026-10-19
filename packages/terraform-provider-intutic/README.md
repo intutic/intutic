@@ -1,13 +1,13 @@
 # Terraform Provider for Intutic
 
-Manage an Intutic workspace's SOPs, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, upstream provider credentials, MCP server decisions, and workspace and member spend budgets with Terraform. Built on the [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework).
+Manage an Intutic workspace's SOPs, policy guardrails, workspace settings, virtual keys, self-hosted gateways, notification rules, SIEM export destinations, custom filters, upstream provider credentials, MCP server decisions, WASM rules, the SOP Optimizer's settings (`intutic_sop_optimizer_settings`), task-management connections (`intutic_task_connection`), and workspace and member spend budgets with Terraform. Built on the [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework).
 
 - Guide: [Manage Intutic with Terraform](https://docs.intutic.ai/guide/terraform)
 - Reference: [`docs/`](docs/) (the Registry's format) and [docs.intutic.ai/reference/terraform](https://docs.intutic.ai/reference/terraform/)
 
 ## Authentication
 
-A workspace API key (`vk_…`) created with **This key is for automation** ticked, in `INTUTIC_API_KEY` or the provider's `api_key`. The provider acts as the key's member; most resources need an OWNER or ADMIN role, and the key's scopes must cover the routes the configuration uses (the default, `*`, does). Set the control plane's base URL in `INTUTIC_CONTROL_PLANE_URL` or `endpoint`; the provider has no default endpoint.
+A workspace API key (`vk_…`) created with **This key is for automation** ticked (or with `intutic keys create --service-account`, a command that needs a control plane), in `INTUTIC_API_KEY` or the provider's `api_key`. The provider acts as the key's member; most resources need an OWNER or ADMIN role, and the key's scopes must cover the routes the configuration uses (the default, `*`, does). Set the control plane's base URL in `INTUTIC_CONTROL_PLANE_URL` or `endpoint`; the provider has no default endpoint.
 
 <!-- UNRELEASED:cloud
 Without `INTUTIC_CONTROL_PLANE_URL` or `endpoint`, the provider uses Intutic Cloud's control plane, `https://api.intutic.ai`.
@@ -44,7 +44,7 @@ TF_ACC=1 go test ./... -run TestAcc
 The key's workspace needs an Enterprise or Self-host plan for the self-hosted gateway tests.
 -->
 
-The tests create and destroy their own resources, but leave the workspace settings they write as they set them. Intutic's CI runs them against a control plane on a throwaway database, started by `services/control-plane/scripts/terraform-acceptance-server.ts`, which writes these variables to a file.
+The tests create and destroy their own resources, but leave the workspace settings they write as they set them. The control plane is not part of this repository; Intutic runs these tests against one on a throwaway database.
 
 ## Releasing
 

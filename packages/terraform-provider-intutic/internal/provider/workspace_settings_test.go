@@ -70,6 +70,29 @@ func TestChangedSettingsSendsOnlyWhatChanged(t *testing.T) {
 	}
 }
 
+// The PUT merges loop_review field by field, as it does featureFlags, so a
+// configuration manages only the fields it names.
+func TestLoopReviewIsManagedFieldByField(t *testing.T) {
+	server := obj(t, `{"loop_review": {"requireDistinctApprover": true, "requireVerifiedCompletion": true}}`)
+	managed := obj(t, `{"loop_review": {"requireDistinctApprover": true}}`)
+	if diff := differingKeys(projectSettings(server, managed), managed); len(diff) != 0 {
+		t.Fatalf("a field set elsewhere must not read as a change; differing: %v", diff)
+	}
+	if got := projectSettings(obj(t, `{}`), managed).String(); got != `{"loop_review":{"requireDistinctApprover":null}}` {
+		t.Fatalf("projection = %s", got)
+	}
+
+	prior := obj(t, `{"loop_review": {"requireDistinctApprover": true, "requireVerifiedCompletion": false}}`)
+	next := obj(t, `{"loop_review": {"requireDistinctApprover": true, "requireVerifiedCompletion": true}}`)
+	if got := changedSettings(prior, next).String(); got != `{"loop_review":{"requireVerifiedCompletion":true}}` {
+		t.Fatalf("body = %s", got)
+	}
+	// A field removed from the configuration is no longer managed: nothing is sent.
+	if body := changedSettings(prior, managed); len(body) != 0 {
+		t.Fatalf("removing a field must send nothing, got %s", body)
+	}
+}
+
 func TestValidateSettingsKeys(t *testing.T) {
 	problems := validateSettingsKeys(obj(t, `{
 		"egressMode": "enforce",

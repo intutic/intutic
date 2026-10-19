@@ -62,11 +62,7 @@ Exposes Intutic governance tools (`intutic_governance_status`, `intutic_list_sop
         "-p",
         "@intutic/mcp-governance-proxy",
         "intutic-mcp-proxy"
-      ],
-      "env": {
-        "NODE_ENV": "production",
-        "PINO_DEST": "stderr"
-      }
+      ]
     }
   }
 }
@@ -92,11 +88,7 @@ Wraps downstream MCP servers (e.g. Filesystem or Postgres) to intercept and eval
         "-y",
         "@modelcontextprotocol/server-filesystem",
         "/Users/username"
-      ],
-      "env": {
-        "NODE_ENV": "production",
-        "PINO_DEST": "stderr"
-      }
+      ]
     }
   }
 }

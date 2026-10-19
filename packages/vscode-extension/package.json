@@ -11,7 +11,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -46,7 +48,7 @@
         "intutic.controlPlaneUrl": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Intutic control plane base URL (e.g. `https://api.intutic.ai`). Leave empty to use the URL from `~/.intutic/credentials.json` written by `intutic connect`."
+          "markdownDescription": "The base URL of the control plane the SOP, incident and WASM panels read (e.g. `http://localhost:3001`). Leave empty to use `INTUTIC_CONTROL_PLANE_URL`, then the URL in `~/.intutic/credentials.json` that `intutic login` writes. There is no default."
         }
       }
     }

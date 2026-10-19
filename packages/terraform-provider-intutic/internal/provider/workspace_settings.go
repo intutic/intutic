@@ -11,9 +11,10 @@ import (
 )
 
 // The keys `PUT /api/v1/workspace/settings` accepts. Its schema is `.strict()`,
-// so any other top-level key is a 400; its `featureFlags` object is not strict
-// and silently drops a flag it does not know, so those are listed too. The
-// control plane's test suite asserts this file matches the route's schema.
+// so any other top-level key is a 400, and so is an unknown flag in its
+// `featureFlags` object; the flags are listed too, so the plan fails instead
+// of the apply. The control plane's test suite asserts this file matches the
+// route's schema.
 //
 //go:embed workspace_settings_keys.json
 var settingsKeysJSON []byte
@@ -34,6 +35,10 @@ var settingsKeys = func() struct {
 
 const featureFlagsKey = "featureFlags"
 
+// mergedKeys are the objects the PUT merges field by field rather than
+// replacing whole: a configuration manages only the fields it names.
+var mergedKeys = []string{featureFlagsKey, "loop_review"}
+
 // redactedSentinel is what GET returns in place of a stored BYOC credential.
 // The PUT treats it as "keep the stored secret".
 const redactedSentinel = "__redacted__"
@@ -53,9 +58,8 @@ func parseSettings(s string) (settingsObject, error) {
 	return obj, nil
 }
 
-// validateSettingsKeys reports every key the PUT would refuse (top level) or
-// silently drop (feature flags), so the plan fails instead of the apply — or,
-// for a dropped flag, instead of a diff that never converges.
+// validateSettingsKeys reports every top-level key and feature flag the PUT
+// would refuse, so the plan fails instead of the apply.
 func validateSettingsKeys(obj settingsObject) []string {
 	var problems []string
 	for k, v := range obj {
@@ -84,9 +88,9 @@ func validateSettingsKeys(obj settingsObject) []string {
 // projectSettings is the server's view of exactly what `managed` covers.
 //
 // A top-level key is managed whole, because the PUT replaces a top-level value
-// whole. `featureFlags` is the exception: the PUT merges it flag by flag, so a
-// configuration manages only the flags it names, and flags set elsewhere are
-// neither compared nor written. A key missing on the server reads as null,
+// whole. The mergedKeys (`featureFlags`, `loop_review`) are the exception: the
+// PUT merges them field by field, so a configuration manages only the fields it
+// names, and fields set elsewhere are neither compared nor written. A key missing on the server reads as null,
 // which is how a cleared `sso_group_policy` is stored. A redacted credential
 // keeps the configured value, since the API never returns the real one.
 func projectSettings(server, managed settingsObject) settingsObject {
@@ -96,15 +100,15 @@ func projectSettings(server, managed settingsObject) settingsObject {
 		if !ok {
 			got = json.RawMessage("null")
 		}
-		if k == featureFlagsKey {
-			got = projectFlags(got, want)
+		if slices.Contains(mergedKeys, k) {
+			got = projectFields(got, want)
 		}
 		out[k] = keepRedacted(got, want)
 	}
 	return out
 }
 
-func projectFlags(server, managed json.RawMessage) json.RawMessage {
+func projectFields(server, managed json.RawMessage) json.RawMessage {
 	var want, have map[string]json.RawMessage
 	if json.Unmarshal(managed, &want) != nil || want == nil {
 		return server
@@ -168,8 +172,8 @@ func mergeRedacted(server, managed any) any {
 }
 
 // changedSettings is the PUT body for moving from prior to next: the top-level
-// keys whose value changed, and within featureFlags only the flags that
-// changed. Sending an unchanged key is not harmless — a PUT naming a knob a
+// keys whose value changed, and within each of the mergedKeys only the fields
+// that changed. Sending an unchanged key is not harmless — a PUT naming a knob a
 // posture governs clears that posture's label.
 func changedSettings(prior, next settingsObject) settingsObject {
 	out := settingsObject{}
@@ -178,9 +182,9 @@ func changedSettings(prior, next settingsObject) settingsObject {
 		if ok && jsonEqual(pv, v) {
 			continue
 		}
-		if k == featureFlagsKey && ok {
-			if flags := changedFlags(pv, v); flags != nil {
-				out[k] = flags
+		if slices.Contains(mergedKeys, k) && ok {
+			if fields := changedFields(pv, v); fields != nil {
+				out[k] = fields
 			}
 			continue
 		}
@@ -189,7 +193,7 @@ func changedSettings(prior, next settingsObject) settingsObject {
 	return out
 }
 
-func changedFlags(prior, next json.RawMessage) json.RawMessage {
+func changedFields(prior, next json.RawMessage) json.RawMessage {
 	var p, n map[string]json.RawMessage
 	_ = json.Unmarshal(prior, &p)
 	if json.Unmarshal(next, &n) != nil {

@@ -152,9 +152,9 @@ describe('dsh hooks writer', () => {
     await writeDshHooks(workspaceRoot, PROXY_URL, 'ws_test')
 
     const after = JSON.parse(await node_fs.readFile(manifestPath, 'utf-8'))
-    // A range npm can actually satisfy with a `./dsh` export (2.0.0 is the
-    // first published version that has one; nothing ever matched ^0.x).
-    expect(after.dependencies['@intutic/gate']).toBe('^2.0.0')
+    // The current major of @intutic/gate, which has a `./dsh` export and
+    // evaluates the 3.0 rules (a 2.x gate refuses them through fallback lines).
+    expect(after.dependencies['@intutic/gate']).toBe('^3.0.0')
     expect(after.dependencies['some-other-plugin']).toBe('^1.0.0')
     expect(after.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base'])
   })
@@ -326,6 +326,16 @@ describe('dsh hooks writer', () => {
 
     expect(afterSecond).toBe(afterFirst)
     expect(afterFirst.match(/intutic-governance/g)?.length).toBe(1)
+  })
+})
+
+describe('the dsh profile dependency tracks @intutic/gate', () => {
+  it('declares the major version @intutic/gate is published at', async () => {
+    const { INTUTIC_GATE_VERSION_RANGE, INTUTIC_GATE_RANGES_WRITTEN } = await import('../../src/harness/dshHooks.js')
+    const gate = JSON.parse(await node_fs.readFile(node_path.join(__dirname, '../../../../packages/gate-js/package.json'), 'utf-8')) as { version: string }
+    expect(INTUTIC_GATE_VERSION_RANGE).toBe(`^${gate.version.split('.')[0]}.0.0`)
+    // disconnect still recognises what an earlier Intutic version wrote.
+    expect(INTUTIC_GATE_RANGES_WRITTEN).toEqual(expect.arrayContaining([INTUTIC_GATE_VERSION_RANGE, '^2.0.0']))
   })
 })
 

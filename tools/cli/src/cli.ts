@@ -1447,7 +1447,7 @@ loopCmd
   .description('Register and start an active loop execution session')
   .requiredOption('--name <name>', 'Name of the loop execution')
   .option('--budget <limit>', 'Maximum token spend budget in USD (e.g. 5.00)')
-  .option('--sops <sops>', 'Comma-separated local SOP folder names or option indices')
+  .option('--sops <sops>', 'Comma-separated local rule sets to select for the rules files: SOP folder names, single SOP file names, or option indices')
   .option('--auto-judge', 'Enable automatic E2E judging for the loop')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .action(async (opts) => {
@@ -1510,7 +1510,7 @@ loopCmd
   .description('Execute an agent command wrapped with loop budget boundaries')
   .option('--name <name>', 'Name of the loop execution')
   .option('--budget <limit>', 'Maximum token spend budget in USD (e.g. 5.00)')
-  .option('--sops <sops>', 'Comma-separated local SOP folder names or option indices')
+  .option('--sops <sops>', 'Comma-separated local rule sets to select for the rules files: SOP folder names, single SOP file names, or option indices')
   .option('--auto-judge', 'Enable automatic E2E judging for the loop')
   .option('--dev', 'Use local control plane (http://localhost:3001)')
   .argument('<command...>', 'Agent execution command (e.g. -- claude-code)')

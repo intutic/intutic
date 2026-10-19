@@ -40,7 +40,7 @@ import { ANTIGRAVITY_CLI_GATE, ANTIGRAVITY_HOOK_NAME, antigravityHooksPath } fro
 import { DECISIONS_MARKERS, removeRulesSection, rulesSectionOf, RULES_SECTION_END } from '../harness/rulesSection.js'
 import { DECISIONS_FILE_HEADER } from '../lib/decisionsDigest.js'
 import { parseComponentOptions, serializeComponentOptions, type ComponentOptionsFile } from '../harness/jetbrainsXmlConfig.js'
-import { resolveDshHome, listDshProfileDirs } from '../harness/dshHooks.js'
+import { resolveDshHome, listDshProfileDirs, INTUTIC_GATE_RANGES_WRITTEN } from '../harness/dshHooks.js'
 import { stripOwnHeader as stripAiderHeader, AIDER_DECISIONS_FILE, AIDER_SOPS_FILE, isAiderIntuticEntry } from '../harness/aiderConfigMerger.js'
 import {
   OPENCLAW_PLUGIN_FILE,
@@ -950,7 +950,6 @@ function dshPatch(plan: DisconnectPlan, file: string, dshHome: string, ctx: Disc
   })
 }
 
-const DSH_GATE_RANGE = '^2.0.0'
 
 const dsh: HarnessReverser = async (plan, ctx) => {
   await agentsMd(plan, ctx)
@@ -960,7 +959,7 @@ const dsh: HarnessReverser = async (plan, ctx) => {
     await dshPatch(plan, join(profile, 'cordis.patch.yml'), dshHome, ctx)
     await json(plan, join(profile, 'package.json'), dshHome, (doc, c) => {
       // Added only when the profile declared none; with no record, it may be the user's own `dsh plugin add`.
-      if (c.original === null || getPath(doc, ['dependencies', '@intutic/gate']) !== DSH_GATE_RANGE) return false
+      if (c.original === null || !INTUTIC_GATE_RANGES_WRITTEN.includes(String(getPath(doc, ['dependencies', '@intutic/gate'])))) return false
       if (getPath(c.original, ['dependencies', '@intutic/gate']) !== undefined) return false
       deletePath(doc, ['dependencies', '@intutic/gate'])
       pruneEmpty(doc, ['dependencies'], c.original)

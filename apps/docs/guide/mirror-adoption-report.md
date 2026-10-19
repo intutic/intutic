@@ -80,7 +80,7 @@ Open **Settings › AI Routing & Caching**, and scroll to the **Mirror-Test Adop
 - An **insufficient data** state is rendered as its own distinct block, not as a report with zeroed-out numbers — this is deliberate, so a candidate with too few samples never looks like a candidate that has been cleared.
 <!-- ENTERPRISE_ONLY_END -->
 
-### CLI
+### CLI <Badge type="tip" text="Cloud" />
 
 ```bash
 intutic routing adoption-report --candidate-model gpt-4o-mini

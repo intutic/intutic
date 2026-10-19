@@ -1,11 +1,23 @@
 # SOP Front Matter <Badge type="tip" text="Open-Core" />
 
-Everything the proxy can act on, declared in the YAML block at the top of a SOP
-file. No toolchain, no compile step — the rules stay readable in review, which a
-`.wasm` binary does not.
+Everything the proxy can act on, declared in the front matter: the YAML block
+between the `---` lines at the top of a SOP file. No toolchain, no compile step —
+the rules stay readable in review, which a `.wasm` binary does not.
 
-The proxy reads SOPs from disk. See [Agent Guidelines](/guide/sops) for where it
-looks and what `INTUTIC_SOPS_DIR` is for.
+```markdown
+---
+review_before: action:deploy
+---
+# Deploys
+
+A person approves every deploy.
+```
+
+The keys are enforced; the Markdown below the block is guidance the agent reads.
+
+The proxy reads SOPs from disk: `.intutic/sops/*.md`, found by walking up from the
+directory it runs in, or the directory `INTUTIC_SOPS_DIR` names (see
+[Configuration](/reference/configuration#rules-budgets-and-memory)).
 
 ## The keys
 
@@ -410,7 +422,8 @@ decide: {"id":"prod-data-export","on":"tool_call","tools":["Bash"],"questions":{
 | `context` | no, `on: tool_call` only | `["last_user_turn"]` or `[]`. Reserved in 3.0: no gate supplies the last user turn, so the rule is asked without it |
 
 Any other field makes the line unreadable, `mode` included: a rule's rollout is
-`rollout`, and a SOP's own `mode: shadow` does not apply to its decide rules.
+`rollout`. A SOP's own `mode: shadow` runs its decide rules as shadow, whatever
+their `rollout` says ([When a rule enforces](/guide/decide#when-a-rule-enforces)).
 
 ### `when`
 

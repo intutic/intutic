@@ -25,7 +25,7 @@ Point the client's base URL at the proxy, as you do for an LLM SDK. The proxy fo
 The credential:
 
 - **Your own provider key** (`Authorization: Bearer <key>`) goes to that upstream unchanged.
-- **An Intutic key** (`vk_…`) never leaves the proxy. A call to TypeSafe or Fastino is sent with the workspace's provisioned key for that provider, else `TYPESAFE_API_KEY` or `FASTINO_API_KEY`; a call to OpenAI with the workspace's OpenAI key, else `OPENAI_API_KEY`. With none available the call is refused (`402 no_upstream_credential`). A self-hosted server or gateway gets no credential, so it must accept calls from the proxy without one.
+- **An Intutic key** (`vk_…`) never leaves the proxy. A call to TypeSafe or Fastino is sent with the workspace's provisioned key for that provider, else `TYPESAFE_API_KEY` or `FASTINO_API_KEY`; a call to OpenAI with the workspace's OpenAI key, else `OPENAI_API_KEY`. With none available the call is refused: `402 byok_required` when the key's plan requires the workspace's own provider keys, else `402 no_upstream_credential`. A self-hosted server or gateway gets no credential, so it must accept calls from the proxy without one.
 
 Headers starting `x-intutic-` are never forwarded.
 
@@ -63,11 +63,15 @@ Your app reads the headers and abstains, escalates or waits for a person. The pr
 
 A forwarded decision call is metered like an LLM call: it produces one trace, priced from the offline pricing bundle (TypeSafe's models by their `typesafe/` entries, OpenAI's by name), and its cost counts against the same budgets. A refused call is not forwarded and costs nothing.
 
+<!-- ENTERPRISE_ONLY_START -->
+On a workspace's bill, each forwarded decision call is one [Governed Request](/guide/plans), as an LLM call is.
+<!-- ENTERPRISE_ONLY_END -->
+
 ---
 
 ## The decision-traffic log
 
-Every call, refused or forwarded, is one line in `~/.intutic/logs/decision-traffic-YYYY-MM-DD.jsonl` (UTC date, mode 0600) on a local proxy. A shared gateway keeps the same record on the call's trace instead. The log is named apart from the [decide log](/guide/decide#the-decide-log), which records Intutic's own decide rules. The proxy deletes files older than 30 days, the decide log's retention, on the first call of each day.
+Every decision call, refused or forwarded, is one line in `~/.intutic/logs/decision-traffic-YYYY-MM-DD.jsonl`, except a body that does not parse, which never was a decision call, and a call refused because no provider key was available. A local proxy writes the file (named by UTC date, mode 0600); a shared gateway keeps the same record on the call's trace instead. The log is named apart from the [decide log](/guide/decide#the-decide-log), which records Intutic's own decide rules. The proxy deletes files older than 30 days, the decide log's retention, on the first call of each day.
 
 ```json
 {"v":1,"at":"2026-10-20T09:00:01.234Z","traceId":"…","workspaceId":"…","virtualKeyId":"vk_ab12cd34",

@@ -115,6 +115,29 @@ describe('loadConfig', () => {
     expect((await loadConfig(['--', 'node', 'server.js'])).controlPlaneUrl, 'the explicit key still wins').toBe('https://explicit.example.test')
   })
 
+  it('reads a blank value as unset, as the runtime.env `intutic gates install` writes with no login', async () => {
+    await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_HOST=\nINTUTIC_API_KEY=\nINTUTIC_WORKSPACE_ID=\n', 'utf-8')
+    const config = await loadConfig(['--', 'node', 'server.js'])
+    expect(config.controlPlaneUrl).toBe('http://localhost:3001')
+    expect(config.workspaceId).toBe('unknown')
+
+    // A blank higher-precedence value falls through to the next source.
+    await node_fs.writeFile(runtimeEnvPath, 'INTUTIC_CONTROL_PLANE_URL= \nINTUTIC_HOST=https://api.example.test\nINTUTIC_WORKSPACE_ID=ws-test-1234\n', 'utf-8')
+    const saved = { url: process.env['INTUTIC_CONTROL_PLANE_URL'], ws: process.env['INTUTIC_WORKSPACE_ID'] }
+    process.env['INTUTIC_CONTROL_PLANE_URL'] = ''
+    process.env['INTUTIC_WORKSPACE_ID'] = ''
+    try {
+      const fallen = await loadConfig(['--', 'node', 'server.js'])
+      expect(fallen.controlPlaneUrl).toBe('https://api.example.test')
+      expect(fallen.workspaceId).toBe('ws-test-1234')
+    } finally {
+      if (saved.url === undefined) delete process.env['INTUTIC_CONTROL_PLANE_URL']
+      else process.env['INTUTIC_CONTROL_PLANE_URL'] = saved.url
+      if (saved.ws === undefined) delete process.env['INTUTIC_WORKSPACE_ID']
+      else process.env['INTUTIC_WORKSPACE_ID'] = saved.ws
+    }
+  })
+
   it('defaults failOpen to true when not specified', async () => {
     const testEnvContent = [
       'INTUTIC_WORKSPACE_ID=ws-test-1234',

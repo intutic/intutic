@@ -896,9 +896,9 @@ const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').diges
  * guardrails `GET /api/v1/workspace/sops-policy` serves, written to
  * `.intutic/sops/guardrail-<id>.md` for a proxy that reads SOPs from disk.
  *
- * Flat, not in a subdirectory: the proxy's loader reads one directory level
- * and titles each SOP by its file stem, and `guardrail-<id>` is a stem the
- * control plane credits shadow reports to. The served markdown already
+ * Flat, not in a subdirectory: the proxy's loader titles a flat file by its
+ * stem but a file one folder down `<folder>/<stem>`, and `guardrail-<id>` is
+ * the bare title the control plane credits shadow reports to. The served markdown already
  * carries its own front-matter fence with the enforcing keys and
  * `mode: shadow`; `withContentHash` puts the pull marker inside that fence
  * rather than wrapping a second one the proxy would never read.
