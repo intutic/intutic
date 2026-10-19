@@ -1,6 +1,6 @@
 # Upgrading to 3.0 <Badge type="tip" text="Open-Core" />
 
-3.0 adds [decide rules](/guide/decide): narrow questions a self-hosted model answers about a tool call. A workspace with no `decide:` line in its SOPs behaves as it did on 2.9, and its policy snapshot is byte for byte what 2.9 wrote. The changes below apply once a SOP carries one.
+3.0 adds [decide rules](/guide/decide), narrow questions a self-hosted model answers about a tool call, and opt-in keys for loops, plans, lanes and agent graphs: a qualified `requires_before`, enforced `scope_paths` and `plan_steps`, `plan_approval`, `closed_lanes`, `on_reask_exhausted`, `context_isolation` and `node_kind`. A workspace whose SOPs use none of them behaves as it did on 2.9, and its policy snapshot is byte for byte what 2.9 wrote. The changes below apply once a SOP carries one.
 
 ---
 
@@ -20,6 +20,20 @@ Decide rule prod-data-export (Production data handling): upgrade to Intutic 3.0 
 A rule is stamped `enforce` only once its `rollout` is `enforce` and a passing `intutic decide eval` has pinned a model for it, so nothing is refused this way on the day you upgrade. When it is, update the gates on each machine that runs the rule: `intutic gates install` rewrites them on a machine with no login, and a connected machine's sync daemon rewrites them on its next sync. Upgrade `@intutic/gate` and `intutic-clawde` to 3.0 in agents that use the gate SDKs.
 
 A 3.0 gate that reads a snapshot format newer than it knows reports `snapshot_format_newer` and enforces what it can read.
+
+---
+
+## Loop, plan and lane keys need gate body v23 {#loop-graph-keys}
+
+A policy snapshot that carries any of the new loop, plan or graph rules is written in format 3, which gate body v23 reads. An older gate, and the 2.9 gate SDKs, cannot evaluate those rules, so the snapshot carries a fallback line for each, with an id starting `<kind>-fallback:`, and the older gate refuses what the rule covers:
+
+- **A qualified `requires_before`** (`action:run_tests[ok] -> X`): every call to X is refused. See [qualified prerequisites](/reference/sop-front-matter#qualified-prerequisites).
+- **`scope_paths_mode: enforce`**: every file change is refused.
+- **`plan_approval:`**: every call is refused.
+
+[Lane](/reference/sop-front-matter#lanes) holds are phrase rules that every gate since v12 reads, so older gates hold them too, and one approval releases a held call at every gate. To enforce the new rules rather than refuse through the fallback lines, rewrite the gates as for decide rules: `intutic gates install` on a machine with no login, or the sync daemon's next sync on a connected one, and upgrade `@intutic/gate` and `intutic-clawde` to 3.0.
+
+A gateway older than 3.0.0 ignores the new keys. The control plane warns when a SOP uses a key the workspace's gateway is too old to read.
 
 ---
 
@@ -50,6 +64,18 @@ The hook gates and the gate SDKs refuse with three codes that 2.x gates never us
 The gate SDKs throw `IntuticGateEscalation`, a subclass of `IntuticGateRefusal`, for `DECIDE_ESCALATED`. Code that catches `IntuticGateRefusal` keeps refusing; code that knows the subclass can ask its user instead. `GOVERNANCE_UNAVAILABLE` was already a code of the proxy and the SDK clients; it is new on the gates.
 
 [Decide escalation by harness](/integrations/decide-escalation) says where an escalation asks rather than refuses.
+
+The loop, plan and graph rules add five more:
+
+| Code | Meaning | Where |
+| :--- | :--- | :--- |
+| `PREREQUISITE_UNMET` | A qualified `requires_before`: the latest test run in the session did not pass, none ran, a later file change made the pass stale, or the harness cannot report test outcomes | gateway, gates and hooks |
+| `OUT_OF_SCOPE` | A file change outside an enforced `scope_paths` | gateway, gates and hooks |
+| `OFF_PLAN` | Under `plan_approval: strict`, the tool is not a step of the session's approved plan | gates and hooks |
+| `PLAN_NOT_APPROVED` | `plan_approval:` requires an approved plan, and the session has none | gates and hooks |
+| `NODE_KIND_DENIED` | The calling node's `node_kind` does not allow the call | gateway (403) |
+
+A refusal now carries `scope` and `evidence` so an agent can retry outside it, and hook harnesses that read exit codes get a `[Intutic] Retry scope:` line. An OPAQUE workspace gets only the code.
 
 ---
 

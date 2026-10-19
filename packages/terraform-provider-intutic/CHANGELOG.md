@@ -1,8 +1,13 @@
-## 0.7.0 (Unreleased)
+## 0.7.0 (October 19, 2026)
 
 FEATURES:
 
 * resource/intutic_guardrail: `kind = "decide"`, a rule that asks a self-hosted model a few narrow `yes_no` or `choice` questions about a tool call (`on = "tool_call"`, with `tools`) or a response (`on = "response"`), and combines the answers with `when`: true refuses, false allows, unknown escalates (`escalate`: `ask`, `review` or `refuse`). New attributes `rule_id` (the IR's `id`), `on`, `questions` and `band` (JSON, written with `jsonencode`), `when`, `escalate`, `rollout` (`shadow` or `enforce`) and `context`; `title` and `tools` take a decide rule's values too. The plan checks the rule exactly as every gate, SDK and the gateway do, with the same first failure and reason text: the shape, then `tools` against `on`, `context`, the question count, each band, the `when` grammar, the names and options `when` uses, that every question is used, and that no question asks about approval. The provider runs the shared decide vectors, so its validation and rule hash agree with the TypeScript, Python and Rust ports.
+* resource/intutic_guardrail: `requires_before` accepts `first = "action:run_tests[ok]"`: the `then` action needs a passing test run in the session, not just any run. A later file change makes the pass stale.
+* resource/intutic_guardrail: the action tokens `action:migrate`, `action:prod_write`, `action:destroy`, `action:force_push` and `action:payment` are accepted wherever an action token is.
+* resource/intutic_workspace_settings: `settings` accepts the keys `closedLanes`, `revertLane`, `decideAutoPromote`, `decideLogUploadEnabled` and `decideLogUploadArgs`.
+* resource/intutic_notification_rule: `event_type` accepts `decide.drift`, `decide.canary_failed` and `decide.promotion_ready`.
+* resource/intutic_provider_credential: `provider_id` accepts the decision-model providers `typesafe` and `fastino`, which take `apiKey`.
 
 ## 0.6.0 (October 16, 2026)
 
