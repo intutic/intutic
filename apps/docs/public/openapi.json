@@ -42653,6 +42653,73 @@
               "stale",
               "uncompiled"
             ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "const": "sop_key_needs_newer_gateway"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "since": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "since"
+                    ]
+                  },
+                  "description": "Each key, and the proxy release that first reads it."
+                },
+                "gateways": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "gatewayId": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "proxyVersion": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "gatewayId",
+                      "name",
+                      "proxyVersion"
+                    ]
+                  },
+                  "description": "The active gateways too old for at least one key; `proxyVersion` null when one has never reported it."
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "keys",
+                "gateways"
+              ]
+            },
+            "description": "Present when the SOP uses a key a registered gateway is too old to read."
           }
         },
         "required": [
@@ -43719,6 +43786,73 @@
               "requiresElevatedApproval",
               "impactSummary"
             ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "const": "sop_key_needs_newer_gateway"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "since": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "since"
+                    ]
+                  },
+                  "description": "Each key, and the proxy release that first reads it."
+                },
+                "gateways": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "gatewayId": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "proxyVersion": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "gatewayId",
+                      "name",
+                      "proxyVersion"
+                    ]
+                  },
+                  "description": "The active gateways too old for at least one key; `proxyVersion` null when one has never reported it."
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "keys",
+                "gateways"
+              ]
+            },
+            "description": "Present when the SOP uses a key a registered gateway is too old to read."
           }
         },
         "required": [

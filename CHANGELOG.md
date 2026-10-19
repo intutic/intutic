@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Saving a SOP warns about gateways too old for its keys.** 3.0.0 said the
+  control plane warned when a SOP used a key the workspace's gateway could not
+  read, but nothing did. `POST` and `PUT /api/v1/sops` now return a
+  `sop_key_needs_newer_gateway` warning naming each such key and each of the
+  organization's registered gateways older than the key's release (or that has
+  never reported its version). The save still succeeds.
+
 ## [3.0.1] - 2026-10-19
 
 ### Fixed

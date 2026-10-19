@@ -33,7 +33,7 @@ A policy snapshot that carries any of the new loop, plan or graph rules is writt
 
 [Lane](/reference/sop-front-matter#lanes) holds are phrase rules that every gate since v12 reads, so older gates hold them too, and one approval releases a held call at every gate. To enforce the new rules rather than refuse through the fallback lines, rewrite the gates as for decide rules: `intutic gates install` on a machine with no login, or the sync daemon's next sync on a connected one, and upgrade `@intutic/gate` and `intutic-clawde` to 3.0.
 
-A gateway older than 3.0.0 ignores the new keys. The control plane warns when a SOP uses a key the workspace's gateway is too old to read.
+A gateway older than 3.0.0 ignores the new keys, so on it they do nothing. Saving a SOP that uses one, through the dashboard or `POST` / `PUT /api/v1/sops`, still succeeds, but the response carries a `sop_key_needs_newer_gateway` warning naming each key and each of the organization's registered gateways too old to read it (or that has never reported its version), and the dashboard shows it beside the SOP. Local proxies do not register, so they are never named.
 
 ---
 
