@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The hook gates refuse more ways for an agent to switch governance off.**
+  `intutic daemon stop` and `intutic daemon uninstall` (and `uninstall-daemon`),
+  which take down the sync-daemon or, with `--proxy` or `--mcp`, the governing
+  proxies; `intutic logout`, which stops policy sync and the audit-trail
+  upload; any read or write of `~/.intutic/credentials.json`; and
+  `intutic disconnect` run as `node …/cli.js`, which 3.0.2 missed. You can
+  still run them yourself. The Kitkat skill lists them.
+
 ## [3.0.2] - 2026-10-19
 
 ### Added

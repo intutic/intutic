@@ -110,7 +110,7 @@ Inside the cluster, connections to PostgreSQL use TLS 1.2 or later, every client
 |---|---|---|
 | Session state & caches | Valkey (Redis-compatible) | None from Intutic. The `intutic-valkey` container `intutic start` runs keeps Valkey's default snapshots on disk, in its `/data` volume |
 | Bandit learning (no Valkey) | `~/.intutic/bandit-state.json` | None — a plain JSON file with your default file permissions |
-| Local config & credentials | `~/.intutic/credentials.json` | File permissions (`0600`) + system keychain |
+| Local config & credentials | `~/.intutic/credentials.json` | File permissions (`0600`) + system keychain; the hook gates refuse an agent tool call that names the file |
 | Provider credentials in flight | Process memory only | Never written to disk |
 
 ### What the proxy keeps

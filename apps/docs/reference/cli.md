@@ -384,6 +384,8 @@ must run on this machine or a private address, or on a host listed in
 one, is read from `INTUTIC_DECIDE_API_KEY` only and is never written. The `INTUTIC_DECIDE_*`
 variables override the file (see [Configuration](/reference/configuration)).
 
+The hook gates refuse this command when an agent runs it: run it yourself.
+
 | Option | Description |
 |--------|-------------|
 | `--url <url>` | The engine's base URL. Default `http://127.0.0.1:11434` (Ollama) |
@@ -405,6 +407,8 @@ per-call p95 and names every harness whose time budget a rule cannot fit.
 Run every decide rule on this machine as shadow (each call is logged, none is refused) until
 `intutic decide enable`. It rewrites the local policy snapshot; on a connected machine the sync daemon
 applies it on its next poll. A `decide:` line that does not read still refuses its tools.
+
+The hook gates refuse this command when an agent runs it: run it yourself.
 
 ---
 
@@ -485,6 +489,8 @@ engine's configuration, an env block, and a Helm values snippet. Writes files on
 `local_judge` is deliberately not remotely configurable (see [the self-hosted gateway's local
 judge](/external/self-hosted-gateway#4-what-does-not-run-locally-read-this-before-you-deploy)).
 See [On-Prem Judge Setup](/external/on-prem-judge) for the full walkthrough.
+
+The hook gates refuse this command when an agent runs it: run it yourself.
 
 ```bash
 intutic judge configure [options]
@@ -587,6 +593,8 @@ intutic login --control-plane-url https://intutic.internal.example
 ## `intutic logout` <Badge type="tip" text="Cloud" />
 
 Clear stored credentials.
+
+The hook gates refuse this command when an agent runs it: run it yourself.
 
 ```bash
 intutic logout
@@ -810,6 +818,8 @@ interval. Files larger than 512 KB are not captured.
 ## `intutic disconnect`
 
 Undo `intutic connect` or [`intutic gates install`](#intutic-gates-install) on this machine: put every harness config they changed back the way it was, remove the gates and the background services, and log out.
+
+The hook gates refuse this command when an agent runs it: run it yourself.
 
 ```bash
 intutic disconnect [options]
@@ -4980,6 +4990,8 @@ Because the service restarts on any exit, stopping it requires `intutic daemon s
 
 Remove the sync-daemon system service and stop it permanently.
 
+The hook gates refuse this command when an agent runs it: run it yourself.
+
 ```bash
 intutic daemon uninstall [options]
 ```
@@ -5038,6 +5050,8 @@ intutic daemon start --mcp
 ## `intutic daemon stop`
 
 Stop and unload the sync-daemon system service. With `--proxy` or `--mcp`, the same for the standalone proxy service or the MCP proxy daemon.
+
+The hook gates refuse this command when an agent runs it: run it yourself.
 
 ```bash
 intutic daemon stop
