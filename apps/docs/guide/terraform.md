@@ -5,7 +5,7 @@ description: Manage SOPs, policy guardrails, workspace settings, virtual keys, g
 
 # Manage Intutic with Terraform <Badge type="tip" text="Cloud" />
 
-The Intutic Terraform provider manages a workspace's governance configuration as code: review it in a pull request, apply it from CI, and see drift when someone changes it in the dashboard. It talks to the control plane's REST API, so it works the same against Intutic Cloud and a self-hosted control plane.
+The Intutic Terraform provider manages a workspace's governance configuration as code: review it in a pull request, apply it from CI, and see drift when someone changes it in the dashboard. It talks to the REST API of the control plane you name with `endpoint` or `INTUTIC_CONTROL_PLANE_URL`; since provider 0.6.0 there is no default.
 
 | Resource | Manages | API |
 |---|---|---|
@@ -35,13 +35,13 @@ terraform {
   required_providers {
     intutic = {
       source  = "intutic/intutic"
-      version = "~> 0.4"
+      version = "~> 0.7"
     }
   }
 }
 ```
 
-Provider 0.4.0 removed the `intutic_policy` resource, with the control plane's policies API. Before upgrading from an earlier version, delete every `intutic_policy` block and run `terraform state rm` on each one. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"`, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`; a workspace that has not set it uses `TRANSPARENT`.
+Decide-rule guardrails (`kind = "decide"`) need provider 0.7.0 or later. Provider 0.4.0 removed the `intutic_policy` resource, with the control plane's policies API. Before upgrading from an earlier version, delete every `intutic_policy` block and run `terraform state rm` on each one. Write per-tool rules as `intutic_guardrail` with `kind = "hook_rule"`, and set the intervention mode with the `interventionMode` key of `intutic_workspace_settings`; a workspace that has not set it uses `TRANSPARENT`.
 
 Its source is in the open-core repository, under `packages/terraform-provider-intutic`. To run a build of your own instead, build it and point Terraform at the binary:
 
@@ -71,7 +71,7 @@ The provider acts as the key's member. Most resources need an OWNER or ADMIN rol
 
 ```sh
 export INTUTIC_API_KEY=vk_...
-# A self-hosted control plane:
+# The control plane's base URL. Required: the provider has no default.
 export INTUTIC_CONTROL_PLANE_URL=https://intutic.example.internal
 ```
 
@@ -196,4 +196,4 @@ The API cannot change an uploaded rule's bytes, so a rebuilt file replaces the r
 - Org-wide SOPs, members and roles, SSO and SCIM are managed in the dashboard.
 - `intutic_workspace_budget` sets the workspace caps; destroying it leaves them as they are. A workspace that has not saved a daily cap is held to $100 a day (see [Budgets](/guide/budgets#workspace-caps)).
 - `intutic_sop_optimizer_settings` sets the SOP Optimizer's approval mode; destroying it sets the mode back to `manual`, and leaving `auto_threshold` out keeps the workspace's current threshold.
-- A virtual key belongs to the member whose key runs Terraform, and Terraform sees only that member's keys.
+- A virtual key belongs to the member whose key runs Terraform. A key already in state stays visible to another member's key with the OWNER, ADMIN or EM role, and an OWNER or ADMIN revokes it on destroy; below EM, Terraform sees only that member's own keys. Importing a virtual key needs a key of the member who owns it.

@@ -53,7 +53,9 @@ Three jobs:
 Anyone who can push a branch can change the workflow its pull request runs, so the key a pull request can reach should not be able to write. The workflow uses two keys:
 
 - `INTUTIC_API_KEY`, an OWNER or ADMIN automation key, lives in the secrets of a protected `intutic` environment that only the apply job uses.
-- `INTUTIC_PLAN_API_KEY`, a repository secret for the plan and drift jobs, can belong to a member with the EM role: a plan only reads, and EM can read everything this configuration manages. If the configuration manages `intutic_virtual_key` resources, both keys must belong to the same member, because the API shows a member only their own keys; the plan key then has the apply key's role, so create it with read scopes only (for this configuration `sops:read`, `policies:read`, `settings:read`, `billing:read` and `inventory:read`, plus `keys:read` for virtual keys), and the API refuses its writes.
+- `INTUTIC_PLAN_API_KEY`, a repository secret for the plan and drift jobs, can belong to a member with the EM role: a plan only reads, and EM can read everything this configuration manages. An EM sees the `intutic_virtual_key` resources in state too: the API lists every live key in the workspace to an OWNER, ADMIN or EM. Create the plan key with read scopes only (for this configuration `sops:read`, `policies:read`, `settings:read`, `billing:read` and `inventory:read`, plus `keys:read` for virtual keys), so the API refuses its writes whatever its role.
+
+Every job also reads the control plane's base URL from the repository variable `INTUTIC_CONTROL_PLANE_URL`: the provider has no default endpoint.
 
 Each job also needs whatever credentials your backend reads, which the example leaves out. GitHub does not pass secrets to workflows run from forks, so a pull request from a fork gets a failed plan rather than a key. The [authentication guide](https://registry.terraform.io/providers/intutic/intutic/latest/docs/guides/authentication) explains the roles.
 

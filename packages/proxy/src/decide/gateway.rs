@@ -669,9 +669,15 @@ impl GatewayRules {
                 match decl {
                     DecideDecl::Rule(rule) => {
                         let hash = rule_hash(rule);
+                        // With nothing served, a `mode: shadow` SOP stamps its own
+                        // rules shadow, as the hook gates and SDKs do with the
+                        // snapshot the sync daemon writes (`localDecideRules`).
                         let (pins, server_shadow) = match served {
                             Some(served) => served.get(&hash),
-                            None => (read_pins(dir, &hash), false),
+                            None => (
+                                read_pins(dir, &hash),
+                                sop.mode == crate::sops::SopMode::Shadow,
+                            ),
                         };
                         let (rollout, stamped_by) =
                             stamp(rule, &pins, disabled, server_shadow, mode);
@@ -1218,6 +1224,45 @@ mod tests {
         assert_eq!(
             state,
             format!("ACTIVE SOP CONSTRAINTS:\n# Production data handling\n\nCustomer data never leaves production.\n\nASSISTANT RESPONSE:\n{leak}")
+        );
+    }
+
+    /// A local `mode: shadow` SOP runs its decide rules in shadow at the
+    /// gateway, as at the gates (CHANGELOG 3.0.0); the SOP's mode was dropped
+    /// here until 2026-10-19, so a pinned rule in a shadow SOP enforced.
+    #[test]
+    fn a_local_shadow_sop_stamps_its_rules_shadow() {
+        let rule = "decide: {\"id\":\"exports\",\"on\":\"tool_call\",\"tools\":[\"Bash\"],\"questions\":{\"x\":{\"type\":\"yes_no\",\"ask\":\"Does this command copy customer data out of production?\"}},\"when\":\"x\",\"rollout\":\"enforce\"}";
+        let parse = |front: &str| {
+            crate::sops::parse_sop_content(
+                "data".into(),
+                &format!("---\n{front}\n---\n# Data\n\nNo exports.\n"),
+                "test",
+                crate::sops::SopScope::Workspace,
+            )
+            .expect("the SOP parses")
+        };
+        let dir = temp_dir("local-shadow-sop");
+        let stamp_of = |sop| {
+            let rules = GatewayRules::from_sops_in(
+                &[sop],
+                "",
+                InterventionMode::Transparent,
+                true,
+                &dir,
+                None,
+            );
+            let e = &rules.entries()[0];
+            (e.rollout, e.stamped_by.clone())
+        };
+        assert_eq!(
+            stamp_of(parse(&format!("mode: shadow\n{rule}"))),
+            (Rollout::Shadow, "server-shadow".to_string())
+        );
+        // The same rule in an enforcing SOP falls through to the pin check.
+        assert_eq!(
+            stamp_of(parse(rule)),
+            (Rollout::Shadow, "no-pins".to_string())
         );
     }
 

@@ -46,7 +46,7 @@ decide: {"id":"prod-data-export","on":"tool_call","tools":["Bash"],"questions":{
 ```
 
 - **There is no `mode` field.** A rule is read strictly, so `"mode": "shadow"` inside the JSON is an unknown field: the line does not read (`decide: unknown field mode`) and refuses its tools.
-- **A SOP's own `mode: shadow` does not reach its decide rules.** It governs the SOP's other keys. A decide rule runs as shadow because its own `rollout` says so, or for one of the reasons in [When a rule enforces](/guide/decide#when-a-rule-enforces).
+- **A SOP's own `mode: shadow` runs its decide rules as shadow** too, whatever their `rollout` says; the decide log records the reason as `server-shadow`. A decide rule also runs as shadow because its own `rollout` says so, or for one of the other reasons in [When a rule enforces](/guide/decide#when-a-rule-enforces).
 - **`"rollout": "enforce"` is a ceiling, not a switch.** The rule enforces only on a model a pre-registered `intutic decide eval` has pinned, and runs as shadow everywhere else.
 
 ---
@@ -125,7 +125,7 @@ Without a band there is no equivalent rule, so the free-text verdict keeps decid
 
 ## Decision calls are governed {#decision-traffic}
 
-The proxy now answers `POST /v1/systemone` and `POST /v1/decisions` itself, as [decision traffic](/guide/decision-traffic), instead of passing them through as unrecognised requests. Two things can refuse a call that 2.9 forwarded: a DLP `block` pattern in the state, and, in the default `enforce` mode, a model with no pinned version, such as `jev-latest` (`403 policy_denied`). Pin the version, or set `decision_traffic.mode: shadow` or `decision_traffic.allow_unpinned: true` while you move.
+The proxy now answers `POST /v1/systemone` and `POST /v1/decisions` itself, as [decision traffic](/guide/decision-traffic), instead of passing them through as unrecognised requests. So it can refuse a call that 2.9 forwarded; [what is checked before the call](/guide/decision-traffic#what-is-checked-before-the-call) lists the checks. The two you are most likely to meet are a DLP `block` pattern in the state and, in the default `enforce` mode, a model with no pinned version, such as `jev-latest` (`403 policy_denied`). Pin the version, or set `decision_traffic.mode: shadow` or `decision_traffic.allow_unpinned: true` while you move.
 
 ---
 

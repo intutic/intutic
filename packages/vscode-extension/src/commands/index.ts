@@ -1,8 +1,6 @@
 import * as vscode from 'vscode'
-import * as fs from 'node:fs'
-import * as os from 'node:os'
-import * as path from 'node:path'
 import { exec } from 'node:child_process'
+import { loadCredentials } from '../credentials'
 import {
   buildWebview,
   LOADING_HTML,
@@ -17,42 +15,12 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-interface IntuticCreds {
-  controlPlaneUrl?: string
-  apiKey?: string
-  workspaceId?: string
-}
-
-/**
- * Resolve the control plane from the credentials `intutic connect` writes.
- *
- * These views used to hardcode `http://127.0.0.1:4000` — the Rust proxy's port,
- * not the control plane's (3001) — while requesting control-plane paths
- * (/api/v1/sops, /api/v1/incidents, /api/v1/wasm-rules), and they sent no
- * Authorization header at all. So every panel was empty on every machine: wrong
- * port, and a 401 even at the right one.
- *
- * ~/.intutic/credentials.json already carries controlPlaneUrl, apiKey and
- * workspaceId, so the extension can configure itself from a `intutic connect`
- * the developer has already run. A VS Code setting overrides it.
- */
-function loadCreds(): IntuticCreds | null {
-  const override = vscode.workspace.getConfiguration('intutic').get<string>('controlPlaneUrl')
-  try {
-    const file = path.join(os.homedir(), '.intutic', 'credentials.json')
-    const creds = JSON.parse(fs.readFileSync(file, 'utf-8')) as IntuticCreds
-    return { ...creds, controlPlaneUrl: override || creds.controlPlaneUrl }
-  } catch {
-    return override ? { controlPlaneUrl: override } : null
-  }
-}
-
 /**
  * Fetch JSON from the Intutic control plane. Returns null on any error — all
  * callers degrade gracefully into an empty panel.
  */
 async function fetchLocal<T>(reqPath: string): Promise<T | null> {
-  const creds = loadCreds()
+  const creds = await loadCredentials(vscode.workspace.getConfiguration('intutic').get<string>('controlPlaneUrl'))
   const base = creds?.controlPlaneUrl
   if (!base) return null
 
@@ -80,14 +48,12 @@ async function fetchLocal<T>(reqPath: string): Promise<T | null> {
 export function registerCommands(context: vscode.ExtensionContext) {
   // 1. Connect
   const connectCmd = vscode.commands.registerCommand('intutic.connect', () => {
-    vscode.window.showInformationMessage('Connecting to Intutic Workspace…')
-    exec('intutic connect', (err, stdout, stderr) => {
-      if (err) {
-        vscode.window.showErrorMessage(`Failed to connect: ${stderr || err.message}`)
-        return
-      }
-      vscode.window.showInformationMessage(stdout || 'Intutic connected.')
-    })
+    // `intutic connect` stays in the foreground until stopped, and needs a
+    // control plane named by `intutic login`, so it runs in a terminal the
+    // developer can watch rather than as a child process that never returns.
+    const terminal = vscode.window.createTerminal('Intutic')
+    terminal.sendText('intutic connect')
+    terminal.show()
   })
 
   // 2. Status

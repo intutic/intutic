@@ -44,7 +44,7 @@ function formatDate(value: unknown): string {
 }
 
 const OFFLINE_BANNER =
-  '<div class="offline-banner">⚠ Control plane offline — start the sync daemon with <code>intutic connect</code></div>'
+  '<div class="offline-banner">⚠ No control plane reachable. These panels read one: set <code>intutic.controlPlaneUrl</code> or <code>INTUTIC_CONTROL_PLANE_URL</code>, or sign in with <code>intutic login</code>.</div>'
 
 /**
  * Shared webview shell with Intutic dark-mode styling.
@@ -183,7 +183,7 @@ export interface SopList {
 export function renderSops(data: SopList | null): string {
   const sops = list(data?.items)
 
-  let body = `<h1>$(shield) Active SOPs</h1>
+  let body = `<h1>Active SOPs</h1>
 <p class="subtitle">Showing up to 50 active SOPs in the connected workspace</p>`
 
   if (!data) body += OFFLINE_BANNER

@@ -19,7 +19,7 @@ Declare the provider in a `versions.tf`:
 
 `terraform init` downloads it from the Registry and checks its signature. Commit the `.terraform.lock.hcl` it writes, so every run uses the same build.
 
-Before 1.0, a minor release can change behaviour you rely on: 0.4.0 removed the `intutic_policy` resource. `~> 0.4` takes every later 0.x release, so read the [changelog](https://github.com/intutic/intutic/blob/main/packages/terraform-provider-intutic/CHANGELOG.md) before `terraform init -upgrade` moves the lock file to a new release.
+Before 1.0, a minor release can change behaviour you rely on: 0.4.0 removed the `intutic_policy` resource, and 0.6.0 removed the default endpoint. `~> 0.7` takes every later 0.x release, so read the [changelog](https://github.com/intutic/intutic/blob/main/packages/terraform-provider-intutic/CHANGELOG.md) before `terraform init -upgrade` moves the lock file to a new release.
 
 ## Authenticate
 
@@ -31,10 +31,11 @@ The provider authenticates with a workspace API key (`vk_…`) created with **Th
 3. Copy the key; it is shown once.
 -->
 
-Give it to the provider through the environment, not the configuration:
+Give it to the provider through the environment, not the configuration, with the control plane's base URL:
 
 ```shell
 export INTUTIC_API_KEY="vk_..."
+export INTUTIC_CONTROL_PLANE_URL="https://intutic.example.internal"
 ```
 
 | Argument   | Environment variable        | Default                  |

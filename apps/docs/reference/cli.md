@@ -139,10 +139,11 @@ intutic start [options]
 
 **What it does:**
 
-1. **Local gates.** On a machine with no login whose gates [`intutic gates install`](#intutic-gates-install) installed, refreshes them before the proxy starts (the gate scripts, the rules files from `.intutic/sops/` and the policy snapshot), and again whenever `.intutic/sops/` changes while the proxy runs. The refresh never writes routing. With no gates installed, one line names the recorded harnesses that have none. `--no-gates` skips this step.
-2. **Valkey (best-effort).** Checks for a Valkey or Redis on `127.0.0.1:<valkey-port>`. If none is listening, it tries, in order: starting an `intutic-valkey` Docker container (`valkey/valkey:8-alpine`), then `valkey-server` or `redis-server` from `PATH`. If none of these works, it warns and continues in standalone mode: routing, policies, DLP, and local spend caps all still work; bandit learning persists to `~/.intutic`, and the response cache lasts only as long as the process.
-3. **Proxy binary.** Runs the version-matched binary in `~/.intutic/bin/` if it is there, otherwise `intutic-proxy` from `PATH`. If neither exists it prints `npm install -g @intutic/proxy` and exits with status `1`.
-4. **Proxy environment.** Starts the proxy with your environment plus:
+1. **Local gates.** On a machine with no login whose gates [`intutic gates install`](#intutic-gates-install) installed, refreshes them before the proxy starts (the gate scripts, the rules files from `.intutic/sops/` and the policy snapshot), and again whenever `.intutic/sops/` changes while the proxy runs. The refresh never writes routing. Each refresh also deletes the decide logs in `~/.intutic/logs/` (`decide-<date>.jsonl`, and the `decide-state-<date>.jsonl` files `--log-state` writes) more than 30 days old. With no gates installed, one line names the recorded harnesses that have none. `--no-gates` skips this step.
+2. **Decide engine (background).** When the policy snapshot carries decide rules and an engine is configured (`intutic decide configure`, or `INTUTIC_DECIDE_MODEL`), it loads the engine's model and keeps it loaded for 8 hours (Ollama's `keep_alive`, with the `logprobs` adapter only), then runs the known-answer canary and stores the result in `~/.intutic/decide/canary.json`, where the gates read it. This runs beside the proxy's start-up: each result is printed, and none stops or delays the proxy.
+3. **Valkey (best-effort).** Checks for a Valkey or Redis on `127.0.0.1:<valkey-port>`. If none is listening, it tries, in order: starting an `intutic-valkey` Docker container (`valkey/valkey:8-alpine`), then `valkey-server` or `redis-server` from `PATH`. If none of these works, it warns and continues in standalone mode: routing, policies, DLP, and local spend caps all still work; bandit learning persists to `~/.intutic`, and the response cache lasts only as long as the process.
+4. **Proxy binary.** Runs the version-matched binary in `~/.intutic/bin/` if it is there, otherwise `intutic-proxy` from `PATH`. If neither exists it prints `npm install -g @intutic/proxy` and exits with status `1`.
+5. **Proxy environment.** Starts the proxy with your environment plus:
    - `PORT` set to `--port`
    - with Valkey running: `VALKEY_URL`, taken from your environment if set, otherwise `redis://127.0.0.1:<valkey-port>`
    - without Valkey: `INTUTIC_STANDALONE=1` — unless `CONTROL_PLANE_URL` is set in your environment. That marks a managed deployment, where the proxy requires Valkey and refuses to start without it; `intutic start` leaves that decision to the proxy.
@@ -184,7 +185,7 @@ intutic gates install [options]
 **What it writes**, for every recorded harness (one with `--harness`):
 
 1. **The gate.** The same tool-call gate [`intutic connect`](#intutic-connect) installs, registered where the harness reads it (`.claude/settings.json` for Claude Code, Cursor's `hooks.json`, and so on). Your own hooks and settings stay. Every gate enforces the built-in protections, such as refusing an agent's attempt to remove or unlock Intutic's own files.
-2. **The policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules` and `.json`) every gate reads: the destructive-command and skill-directory tiers, and each `review_before:` token in `.intutic/sops/`. With no control plane to approve a hold, a `review_before:` token is refused outright, with a message saying so, rather than held. The snapshot names no workspace and is marked `source: local`.
+2. **The policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules` and `.json`) every gate reads: the destructive-command and skill-directory tiers, and from `.intutic/sops/` each `review_before:` token, the lane holds of each `closed_lanes:`, the `decide:` rules (with the pins `intutic decide eval` wrote), and the rule records: each qualified `requires_before:` (`[ok]`), `scope_paths:` under `scope_paths_mode: enforce`, and `plan_approval:`. A SOP with `roles:` contributes no rule records or lane holds, since a gate knows no role. With no control plane to approve a hold, a `review_before:` token or a lane hold is refused outright, with a message saying so, rather than held, and `plan_approval:` refuses every gated call that is not a read (`PLAN_NOT_APPROVED`). The snapshot names no workspace and is marked `source: local`.
 3. **The rules files** from the SOPs in `.intutic/sops/`, into each harness's own file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). A harness no SOP targets gets no rules file.
 
 It also blanks the API key an earlier `intutic connect` may have left in `~/.intutic/env/runtime.env`,
@@ -308,6 +309,7 @@ fitted by the calibration job gets the planted-approval mark its promotion needs
 | `--labels <file>` | The labelled calls, JSONL |
 | `--preregister <file>` | Write the pre-registration when the file is absent (reading no label); evaluate against it when present |
 | `--adversarial` | Add the adversarial families (always on under a pre-registration) |
+| `--calibration <id>` | With `--preregister`, when writing the pre-registration: pre-register the band and combiner of a candidate calibration of this rule that a control plane holds, fitted on the engine's model, and register the run as that calibration's companion. Needs a control plane: refused without a login |
 | `--json` | Print the run report as JSON |
 | `--log-state` | Also write each exact state sent to `~/.intutic/logs/decide-state-<date>.jsonl` |
 | `--workspace <dir>` | The workspace whose `.intutic/sops` to read |
@@ -385,7 +387,7 @@ variables override the file (see [Configuration](/reference/configuration)).
 | Option | Description |
 |--------|-------------|
 | `--url <url>` | The engine's base URL. Default `http://127.0.0.1:11434` (Ollama) |
-| `--adapter <adapter>` | `logprobs` (Ollama, vLLM, llama.cpp, LM Studio), `systemone` or `decisions` |
+| `--adapter <adapter>` | `logprobs` (Ollama, vLLM, llama.cpp, LM Studio), `systemone` or `decisions`. Default `logprobs` |
 | `--model <model>` | The model the engine serves. Without one the engine is not configured |
 | `--timeout-ms <ms>` | Per-call timeout. Default 5000 |
 | `--parallel <n>` | Most requests in flight. Default 1 for Ollama, 8 otherwise |
@@ -433,8 +435,8 @@ change the status.
 
 Guided setup wizard — detect harnesses, configure a provider credential, and verify it, in one
 interactive flow. It is the interactive counterpart of `intutic init`, not a replacement: this
-command always prompts, while `init` asks only about Git hooks, and never without a terminal, so
-it stays safe for CI. See [the cohort wizard guide](/guide/cohort-wizard) for a full narrative walkthrough
+command always prompts, while `init` asks only whether to install the Git hooks and the gates, and
+never without a terminal, so it stays safe for CI. See [the cohort wizard guide](/guide/cohort-wizard) for a full narrative walkthrough
 of every step.
 
 ```bash
@@ -630,7 +632,7 @@ intutic whoami [options]
 
 ## `intutic doctor`
 
-Diagnose workspace health — proxy, auth, daemon, configs, logs, Valkey, CA trust, policy snapshot.
+Diagnose workspace health — proxy, auth, daemon, configs, logs, Valkey, CA trust, policy snapshot, gates, decide.
 
 ```bash
 intutic doctor
@@ -647,8 +649,9 @@ No options. Runs these checks in order, each printing ✓ or ✗ plus a one-line
 7. CA cert trust (`~/.intutic/ca.crt` plus the OS trust store)
 8. Policy snapshot present, valid, non-empty and fresh (`~/.intutic/hooks/policy-snapshot.rules`)
 9. Local gates, on a machine with no login: a gate file for each recorded harness that has one
-10. Cisco skill scanner on `PATH` (optional; never fails)
-11. Decide, when the snapshot carries decide rules or an engine is configured: the engine and its model (with the digest, and a note when the server cannot report a weights digest), the known-answer canary (cached in `~/.intutic/decide/canary.json`), the per-call p95 of 20 warm calls (stored in `~/.intutic/decide/engine.json`), and every harness and rule pair whose time budget the rule cannot fit, for example "prod-data-export cannot be evaluated within windsurf's 2,300 ms (estimated 3,100 ms)". Such a rule escalates there instead of being asked
+10. Plan approval, only when a SOP sets `plan_approval:`: with no control plane connected it fails, since every gated call that is not a read is refused with `PLAN_NOT_APPROVED`; on a connected machine it fails until the daemon has written a fresh approved-plans cache (`~/.intutic/hooks/approved-plans.jsonl`)
+11. Cisco skill scanner on `PATH` (optional; never fails)
+12. Decide, always. With no decide rules in the snapshot and no engine configured it prints one passing line, `✓ Decide — no decide rules and no engine configured`. Otherwise: the engine and its model (with the digest, and a note when the server cannot report a weights digest), the known-answer canary (cached in `~/.intutic/decide/canary.json`), the per-call p95 of 20 warm calls (stored in `~/.intutic/decide/engine.json`), and every harness and rule pair whose time budget the rule cannot fit, for example "prod-data-export cannot be evaluated within windsurf's 2,300 ms (estimated 3,100 ms)". Such a rule escalates there instead of being asked
 
 Checks 2–5 need a control plane. On a machine with no login they are skipped with one note, the
 proxy and CA-trust remediations point at `intutic start`, and checks 8 and 9 look at what
@@ -1657,7 +1660,7 @@ intutic loop start [options]
 |--------|-------------|---------|
 | `--name <name>` | Name for the loop run (need not be unique; the run is addressed by its `lr_…` id) | _(required)_ |
 | `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | `10.00` (set by the control plane) |
-| `--sops <sops>` | Comma-separated local SOP folder names or option indices | — |
+| `--sops <sops>` | Comma-separated local rule sets to select: SOP folder names, single SOP file names (`deploy` or `deploy.md`) in `.intutic/sops/`, or option indices (folders first, then files). The selection narrows only which local SOPs are written into the rules files; the gates and the proxy still enforce every local SOP | — |
 | `--auto-judge` | Enable automatic E2E judging for the loop | — |
 | `--dev` | Use local control plane | — |
 
@@ -1677,7 +1680,7 @@ intutic loop exec [options] -- <command> [args...]
 |--------|-------------|---------|
 | `--name <name>` | Name for the loop run (need not be unique; the run is addressed by its `lr_…` id) | `exec-<command>` (e.g. `exec-npm`) |
 | `--budget <limit>` | Maximum token spend budget in USD (e.g. `5.00`) | `10.00` (set by the control plane) |
-| `--sops <sops>` | Comma-separated local SOP folder names or option indices | — |
+| `--sops <sops>` | Comma-separated local rule sets to select: SOP folder names, single SOP file names (`deploy` or `deploy.md`) in `.intutic/sops/`, or option indices (folders first, then files). The selection narrows only which local SOPs are written into the rules files; the gates and the proxy still enforce every local SOP | — |
 | `--auto-judge` | Enable automatic E2E judging for the loop | — |
 | `--dev` | Use local control plane | — |
 
@@ -1804,7 +1807,7 @@ intutic loop review <loop_run_id> (--approve | --reject) [--note <note>] [option
 Exactly one of `--approve` and `--reject` is required; passing neither or both exits `1`.
 
 **What it does:**
-Resolves a run in `PENDING_REVIEW`: the state a `review_before:` SOP puts a whole run in when the proxy sees a declared action, after which every request in the run is refused until someone reviews it. A run in any other state is refused. It needs the OWNER, ADMIN or EM role. When the workspace requires a different approver (`loop_review.requireDistinctApprover`, off by default), the member who started the run cannot approve or reject it; an owner or admin turns that on with `PUT /api/v1/workspace/settings` and `{"loop_review": {"requireDistinctApprover": true}}`, and the change is recorded in the settings history.
+Resolves a run in `PENDING_REVIEW`: the state a `review_before:` SOP puts a whole run in when the proxy sees a declared action, or an `on_reask_exhausted: pause` SOP puts it in on the third failed correction (see [SOP front matter](/reference/sop-front-matter)), after which every request in the run is refused until someone reviews it. After an approval that followed `on_reask_exhausted: pause`, the run gets three fresh correction attempts. A run in any other state is refused. It needs the OWNER, ADMIN or EM role. When the workspace requires a different approver (`loop_review.requireDistinctApprover`, off by default), the member who started the run cannot approve or reject it; an owner or admin turns that on with `PUT /api/v1/workspace/settings` and `{"loop_review": {"requireDistinctApprover": true}}`, and the change is recorded in the settings history.
 
 **How it differs from `intutic decision approve|reject`:** `loop review` acts on a whole **loop run**, addressed by its loop run id. `decision` acts on a single **held tool call**, the `hold_…` id a harness hook gate prints when it holds a call. The two ids are not interchangeable: a hold id given to `loop review` is not found.
 
@@ -2701,7 +2704,7 @@ intutic guardrails pull
 | `--dev` | Use local control plane (`http://localhost:3001`) |
 
 **What it does:**
-Fetches the workspace SOP policy and writes one flat file per served guardrail, named by the guardrail id — flat because the proxy reads one directory level and titles each SOP by its file name, and that name is what its shadow reports are credited to. The served front matter (the enforcing keys, `mode: shadow`, `source:`, `cite:`) is kept in its single fence and a `content_hash:` marker is added inside it. Refuses to overwrite a file whose recorded hash no longer matches its body unless `--force` is passed; reports a file whose guardrail is no longer served, and removes it only with `--prune` and only when unmodified. A gateway-mode proxy reads the served projection directly and ignores this directory. See [Policy Guardrails](/guide/policy-guardrails).
+Fetches the workspace SOP policy and writes one flat file per served guardrail, named by the guardrail id, directly in `.intutic/sops/`. The proxy reads the files there and one folder down, and titles a file directly in the directory by its file name alone (a file in a folder is titled `<folder>/<name>`); that title is what the guardrail's shadow reports are credited to. The served front matter (the enforcing keys, `mode: shadow`, `source:`, `cite:`) is kept in its single fence and a `content_hash:` marker is added inside it. Refuses to overwrite a file whose recorded hash no longer matches its body unless `--force` is passed; reports a file whose guardrail is no longer served, and removes it only with `--prune` and only when unmodified. A gateway-mode proxy reads the served projection directly and ignores this directory. See [Policy Guardrails](/guide/policy-guardrails).
 
 ---
 
@@ -4840,7 +4843,7 @@ intutic enforce <action> [options]
 | `apply` | Root | Applies the default-deny egress firewall. All egress except the proxy, DNS, and `--allow` infrastructure is dropped. |
 | `remove` | Root | Removes the Intutic egress firewall. |
 | `status` | None | Reports whether the egress firewall is currently applied. |
-| `report` | None (needs `intutic login`) | Reports the locally recorded enforcement state (firewall, CA-trust, system-hooks posture) to the control plane. For when `apply`/`remove` ran elevated and couldn't reach stored credentials. |
+| `report` <Badge type="tip" text="Cloud" /> | None (needs `intutic login`) | Reports the locally recorded enforcement state (firewall, CA-trust, system-hooks posture) to the control plane. For when `apply`/`remove` ran elevated and couldn't reach stored credentials. |
 
 **Options** (`apply`/`remove`/`status`/`generate`):
 
@@ -4954,7 +4957,7 @@ Also available as the top-level shortcut `intutic install-daemon`, with the same
 |--------|-------------|---------|
 | `--workspace-id <id>` | Workspace ID, e.g. `wk_xxxx` (required unless `--proxy`) | — |
 | `--api-key <key>` | Workspace API key, e.g. `vk_xxxx` (required unless `--proxy`) | — |
-| `--control-plane-url <url>` | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL` (or `INTUTIC_DEV=1`), then a workspace initialized with `intutic init --dev`, then the URL saved by `intutic login`; this release has no default |
+| `--control-plane-url <url>` <Badge type="tip" text="Cloud" /> | Control plane the sync-daemon or MCP daemon connects to, written into the service | Resolved as in [Choosing a control plane](#control-plane-url): `INTUTIC_CONTROL_PLANE_URL` (or `INTUTIC_DEV=1`), then a workspace initialized with `intutic init --dev`, then the URL saved by `intutic login`; this release has no default |
 | `--binary-path <path>` | Path to the `intutic` CLI binary; with `--proxy`, an absolute path to `intutic-proxy` | _(current process; with `--proxy`, the launcher's pinned binary, then `intutic-proxy` on PATH)_ |
 | `--dry-run` | Print what would be done without writing files | — |
 | `--system` | Install as a system-level service (LaunchDaemon on macOS, systemd system unit on Linux) | — |

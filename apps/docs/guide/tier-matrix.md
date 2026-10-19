@@ -65,6 +65,11 @@ list is a trial or a degraded preview of a paid feature:
 | Guardrails from policy documents | hand-written SOP files and rules | Notion, Confluence, GitHub, Google Docs and uploads become cited, shadow-first guardrails a person promotes |
 | LLM-as-judge (L2/L3 semantic checks) | — | on a paid plan or a trial, not Free: Free stays deterministic |
 | MCP server governance | the proxy's local checks: DLP, injection scanning, anomaly detectors, WASM rules, TOFU pinning | plus the [server registry](/guide/mcp-governance#the-registry) with approvals and default-deny, [approval holds](/guide/mcp-governance#approval-holds), allowlists, the calling member on every event, [call budgets](/guide/mcp-governance#call-budgets) and [tool-change risk scoring](/guide/mcp-governance#tool-change-risk), on every plan; the [SSO group policy](/concepts/circuit-breaker#_3-sso-group-clearance) on plans with single sign-on |
+| [Decide rules](/guide/decide) | `decide:` lines in local SOPs, asked of your own self-hosted engine and pinned by `intutic decide eval`; enforced by the hook gates, the gate SDKs and the proxy | plus rules served from the control plane with their pins, and its shadow stamps |
+| [Decision traffic](/guide/decision-traffic) | the proxy governs decision-model calls: DLP, pinned model versions, abstention and human-review headers, the local decision-traffic log, its own daily cap | plus workspace and virtual-key budgets |
+| Qualified `requires_before`, `scope_paths_mode: enforce` | enforced by the hook gates, the gate SDKs and the proxy | the same |
+| `plan_approval:` | no plan can be approved, so every call but a read is refused (`PLAN_NOT_APPROVED`) | enforced against the session's approved plan |
+| `review_before:` and `closed_lanes:` holds | refused, not held: approval needs a control plane | held until a person approves the call |
 
 Arm state carries over rather than resetting when you connect: a workspace
 that learned standalone keeps that learning, and the local loop stands down

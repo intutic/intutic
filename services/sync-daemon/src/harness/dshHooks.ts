@@ -123,8 +123,14 @@ const PLUGIN_MODULE_NAME = '@intutic/gate/dsh'
  *  `./dsh` export — this was `^0.1.0` until 2026-10-03, which no published
  *  `@intutic/gate` satisfies (npm has 1.10.1 and 2.0.0), so a `pnpm install`
  *  in the profile could never resolve it. Bump with
- *  `packages/gate-js/package.json`'s major version. */
-const INTUTIC_GATE_VERSION_RANGE = '^2.0.0'
+ *  `packages/gate-js/package.json`'s major version (a test holds the two
+ *  together); it stayed `^2.0.0` through 3.0.1, so a new profile got a gate
+ *  that cannot evaluate 3.0 rules. */
+export const INTUTIC_GATE_VERSION_RANGE = '^3.0.0'
+
+/** Every range a sync has written, so `disconnect` removes the one in a
+ *  profile an earlier Intutic version set up as well as the current one. */
+export const INTUTIC_GATE_RANGES_WRITTEN: readonly string[] = [INTUTIC_GATE_VERSION_RANGE, '^2.0.0', '^0.1.0']
 
 /** `$DSH_HOME` resolution: an explicit env override, else `~/.dsh` — mirrors
  *  `dsh-home-paths`' `resolveDshHome()` (this writer has no "explicit

@@ -940,6 +940,9 @@ Settings are read from the environment first, then from
 | `INTUTIC_EVENTS_FILE` | `~/.intutic/events/hook-events.jsonl` | The local file every event is also appended to (in `daemon` mode, only when the daemon does not answer). |
 | `INTUTIC_WASM_LOCAL_DIR` | `~/.intutic/wasm` | Where the proxy loads local custom WASM rules from. Read from runtime.env; `INTUTIC_WASM_DIR` in the environment takes precedence. |
 | `INTUTIC_DISABLE_REGO_RULES` | unset | `1` refuses [Rego rules](/guide/rego-policies) at load; native WASM rules still run. |
+| `INTUTIC_WASM_MANIFEST_ROOT` | unset (off) | The directory [WASM rules](/guide/wasm-rules) may read manifests from: when a tool call names one, the proxy reads that file under this root and hands its contents to the rule. Unset, rules see only the path. `~/` is expanded. Environment only. |
+| `INTUTIC_CHAOS_PLAN` | unset | Set by [`intutic chaos run`](/guide/chaos-engineering): the fault plan the proxy injects. Environment only. |
+| `INTUTIC_CHAOS_EVENTS` | unset | Set with it: the file each injected fault is recorded in. Environment only. |
 
 An agent cannot change these settings in runtime.env: every Intutic hook gate refuses a tool call that names `.intutic/env`, reading it included. The hook gates read the workspace id from the same file and drop the policy snapshot's rules when it does not match the snapshot's.
 
@@ -954,6 +957,8 @@ Unix socket, caches policy and batches events for proxies in `daemon` mode:
 | `MCP_DAEMON_STATUS_REPORT_MS` | `60000` | How often it reports its status and the servers it found. |
 | `MCP_DAEMON_TELEMETRY_FLUSH_MS` | `1000` | How often it flushes the events it batched to the control plane. |
 | `CONTROL_PLANE_URL` | `http://localhost:3001` | The control plane, for the daemon itself. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset (off) | Where the daemon exports its OpenTelemetry traces. Unset, it exports none. |
+| `OTEL_SERVICE_NAME` | `mcp-daemon` | The service name on those traces. |
 | `INTUTIC_POLICY_SNAPSHOT` | `~/.intutic/hooks/verified/policy-snapshot.json` | The sync daemon's verified copy of its snapshot, which the daemon seeds its cache from at start. It reads the verified copy rather than the live file beside it, so an edit to the live file never seeds the cache. The daemon seeds the SOP rules and the server allowlist from it, not the registry, so the registry follows the fail setting until the first fetch. A proxy that already loaded a policy keeps its allowlists and other settings through a daemon restart and takes only the snapshot's rules. |
 
 The daemon also reads `INTUTIC_API_KEY` and `INTUTIC_WORKSPACE_ID` from its

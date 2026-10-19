@@ -16,9 +16,9 @@ instead of following a fixed rule, which is what makes explicit budgets, vetoes
 and stop conditions necessary rather than optional.
 
 Everything here runs in the proxy and the gates on your machine, with no
-account, except the three sections badged <Badge type="tip" text="Cloud" />: a
-run budget, a hold for human review, and sandbox attestation each need a
-connected workspace's control plane — as does anything that reads loop runs or
+account, except the four sections badged <Badge type="tip" text="Cloud" />: a
+run budget, a hold for human review, learning from reverts and sandbox
+attestation each need a connected workspace's control plane — as does anything that reads loop runs or
 stored findings (`LOOP_RUN_TERMINATED`, the Findings page).
 
 ## The problem a graph creates
@@ -806,16 +806,31 @@ regardless of what it claims to be.
 
 ### Reversibility lanes
 
-<!-- 3.0: the review-hold text for closed_lanes: / open_actions: and the
-reversibility class of each action token goes here (sent by WS1, added by the
-integrator). -->
+Every action token has a reversibility class: `reversible_contained` (running
+tests, reading a secret, exporting PII), `reversible_wide` (a deploy, release,
+database write, POST, migration or production write) and `irreversible`
+(publishing, destroying, a force push, a payment). `closed_lanes: irreversible`
+in a SOP holds every token of the listed classes for a person, exactly as
+listing them in `review_before:` would, and `open_actions:` re-opens a token in
+that SOP's own lanes. A workspace can close lanes for every role with its
+`closedLanes` setting.
 
-### Learning from reverts
+A hold needs a person to approve it, and that needs a control plane: on a
+machine without one, the gates refuse a held call instead. A decide rule's
+allow never releases a hold. The tokens each class covers, and what the newer
+tokens match in a shell command, are in
+[SOP Front Matter → Lanes](/reference/sop-front-matter#lanes).
 
-<!-- 3.0: the learning-edge text for revert and rejection rates and the
-revertLane setting goes here (sent by WS5, added by the integrator). It needs a
-connected workspace: add the Cloud badge to this heading and update the intro's
-count of Cloud-badged sections with it. -->
+### Learning from reverts <Badge type="tip" text="Cloud" /> {#learning-from-reverts}
+
+A connected workspace counts, for each role and action, how often a run that
+took the action was undone with `intutic rollback` and how often a hold on it
+was rejected, over the last 30 days. With the workspace's `revertLane` setting
+at `enforce`, a `reversible_wide` action whose rate reached the threshold (25%
+by default) is held for a person until the rate falls; `shadow` records what
+would be held, and `off`, the default, only computes the rates. A rate counts
+once there is enough history: 20 runs and 3 rollbacks, or 5 decided holds. The
+threshold, the floors and the window are workspace settings.
 
 ## Seeing the trajectory
 

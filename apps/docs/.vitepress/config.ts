@@ -267,6 +267,8 @@ sidebarGuide.push({
       // absent a control plane (no judge, no report). Same dual-listing
       // reasoning as the entry directly above.
       { text: 'Pre-Adoption Report for Model Upgrades (Open-Core)', link: '/guide/mirror-adoption-report' },
+      // Built in both editions; the full edition lists it under 'Using Intutic'.
+      { text: 'Activity Logs (Open-Core)', link: '/guide/traces' },
     ] : []),
     ...(!IS_OSS ? [
       { text: 'SOP Optimizer (Biz Org+)', link: '/guide/metaclaw' },

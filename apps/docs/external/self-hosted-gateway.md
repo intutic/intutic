@@ -356,7 +356,8 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
 
 - **By default, LLM-as-judge evaluation stays on Intutic's Cloud control plane.** The proxy
   POSTs chunk/response content to `{CONTROL_PLANE_URL}/api/v1/judge/...` for evaluation
-  (default `https://app.intutic.ai`) unless you opt into the local judge below. There it runs
+  unless you opt into the local judge below. `CONTROL_PLANE_URL` has no default since 2.8.1:
+  set it to the control plane the gateway registered with. There it runs
   on Intutic's own self-hosted open-weight models, never a third-party hosted API.
 - **Local judge (opt-in) keeps finalize-time judging entirely on your infrastructure.** Set
   `INTUTIC_GATEWAY_LOCAL_JUDGE=true` and `LITELLM_LOCAL_JUDGE_MODEL` (Docker), or
@@ -364,7 +365,10 @@ infrastructure. It does **not**, today, keep every part of Intutic's evaluation 
   LiteLLM's `model_list`, and finalize-time content is judged there instead — it never
   reaches `CONTROL_PLANE_URL`. That model must be self-hosted (Ollama, vLLM, or another server
   you run): judges never call a hosted API such as Anthropic, OpenAI, OpenRouter or Ollama Cloud,
-  even with your own key. This is a **smaller capability than the SaaS judge**, not a
+  even with your own key. These variables are deprecated since 3.0 and removed in 4.0: they
+  still work, mapped to the decide rule `local-judge`, and the gateway logs a deprecation
+  warning once ([Upgrading to 3.0](/guide/upgrading-to-3#local-judge-variables)).
+  This is a **smaller capability than the SaaS judge**, not a
   drop-in replacement, and the gap is deliberate, not an oversight:
   - Verdicts are `COMPLIANT | VIOLATION | AMBIGUOUS` only (no SaaS-judge chunk-log
     reconciliation vocabulary).

@@ -47,7 +47,8 @@ func (r *workspaceSettingsResource) Schema(_ context.Context, _ resource.SchemaR
 	resp.Schema = schema.Schema{
 		Description: "The workspace's governance settings, written through `PUT /api/v1/workspace/settings`. " +
 			"Declare one per workspace. Terraform manages only the keys you set: each top-level key is compared " +
-			"and written whole (the API replaces it whole), except `featureFlags`, which is managed flag by flag. " +
+			"and written whole (the API replaces it whole), except `featureFlags` and `loop_review`, which the API merges " +
+			"and Terraform manages field by field: fields you do not name are left alone. " +
 			"Keys you do not set are never sent, so values set in the dashboard or by another tool are left alone. " +
 			"Removing a key from the configuration stops managing it and leaves its value in place; destroying the " +
 			"resource changes nothing in the workspace. Spend caps are not settings and are not managed here: a " +

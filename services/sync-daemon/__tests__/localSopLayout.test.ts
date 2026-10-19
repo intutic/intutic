@@ -68,6 +68,13 @@ describe('local SOP layout', () => {
     expect((await loadLocalSopEntries(root, HARNESSES)).map((e) => e.sopId)).toEqual(['local:deploy.md', 'local:pulled.md'])
   })
 
+  // `/intutic start` without `--sops` pushes an empty list, which the daemon
+  // logs as "all"; it dropped every folder and flat file until 2026-10-19.
+  it('keeps every rule set when the session selection is empty', async () => {
+    await fs.writeFile(join(root, '.intutic', 'session-context.json'), JSON.stringify({ activeLocalSops: [] }))
+    expect((await loadLocalSopEntries(root, HARNESSES)).map((e) => e.sopId)).toEqual(['local:deploy.md', 'local:safety:rules.md'])
+  })
+
   // The selection is made from inside the agent's own chat
   // (`/intutic start --sops`), so it must not switch enforcement off: a
   // deselected SOP's review_before still holds.

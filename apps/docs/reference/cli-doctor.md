@@ -1,6 +1,6 @@
 ---
 title: intutic doctor
-description: Diagnose workspace health — verify proxy, auth, daemon, config integrity, logs, Valkey, cert trust, the policy snapshot, the local gates and the optional Cisco skill scanner.
+description: Diagnose workspace health — verify proxy, auth, daemon, config integrity, logs, Valkey, cert trust, the policy snapshot, the local gates, plan approval, the optional Cisco skill scanner and the decide engine.
 ---
 
 # `intutic doctor`
@@ -20,7 +20,8 @@ No flags. The command reads `~/.intutic/` and the workspace recorded by `intutic
 The doctor runs these checks in order. Checks 2–5 need a control plane: on a machine with no login
 they are skipped with one note, and the proxy and CA-trust remediations point at `intutic start`.
 On such a machine check 8 reads the snapshot [`intutic gates install`](/reference/cli#intutic-gates-install)
-wrote, and check 9 runs; both point at `intutic gates install` to fix what is missing.
+wrote, and check 9 runs; both point at `intutic gates install` to fix what is missing. Check 10
+runs only when a SOP sets `plan_approval:`. Check 12 always runs.
 
 | # | Check | What it verifies | Pass condition |
 |---|---|---|---|
@@ -33,7 +34,9 @@ wrote, and check 9 runs; both point at `intutic gates install` to fix what is mi
 | 7 | **Cert Trust** | `~/.intutic/ca.crt` exists and is in the OS trust store | macOS: `security verify-cert`; Linux: system CA directory |
 | 8 | **Policy Snapshot** | `~/.intutic/hooks/policy-snapshot.rules`, the compiled workspace policy every harness gate reads | Present, digest valid, belongs to the logged-in workspace (a local snapshot names none), at least one rule, refreshed within 7 days |
 | 9 | **Local Gates** | With no login: a gate file for each harness recorded by `intutic init` that has a tool-call gate | Every such harness has one |
-| 10 | **Cisco Skill Scanner** | Whether the optional `skill-scanner` binary used by `intutic skill audit --engine cisco` is on `PATH` | Always passes; prints the install command when absent |
+| 10 | **Plan Approval** | Only when a SOP sets `plan_approval:`. With no login there is no control plane to approve a plan, so every gated call that is not a read is refused (`PLAN_NOT_APPROVED`). With one, the approved-plans cache the daemon writes (`~/.intutic/hooks/approved-plans.jsonl`) | A control plane is connected and the cache has not expired |
+| 11 | **Cisco Skill Scanner** | Whether the optional `skill-scanner` binary used by `intutic skill audit --engine cisco` is on `PATH` | Always passes; prints the install command when absent |
+| 12 | **Decide** | With no decide rule in the snapshot and no engine configured, one passing line: `Decide — no decide rules and no engine configured`. Otherwise one line each: `Decide Engine` (the engine and its model, with the digest; `Decide Model Digest` when the server cannot report a weights digest), `Decide Canary` (the known-answer canary, cached in `~/.intutic/decide/canary.json`), `Decide Latency` (the per-call p95 of 20 warm calls, stored in `~/.intutic/decide/engine.json`), `Decide Budget` (each harness and rule pair whose time budget the rule cannot fit; such a rule escalates there instead of being asked) and `Decide Rules` (how many rules, and how many enforce on this model) | The engine answers, the canary passes, and every rule fits every harness's budget |
 
 Valkey is optional for a standalone proxy (`intutic start` runs without it), so a failed
 Valkey check on a machine that never set one up is expected. A stale policy snapshot is still
@@ -57,8 +60,9 @@ Intutic Doctor — Workspace Health Check
   ✓ Policy Snapshot — 9 rule(s), digest a1b2c3d4e5f60718293a4b5c6d7e8f90, 0d old
   ✓ Cisco Skill Scanner — not installed (optional integration)
     → pipx install cisco-ai-skill-scanner
+  ✓ Decide — no decide rules and no engine configured
 
-✔ All 9 checks passed — workspace is healthy.
+✔ All 10 checks passed — workspace is healthy.
 ```
 
 On a machine with no login, with the gates installed:
@@ -74,6 +78,7 @@ On a machine with no login, with the gates installed:
   ✓ Local Gates — 2 gate(s) installed: claude-code, cursor
   ✓ Cisco Skill Scanner — not installed (optional integration)
     → pipx install cisco-ai-skill-scanner
+  ✓ Decide — no decide rules and no engine configured
   – Control plane, sync daemon, harness sync and daemon log checks skipped: open core, no control plane connected. The gates are checked as `intutic gates install` writes them.
 ```
 
@@ -103,7 +108,14 @@ When a check fails:
 | CA cert not trusted (Linux) | `sudo cp ~/.intutic/ca.crt /usr/local/share/ca-certificates/intutic-ca.crt && sudo update-ca-certificates` |
 | Policy snapshot absent, invalid, empty or stale | `intutic gates install` with no login; `intutic policy snapshot` with one |
 | Local gates missing | `intutic gates install` |
+| Plan approval with no control plane connected | Remove `plan_approval:` from the local SOP, or connect a workspace with `intutic connect` and capture plans there |
+| No approved-plans cache | Start the daemon with `intutic connect`; its key needs the `traces:read` scope to read approved plans |
 | Cisco skill scanner not installed | `pipx install cisco-ai-skill-scanner` (only needed for `--engine cisco`) |
+| Decide engine not configured | `intutic decide configure --url <url> --model <model>`; `intutic decide models` lists what was validated |
+| Decide engine unreachable or its model missing | Start the engine, or pull the model it names |
+| Decide model digest weak | Set `INTUTIC_DECIDE_MODEL_DIGEST` to the weights digest |
+| Decide canary failed | The model answers the fixed known-answer questions wrongly: check the model and adapter |
+| Decide budget: a rule cannot fit a harness | Ask fewer questions, raise `--parallel` on an engine that serves requests concurrently, or use a faster model |
 
 ## Source
 

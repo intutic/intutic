@@ -62,7 +62,7 @@ When interacting with model providers through the Intutic proxy, agents can issu
 
 #### 1. Cost & Task Attribution
 * **`@intutic initialize`**: Lists the open tickets on the workspace's Jira and Linear connections, and the local rule sets under `.intutic/sops/` (folders and single SOP files), as numbered options, and marks the ticket your git branch names as Recommended.
-* **`@intutic start [<option_number_or_ticket_key>] [--sops=<names>] [--auto-judge]`**: Locks cost attribution to a ticket (an option number from `initialize`, or the ticket key) and scopes active local SOP directories; `--auto-judge` (or `-j`) judges every later prompt in the session.
+* **`@intutic start [<option_number_or_ticket_key>] [--sops=<names>] [--auto-judge]`**: Locks cost attribution to a ticket (an option number from `initialize`, or the ticket key) and selects which local rule sets (folders or single SOP files, by option number or name) are written into the rules files, without changing what is enforced; `--auto-judge` (or `-j`) judges every later prompt in the session.
   * *Example:* `@intutic start 12 --sops=security-rules --auto-judge`
 
 #### 2. FinOps & Token Projections

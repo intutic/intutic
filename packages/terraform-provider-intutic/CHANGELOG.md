@@ -1,3 +1,9 @@
+## 0.7.1 (Unreleased)
+
+BUG FIXES:
+
+* resource/intutic_workspace_settings: `loop_review` is managed field by field, as `featureFlags` is. The control plane merges it field by field since 3.0, so when the workspace stored a field the configuration did not name (set elsewhere, or removed from the configuration), every plan showed a change that no apply could clear. A configuration now manages only the `loop_review` fields it names, and sends only those that changed.
+
 ## 0.7.0 (October 19, 2026)
 
 FEATURES:

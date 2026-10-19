@@ -27,6 +27,9 @@ defaults:
 env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
+  # The provider has no default endpoint: the control plane's base URL, from a
+  # repository variable.
+  INTUTIC_CONTROL_PLANE_URL: ${{ vars.INTUTIC_CONTROL_PLANE_URL }}
 
 jobs:
   plan:

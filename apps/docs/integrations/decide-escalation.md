@@ -15,7 +15,7 @@ The table is what each generated gate writes, from the harnesses' documented hoo
 | Gemini CLI | refuses | Its hook has no ask; exits 2 |
 | [Hermes](/integrations/hermes) | asks | Exits 0 with `{"action":"approve","message":"…"}`, Hermes' human approval. The gate never writes `{"decision":"approve"}`, which Hermes reads as an allow |
 | [OpenClaw](/integrations/openclaw) | asks | Returns `requireApproval` with the reason and the decisions `allow-once` and `deny`, so an approval covers that call only |
-| [dsh](/integrations/dsh) | asks | Returns `{kind: 'ask', reason}`, which dsh's approval service asks. dsh turns it into a deny when no approval service is mounted |
+| [dsh](/integrations/dsh) | asks | Returns `{kind: 'ask', reason}`, which dsh's approval service asks. dsh turns it into a deny when no approval service is mounted. Needs `@intutic/gate` 3.0 in the profile: a profile still on 2.x refuses the rule's tools through its fallback line |
 | [Codex](/integrations/codex) | refuses | Codex parses an ask, reports it as unsupported and runs the call, so the gate refuses (exit 2) instead |
 | [Windsurf](/integrations/windsurf), [Muse Code](/integrations/muse-code) | refuses | Exit codes only; exits 2 |
 | [Cline](/integrations/cline) | refuses | `{"cancel":true,…}` with `code: "DECIDE_ESCALATED"`; Cline's file hooks have no ask |

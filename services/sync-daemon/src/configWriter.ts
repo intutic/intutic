@@ -102,6 +102,8 @@ export interface LoadLocalSopOptions {
  * (see `lib/sopFiles.ts`), the same files the proxy enforces. A session's
  * selection (`session-context.json`'s `activeLocalSops`: folder names and
  * flat file names, see `listSopSets`) narrows them unless `ignoreSelection`.
+ * An empty selection is no selection: `/intutic start` without `--sops`
+ * pushes `[]`, and that means every rule set, as the daemon logs it.
  * Skipped: `guardrail-*.md` files, which `intutic guardrails pull` writes for
  * a proxy that reads SOPs from disk while a connected machine receives those
  * guardrails from the control plane, and files `intutic sops pull` marked
@@ -131,7 +133,7 @@ export async function loadLocalSopEntries(
       if (folder === null && file.startsWith('guardrail-')) continue
       const content = await node_fs.readFile(path, 'utf-8')
       if (markedNotEnforced(content)) continue
-      if (!opts.ignoreSelection && activeLocalSops !== undefined && !selectionKeeps({ path, folder, file }, content, activeLocalSops)) continue
+      if (!opts.ignoreSelection && activeLocalSops !== undefined && activeLocalSops.length > 0 && !selectionKeeps({ path, folder, file }, content, activeLocalSops)) continue
       const recorded = recordedSopId(content)
       if (recorded !== null && opts.skipSopIds?.has(recorded)) continue
       const label = folder === null ? file : `${folder}/${file}`

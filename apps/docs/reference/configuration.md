@@ -508,7 +508,7 @@ Customer calls to decision models on `/v1/systemone` and `/v1/decisions`. See [D
 | `require_vk` | boolean | `false` | As `INTUTIC_GATEWAY_REQUIRE_VK`, which takes precedence |
 | `require_provisioned_key` | boolean | `false` | As `INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=true` |
 | `provisioned_key_paid_only` | boolean | `false` | With `require_provisioned_key`, apply it to paid workspaces only (`INTUTIC_GATEWAY_REQUIRE_PROVISIONED_KEY=paid`) |
-| `local_judge` | boolean | `false` | As `INTUTIC_GATEWAY_LOCAL_JUDGE` |
+| `local_judge` | boolean | `false` | As `INTUTIC_GATEWAY_LOCAL_JUDGE`. Deprecated since 3.0, removed in 4.0 |
 
 ### Tool-output compaction (`intutic_settings.snip_compactor`)
 
