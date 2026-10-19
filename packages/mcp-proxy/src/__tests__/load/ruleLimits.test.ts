@@ -21,6 +21,11 @@ import { fileURLToPath } from 'node:url'
 import { EVALUATE_TIMEOUT_MS, WasmRunner } from '../../wasm/runner.js'
 import type { WasmContextInput } from '../../wasm/context.js'
 
+// The limits under test are fuel and the evaluate deadline. Compiling on a
+// loaded CI runner has run past the production 3 s and dropped the rule
+// before either was reached.
+const SLOW_RUNNER_COMPILE_MS = 60_000
+
 const fixture = (name: string): string =>
   fileURLToPath(new URL(`../../../../proxy/tests/fixtures/rego/${name}`, import.meta.url))
 
@@ -53,7 +58,7 @@ afterEach(async () => {
 async function runnerWith(files: Record<string, string>): Promise<WasmRunner> {
   dir = mkdtempSync(join(tmpdir(), 'intutic-mcp-load-'))
   for (const [name, source] of Object.entries(files)) copyFileSync(source, join(dir, name))
-  runner = new WasmRunner(dir)
+  runner = new WasmRunner(dir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
   await runner.rescan()
   return runner
 }
@@ -113,7 +118,7 @@ describe('the per-rule deadline', () => {
   it('stops a rule that never returns while spending little fuel, and refuses the call', async () => {
     dir = mkdtempSync(join(tmpdir(), 'intutic-mcp-deadline-'))
     writeFileSync(join(dir, '10_slow.wasm'), slowLoopRule())
-    runner = new WasmRunner(dir)
+    runner = new WasmRunner(dir, undefined, { compileTimeoutMs: SLOW_RUNNER_COMPILE_MS })
     await runner.rescan()
     expect(runner.getLoadedRuleIds()).toEqual(['local:10_slow.wasm'])
 
