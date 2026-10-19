@@ -90,8 +90,13 @@ fn config(url: &str, c: &Value, parallel: usize) -> DecideEngineConfig {
     }
 }
 
+/// A fresh server per case, never one from wiremock's pool. A case that fails
+/// early (an Ollama engine without the model) drops its other requests mid
+/// flight; a pooled server goes straight to the next case on the same port,
+/// where a request still in flight consumed that case's `up_to_n_times(1)`
+/// mock and left its own request a 404.
 async fn replay(entries: &[Value]) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     for e in entries {
         let body = match e.get("bodyRaw") {
             Some(raw) => raw.as_str().unwrap().to_string(),
