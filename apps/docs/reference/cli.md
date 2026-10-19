@@ -187,13 +187,13 @@ intutic gates install [options]
 1. **The gate.** The same tool-call gate [`intutic connect`](#intutic-connect) installs, registered where the harness reads it (`.claude/settings.json` for Claude Code, Cursor's `hooks.json`, and so on). Your own hooks and settings stay. Every gate enforces the built-in protections, such as refusing an agent's attempt to remove or unlock Intutic's own files.
 2. **The policy snapshot** (`~/.intutic/hooks/policy-snapshot.rules` and `.json`) every gate reads: the destructive-command and skill-directory tiers, and from `.intutic/sops/` each `review_before:` token, the lane holds of each `closed_lanes:`, the `decide:` rules (with the pins `intutic decide eval` wrote), and the rule records: each qualified `requires_before:` (`[ok]`), `scope_paths:` under `scope_paths_mode: enforce`, and `plan_approval:`. A SOP with `roles:` contributes no rule records or lane holds, since a gate knows no role. With no control plane to approve a hold, a `review_before:` token or a lane hold is refused outright, with a message saying so, rather than held, and `plan_approval:` refuses every gated call that is not a read (`PLAN_NOT_APPROVED`). The snapshot names no workspace and is marked `source: local`.
 3. **The rules files** from the SOPs in `.intutic/sops/`, into each harness's own file (see [Where rule sets go](/guide/how-it-works#where-rule-sets-go)). A harness no SOP targets gets no rules file.
+4. **The bundled agent skills**, once per workspace: the [Kitkat skill](/integrations/kitkat) (`.agents/skills/intutic-governance-kitkat/SKILL.md`), which tells an agent what each refusal code means and what to do about it, and the [Rule Author skill](/integrations/rule-author) (`.agents/skills/intutic-rule-author/SKILL.md`), as `intutic connect` writes them. Only a missing one is written; a copy already there is never overwritten. `intutic disconnect` deletes the copies it wrote, unless you have edited them.
 
 It also blanks the API key an earlier `intutic connect` may have left in `~/.intutic/env/runtime.env`,
 so no gate posts events to that control plane, and moves `.intutic/events/hook-events.jsonl` aside to
 `hook-events.jsonl.1` once it passes 10 MB: with no control plane, nothing drains it.
 
-**Not written:** proxy routing (unless `--route`), MCP server wrapping, the bundled agent skills, and
-anything sent anywhere: it makes no network call. `.env.intutic`, which Codex and the SDK frameworks
+**Not written:** proxy routing (unless `--route`), MCP server wrapping, and anything sent anywhere: it makes no network call. `.env.intutic`, which Codex and the SDK frameworks
 read only when you source it, is still written for a harness a SOP targets. With `--route`, Windsurf's
 traffic goes through the proxy's TLS interception, which needs the Intutic CA (`~/.intutic/ca.crt`,
 created when the proxy first runs) trusted; `gates install` does not trust it for you.

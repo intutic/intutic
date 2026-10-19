@@ -1,60 +1,69 @@
 ---
 title: Harnesses
-description: How Intutic's proxy and sync daemon work together to govern 43 AI coding agents without changing their source code.
+description: How Intutic's proxy and harness gates work together to govern 43 AI coding agents without changing their source code.
 ---
 
 # Harnesses <Badge type="tip" text="Open-Core" />
 
 A **harness** is any AI coding agent that Intutic governs. Intutic currently supports [43 harnesses](/integrations/) — from IDE extensions like Cursor and Windsurf to CLI tools like Claude Code and Aider to autonomous agent frameworks like OpenHands and Goose, plus orchestrators like Spotify Xirp, DoorDash Agentic Orchestrator, and AWS Bedrock AgentCore Runtime that delegate to already-gated harnesses underneath them. A separate set of server-side platform integrations (QM, Anthropic Managed Agents, AWS Bedrock AgentCore Gateway) call Intutic directly over HTTP and have no `HarnessType` of their own — see [Integrations Hub](/integrations/#server-side-platform-integrations).
 
-Governance works through two components that run on the developer's machine:
+Governance works through three components that run on the developer's machine:
 
 | Component | Language | Role |
 |---|---|---|
 | **Proxy** | Rust | Intercepts LLM API calls on port 4000 — DLP, metering, policy checks |
-| **Sync Daemon** | TypeScript | Syncs SOPs from the control plane → harness config files, detects drift |
+| **Gate** | Generated per harness (mostly shell or JavaScript) | Runs inside the harness before each tool call and allows or refuses it, from the policy snapshot |
+| **Gate writer** | TypeScript (`intutic gates install`, `intutic start`) | Compiles `.intutic/sops/` into each harness's gate, its rules file and the policy snapshot; with a control plane, the sync daemon writes them instead and watches them for drift |
 
 ---
 
 ## Architecture
 
 ```
-Developer's Machine                                  Cloud
-┌────────────────────────────────────────────┐
-│                                            │     ┌────────────────┐
-│  ┌──────────┐  LLM API calls  ┌──────────┐ │     │  LLM provider  │
-│  │ Harness  │ ──────────────▶ │  Proxy   │ ─────▶│                │
-│  │ (Cursor, │ localhost:4000  │  (Rust)  │ │     └────────────────┘
-│  │  Claude, │                 │  :4000   │ ─────┐
-│  │  etc.)   │                 └──────────┘ │    │ policy checks
-│  └────┬─────┘                              │    │ + telemetry
-│       │ reads                              │    ▼
-│       ▼                                    │  ┌────────────────┐
-│  ┌──────────┐ writes and ┌──────────────┐  │  │ Control Plane  │
-│  │ Config   │◀────────── │ Sync Daemon  │ ◀──▶│ (:3001)        │
-│  │ files    │ watches    │ (sync loop + │  │  │                │
-│  │          │ for drift  │  WebSocket)  │  │  │ SOPs, traces,  │
-│  └──────────┘            └──────────────┘  │  │ budgets        │
-│                                            │  └────────────────┘
-└────────────────────────────────────────────┘
+Developer's Machine
+┌────────────────────────────────────────────────────────┐
+│                                                        │     ┌────────────────┐
+│  ┌──────────┐  LLM API calls  ┌──────────┐             │     │  LLM provider  │
+│  │ Harness  │ ──────────────▶ │  Proxy   │ ───────────────▶  │                │
+│  │ (Cursor, │ localhost:4000  │  (Rust)  │             │     └────────────────┘
+│  │  Claude, │                 │  :4000   │             │
+│  │  etc.)   │                 └────▲─────┘             │
+│  └────┬─────┘                      │ re-reads          │
+│       │ runs the gate              │ every 30 s        │
+│       │ before each tool           │                   │
+│       │ call; reads the     ┌──────┴─────────┐         │
+│       │ rules file          │ .intutic/sops/ │         │
+│       ▼                     └──────┬─────────┘         │
+│  ┌──────────┐                      │ reads             │
+│  │ Gate,    │  writes  ┌───────────▼───────────┐       │
+│  │ rules    │◀──────── │ intutic gates install │       │     ┌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐
+│  │ file,    │          │ intutic start         │◀╌╌╌╌╌╌╌╌╌╌╌╌┆ Control plane  ┆
+│  │ policy   │          │ (connected: the sync  │       │     ┆ (optional; not ┆
+│  │ snapshot │          │ daemon, from the      │       │     ┆ in open core)  ┆
+│  └──────────┘          │ control plane)        │       │     └╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘
+│                        └───────────────────────┘       │
+└────────────────────────────────────────────────────────┘
 ```
 
 ::: tip Open core runs without the control plane
-The control plane is optional, and open core ships none. A standalone install
-(`intutic start`) runs the harness and the proxy on the developer's machine. The
-sync daemon needs a control plane, so it and steps 4–6 below apply only once
-you connect one. Standalone, `intutic gates install` writes each harness's gate
-and rules file from `.intutic/sops/`.
+The control plane, drawn dashed, is optional, and open core ships none. A
+standalone install runs everything inside the box: `intutic gates install`
+writes each harness's gate, rules file and policy snapshot from
+`.intutic/sops/`, and `intutic start` runs the proxy and rewrites them when
+`.intutic/sops/` changes. The sync daemon needs a control plane.
 :::
 
 ### The flow
 
-1. **Harness** makes an LLM API call (e.g., `POST /v1/chat/completions`)
-2. **Proxy** intercepts the call at `localhost:4000` — runs DLP scanning, budget checks, and policy evaluation
-3. **Proxy** forwards approved requests to the real LLM provider, records traces
-4. **Sync Daemon** polls the control plane every 30s (or receives instant WebSocket pushes) for SOP updates
-5. **Sync Daemon** writes SOPs into each harness's native config file format
-6. **Sync Daemon** watches config files via chokidar — unauthorized edits trigger immediate rewrite + tamper event
+1. **`intutic gates install`** compiles `.intutic/sops/` into each harness's gate and rules file, in its native format, and into the policy snapshot (`~/.intutic/hooks/policy-snapshot.rules`); **`intutic start`** writes them again whenever `.intutic/sops/` changes
+2. **Harness** makes an LLM API call (e.g., `POST /v1/chat/completions`)
+3. **Proxy** intercepts the call at `localhost:4000` — runs DLP scanning, budget checks, and policy evaluation, with the SOPs it re-reads from `.intutic/sops/` every 30 seconds
+4. **Proxy** forwards approved requests to the real LLM provider, records traces
+5. **Gate** runs before each tool call the harness makes and allows or refuses it from the policy snapshot; a [`decide:` rule](/guide/decide) is asked of your self-hosted decide engine
+<!-- ENTERPRISE_ONLY_START -->
+
+With a control plane connected, the [sync daemon](#sync-daemon-typescript) writes the same files instead: it polls the control plane every 30s (or receives instant WebSocket pushes) for SOP updates, writes them into each harness's native config file format, and watches the files via chokidar — an unauthorized edit triggers an immediate rewrite and a tamper event.
+<!-- ENTERPRISE_ONLY_END -->
 
 ---
 
@@ -76,11 +85,11 @@ The proxy is a high-performance Rust proxy gateway (`@intutic/proxy`) that trans
 
 Every request passes through these stages before reaching the LLM:
 
-1. **Virtual key validation** — verifies the `vk_*` workspace key
-2. **Budget gate** — checks session and workspace spend limits against Valkey (`v2:budget:hard_block:{workspace_id}`)
+1. **Virtual key validation** (with a control plane) — verifies the `vk_*` workspace key; a standalone proxy forwards the provider key the harness sends
+2. **Budget gate** — standalone, the machine's daily cap (`maxDailyBudgetUsd` in `~/.intutic/config.json`); with a control plane, the session and workspace spend limits in Valkey (`v2:budget:hard_block:{workspace_id}`)
 3. **DLP scanner** — regex-based detection of secrets across ~20 high-precision patterns (AWS keys incl. temporary creds, GitHub classic + fine-grained tokens, Anthropic/OpenAI/GitLab/Slack/Google/Stripe/SendGrid/npm/PyPI/Hugging Face keys, Slack webhooks, DB connection credentials, JWTs, bearer tokens, private keys) plus validated PII detectors (payment cards, IBANs, SSNs; email and phone when enabled), with `redact` or `block` actions — applied to request bodies and forwarded header values; responses are scanned on the way back too, with streaming output scrubbed per SSE line
 4. **WASM plugin evaluation** — custom governance plugins compiled to WebAssembly
-5. **Policy check** — pre-request evaluation against the control plane (3s timeout, configurable fail-open or fail-closed)
+5. **Policy check** (with a control plane) — pre-request evaluation against the control plane (3s timeout, configurable fail-open or fail-closed); a standalone proxy skips it
 
 **SnipCompactor** — token compression: text repetition collapse, JSON array truncation, code skeleton extraction via tree-sitter — runs on the way back instead: on the tool-result text of a non-streaming response, after the response DLP scan.
 

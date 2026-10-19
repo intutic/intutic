@@ -321,6 +321,306 @@
       ]
     },
     {
+      "id": "bypass.guard_disable_env",
+      "subject": "any",
+      "flags": "-",
+      "line": "bypass.guard_disable_env\tblock\t-\tany\tGovernance bypass pattern: setting INTUTIC_GUARD_DISABLE, which turns off the policy snapshot guards\tINTUTIC_GUARD_DISABLE=",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " INTUTIC_GUARD_DISABLE=1 claude -p x "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " export INTUTIC_GUARD_DISABLE=1 "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " env INTUTIC_GUARD_DISABLE=1 node agent.js "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " echo $INTUTIC_GUARD_DISABLE "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " unset INTUTIC_GUARD_DISABLE "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " export INTUTIC_API_URL=http://x "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the name without =, repeated",
+          "prefix": "",
+          "unit": " INTUTIC_GUARD_DISABLE",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the switch after a long command",
+          "prefix": " echo",
+          "unit": " x",
+          "suffix": " INTUTIC_GUARD_DISABLE=1",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "bypass.intutic_decide_disable",
+      "subject": "any",
+      "flags": "-",
+      "line": "bypass.intutic_decide_disable\tblock\t-\tany\tGovernance bypass pattern: intutic decide disable turns every decide rule on this machine to shadow. Run it yourself, not through an agent.\t decide disable[^a-zA-Z0-9_-]",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic decide disable "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npx -y @intutic/cli@3.0.1 decide disable && echo ok "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " node tools/cli/dist/cli.js decide disable;"
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic decide enable "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic decide test r --state s.json "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic decide lint --json "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "decide and less than disable, repeated",
+          "prefix": "",
+          "unit": " decide disabl",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "disable after a long command",
+          "prefix": " echo",
+          "unit": " x",
+          "suffix": " intutic decide disable",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "bypass.intutic_decide_configure",
+      "subject": "any",
+      "flags": "-",
+      "line": "bypass.intutic_decide_configure\tblock\t-\tany\tGovernance bypass pattern: intutic decide configure (or judge configure) repoints the decide engine. Run it yourself, not through an agent.\t (decide|judge) configure[^a-zA-Z0-9_-]",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic decide configure --model x "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npx @intutic/cli decide configure --url http://127.0.0.1:9 "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic judge configure --engine-url http://127.0.0.1:1 "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic decide models "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ./configure --prefix=/usr "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic decide eval r --labels l.jsonl "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "decide and less than configure, repeated",
+          "prefix": "",
+          "unit": " decide configur",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "configure after a long command",
+          "prefix": " echo",
+          "unit": " x",
+          "suffix": " intutic decide configure",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "bypass.intutic_disconnect",
+      "subject": "any",
+      "flags": "-",
+      "line": "bypass.intutic_disconnect\tblock\t-\tany\tGovernance bypass pattern: intutic disconnect removes the governance gates and rules files. Run it yourself, not through an agent.\tintutic(/cli)?(@[0-9A-Za-z.-]*)? disconnect[^a-zA-Z0-9_-]",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic disconnect "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npx -y @intutic/cli@latest disconnect --keep-login "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic disconnect --harness cursor "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " intutic disconnects "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " warp-cli disconnect "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " docker network disconnect bridge web "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "version tags, never the command",
+          "prefix": " npx ",
+          "unit": "intutic@1.",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "disconnect after a long command",
+          "prefix": " echo",
+          "unit": " x",
+          "suffix": " intutic disconnect",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
       "id": "hook_settings.vscode_key_written",
       "subject": "content",
       "flags": "-",
@@ -3302,6 +3602,81 @@
           "prefix": " cat",
           "unit": " x",
           "suffix": " .intutic/env",
+          "length": 262144,
+          "held": true,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        }
+      ]
+    },
+    {
+      "id": "path.intutic_decide",
+      "subject": "any",
+      "flags": "-",
+      "line": "path.intutic_decide\tblock\t-\tany\tShell command references the governance-protected path .intutic/decide\t\\.intutic/decide",
+      "argPattern": false,
+      "held": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " rm -rf .intutic/decide "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " printf x > .intutic/decide "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " mv .intutic/decide /tmp/x "
+          }
+        }
+      ],
+      "benign": [
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " ls -la . "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " git status "
+          }
+        },
+        {
+          "tool": "Bash",
+          "input": {
+            "command": " npm run build "
+          }
+        }
+      ],
+      "adversarial": [
+        {
+          "name": "the path less its last character, repeated",
+          "prefix": "",
+          "unit": " .intutic/decid",
+          "suffix": "",
+          "length": 262144,
+          "held": false,
+          "tool": "Bash",
+          "input": {
+            "command": ""
+          },
+          "fill": "command"
+        },
+        {
+          "name": "the path after a long command",
+          "prefix": " cat",
+          "unit": " x",
+          "suffix": " .intutic/decide",
           "length": 262144,
           "held": true,
           "tool": "Bash",

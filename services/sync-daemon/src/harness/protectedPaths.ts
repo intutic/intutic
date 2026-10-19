@@ -85,6 +85,16 @@ export const UNIVERSAL_PROTECTED_PATHS: readonly string[] = [
   // snapshot as invalid and drops every SOP rule in it, so rewriting that one
   // line turns the workspace's own rules off under every harness.
   '.intutic/env',
+  // Decide's machine state: the `disabled` marker `intutic decide disable`
+  // writes (every decide rule then runs as shadow), the pins under `evals/`
+  // (a rule enforces only under a pin for the engine's model), and
+  // `engine.json`, which names the engine. Writing the marker, deleting the
+  // pins or repointing the engine turns decide rules off as surely as
+  // removing a hook. The CLI and the gates write here themselves, outside any
+  // agent's tool call; a bare mention also refuses reading the directory, as
+  // for the other `.intutic` entries — `intutic decide lint` and `intutic
+  // status` report its state instead.
+  '.intutic/decide',
 
   // Claude Code / Claude Desktop. `settings.local.json` loads at higher
   // precedence than `settings.json`, so protecting only the latter leaves the
@@ -653,6 +663,88 @@ export const GOVERNANCE_BYPASS_PATTERNS: readonly GuardPattern[] = assertGuardTa
       { name: 'one long name, no =', prefix: ' ', unit: 'A_HOOK', held: false },
       { name: 'many names, no =', unit: ' A_HOOK', held: false },
       { name: 'a long name that is a switch', prefix: ' ', unit: 'A', suffix: '_HOOKS=0', held: true },
+    ],
+  },
+  {
+    id: 'bypass.guard_disable_env',
+    source: 'INTUTIC_GUARD_DISABLE=',
+    severity: 'block',
+    reason: 'Governance bypass pattern: setting INTUTIC_GUARD_DISABLE, which turns off the policy snapshot guards',
+    rationale:
+      'Intutic\'s own switch, which `bypass.env_kill_switch` misses because the name does not end in _HOOK. ' +
+      'A gate reads its harness\'s environment, not the command\'s, so the assignment does not disarm the ' +
+      'gate refusing it — it disarms the gates of whatever the command starts: an agent CLI run as a ' +
+      'subprocess, a program built on the gate SDKs, or a shell profile the line is appended to. No leading ' +
+      'space, so `x=1;INTUTIC_GUARD_DISABLE=1` counts. Refuses `grep INTUTIC_GUARD_DISABLE= docs` as well. ' +
+      'Does not catch `os.environ` in a script, the name assembled from parts, or the assignment written ' +
+      'into a file with a write tool rather than a shell command.',
+    matches: [' INTUTIC_GUARD_DISABLE=1 claude -p x ', ' export INTUTIC_GUARD_DISABLE=1 ', ' env INTUTIC_GUARD_DISABLE=1 node agent.js '],
+    notMatches: [' echo $INTUTIC_GUARD_DISABLE ', ' unset INTUTIC_GUARD_DISABLE ', ' export INTUTIC_API_URL=http://x '],
+    adversarial: [
+      { name: 'the name without =, repeated', unit: ' INTUTIC_GUARD_DISABLE', held: false },
+      { name: 'the switch after a long command', prefix: ' echo', unit: ' x', suffix: ' INTUTIC_GUARD_DISABLE=1', held: true },
+    ],
+  },
+  {
+    id: 'bypass.intutic_decide_disable',
+    source: ' decide disable[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic decide disable turns every decide rule on this machine to shadow. ' +
+      'Run it yourself, not through an agent.',
+    rationale:
+      'Matched on the subcommand words alone, so every way of starting the CLI counts: `intutic`, ' +
+      '`npx @intutic/cli@<version>`, `node .../cli.js`, an alias. `intutic decide enable`, which turns them ' +
+      'back on, and the read-only subcommands (`test`, `eval`, `lint`, `check`, `models`) stay usable. ' +
+      'Writing the `disabled` marker directly is the `.intutic/decide` path rule. Does not catch the words ' +
+      'split by a quote or a line continuation, a shell function, or the command held in a variable.',
+    matches: [' intutic decide disable ', ' npx -y @intutic/cli@3.0.1 decide disable && echo ok ', ' node tools/cli/dist/cli.js decide disable;'],
+    notMatches: [' intutic decide enable ', ' intutic decide test r --state s.json ', ' intutic decide lint --json '],
+    adversarial: [
+      { name: 'decide and less than disable, repeated', unit: ' decide disabl', held: false },
+      { name: 'disable after a long command', prefix: ' echo', unit: ' x', suffix: ' intutic decide disable', held: true },
+    ],
+  },
+  {
+    id: 'bypass.intutic_decide_configure',
+    source: ' (decide|judge) configure[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic decide configure (or judge configure) repoints the decide engine. ' +
+      'Run it yourself, not through an agent.',
+    rationale:
+      'Both write `~/.intutic/decide/engine.json`. A rule enforces only under a pin for the engine\'s model ' +
+      'digest, so naming a model no rule is pinned for runs every decide rule as shadow, the effect of ' +
+      '`decide disable`; and `--url` may name any loopback engine, including one the agent started and ' +
+      'whose answers it writes. Matched on the subcommand words, as `bypass.intutic_decide_disable` is, ' +
+      'with the same limits. The `INTUTIC_DECIDE_*` overrides are not refused: they reach only the ' +
+      'command they are set for, never a gate.',
+    matches: [' intutic decide configure --model x ', ' npx @intutic/cli decide configure --url http://127.0.0.1:9 ', ' intutic judge configure --engine-url http://127.0.0.1:1 '],
+    notMatches: [' intutic decide models ', ' ./configure --prefix=/usr ', ' intutic decide eval r --labels l.jsonl '],
+    adversarial: [
+      { name: 'decide and less than configure, repeated', unit: ' decide configur', held: false },
+      { name: 'configure after a long command', prefix: ' echo', unit: ' x', suffix: ' intutic decide configure', held: true },
+    ],
+  },
+  {
+    id: 'bypass.intutic_disconnect',
+    source: 'intutic(/cli)?(@[0-9A-Za-z.-]*)? disconnect[^a-zA-Z0-9_-]',
+    severity: 'block',
+    reason:
+      'Governance bypass pattern: intutic disconnect removes the governance gates and rules files. ' +
+      'Run it yourself, not through an agent.',
+    rationale:
+      'Needs the CLI\'s name before the word, unlike the decide rules, because `disconnect` is a ' +
+      'subcommand of many tools (`docker network disconnect`, `warp-cli disconnect`). Matches `intutic`, ' +
+      '`@intutic/cli` and a version tag on either; `intutic disconnects`, the history listing, stays ' +
+      'usable. Refuses `--dry-run` too, which changes nothing — a regex cannot tell it apart wherever ' +
+      'it falls on the line. Does not catch `node .../cli.js disconnect`, an alias, a shell function, or ' +
+      'the words split by a quote or a line continuation.',
+    matches: [' intutic disconnect ', ' npx -y @intutic/cli@latest disconnect --keep-login ', ' intutic disconnect --harness cursor '],
+    notMatches: [' intutic disconnects ', ' warp-cli disconnect ', ' docker network disconnect bridge web '],
+    adversarial: [
+      { name: 'version tags, never the command', prefix: ' npx ', unit: 'intutic@1.', held: false },
+      { name: 'disconnect after a long command', prefix: ' echo', unit: ' x', suffix: ' intutic disconnect', held: true },
     ],
   },
 ])

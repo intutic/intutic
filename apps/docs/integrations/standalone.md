@@ -6,14 +6,14 @@ Intutic's proxy engine (`intutic-proxy`) is a high-performance, OpenAI-compatibl
 
 ## 🚀 Deployment Topologies
 
-Intutic Proxy supports two primary self-hosted deployment topologies depending on whether you require multi-provider LLM gateway translation (via LiteLLM) or direct model provider routing:
+Intutic Proxy supports three deployment topologies, depending on whether you require multi-provider LLM gateway translation (via LiteLLM), direct model provider routing, or a one-off run of the native binary:
 
 ```
                             [ Option A: Dual Self-Hosted Proxy ]
 
    Developer IDE / CLI                                           Upstream LLM Providers
   (Claude Code, Cursor,  ──────►  Intutic Proxy  ──────►  LiteLLM Proxy  ──────►  (Anthropic, OpenAI,
-       LangGraph)               (Rust — :4000)          (Python — :4001)        Bedrock, Vertex, Ollama)
+       LangGraph)               (Rust — :4000)      (Python — litellm:4000)     Bedrock, Vertex, Ollama)
                                        │                        │
                                        ▼                        ▼
                                 DLP & SOP rules          Model Translation &
@@ -41,7 +41,7 @@ Intutic Proxy supports two primary self-hosted deployment topologies depending o
 ```
 
 ### Option A: Dual Self-Hosted Proxy (Intutic + LiteLLM Gateway)
-* **How it works:** Intutic Proxy (Rust `:4000`) sits in front of LiteLLM (`:4001`). Intutic enforces DLP, security SOPs and WASM policies in-process, then forwards clean requests to LiteLLM to translate and route across 100+ model providers (Bedrock, Azure, Vertex, Ollama).
+* **How it works:** Intutic Proxy (Rust `:4000`) sits in front of LiteLLM (`litellm:4000` on the Compose network, published on the host as `:4001`). Intutic enforces DLP, security SOPs and WASM policies in-process, then forwards clean requests to LiteLLM to translate and route across 100+ model providers (Bedrock, Azure, Vertex, Ollama).
 * **Docker Compose Snippet:**
   ```yaml
   services:

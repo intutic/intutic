@@ -152,11 +152,14 @@ All harnesses share the same integration flow:
 │  init        │     │  harnesses  │     │  config.json │
 └──────────────┘     └─────────────┘     └──────┬───────┘
                                                 │
-┌──────────────┐     ┌─────────────┐     ┌──────▼───────┐
-│  Evaluate    │◀────│  Write      │◀────│  intutic     │
-│  + enforce   │     │  harness    │     │  gates       │
+┌──────────────┐     ┌─────────────┐     ┌──────▼───────┐     ┌────────────────┐
+│  Evaluate    │◀────│  Write      │◀────│  intutic     │◀────│ .intutic/sops/ │
+│  + enforce   │     │  harness    │     │  gates       │     └────────────────┘
 │  each call   │     │  config     │     │  install     │
-└──────────────┘     └─────────────┘     └──────────────┘
+└──────────────┘     └─────────────┘     │  (intutic    │
+                                         │  start: on   │
+                                         │  each change)│
+                                         └──────────────┘
 ```
 
 1. **`intutic init`** scans your workspace, detects the harnesses present and records them in `~/.intutic/config.json`. With no login it offers to run the next step for you.

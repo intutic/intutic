@@ -8,17 +8,18 @@ description: Install Intutic, connect your AI agent, and see your first governed
 Go from zero to your first blocked tool call in under 5 minutes.
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌──────────────────┐
+┌──────────────┐    ┌──────────────┐    ┌──────────────────┐
 │  Your IDE /  │───▶│ Intutic      │───▶│  LLM Provider    │
 │  AI Agent    │◀───│ Proxy :4000  │◀───│  (OpenAI, etc.)  │
-└─────────────┘    └──────┬───────┘    └──────────────────┘
-                          │
-                   ┌──────▼───────┐
-                   │ WASM Policy  │
-                   │   Engine     │
-                   └──────────────┘
-                    (all local — no
-                     network egress)
+└──────┬───────┘    └──────┬───────┘    └──────────────────┘
+       │ each              │
+       │ tool call  ┌──────▼──────────────────────┐
+┌──────▼───────┐    │ Policy: SOP front matter,   │
+│  Hook gate   │    │ WASM rules, DLP, detectors  │
+│  (Step 3)    │    └─────────────────────────────┘
+└──────────────┘
+  (all local; a decide engine, if you add one,
+   is your own model on this machine or your network)
 ```
 
 Everything above runs on your machine. A control plane is **optional** and not
@@ -26,7 +27,7 @@ part of open core; see [Security](/security) for what changes if you connect one
 
 Every LLM request from your AI agent flows through Intutic's local proxy,
 where SOPs (Standard Operating Procedures) evaluate each tool call in
-real time and return one of five verdicts: **BYPASS**, **ENHANCE**, **HIJACK**, **REASK** or **KILL**.
+real time and return a verdict: **BYPASS**, **HIJACK**, **REASK** or **KILL** from the proxy, or **ENHANCE** from a control plane's evaluator.
 
 ## Prerequisites
 

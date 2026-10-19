@@ -33,6 +33,8 @@ const intutic = join(home, '.intutic')
 const snapshotRules = join(intutic, 'hooks', 'policy-snapshot.rules')
 const cursorGate = join(ws, '.intutic', 'hooks', 'cursor-check.js')
 const claudeGate = join(ws, '.intutic', 'hooks', 'claude-code-check.js')
+const kitkatSkill = join(ws, '.agents', 'skills', 'intutic-governance-kitkat', 'SKILL.md')
+const ruleAuthorSkill = join(ws, '.agents', 'skills', 'intutic-rule-author', 'SKILL.md')
 
 async function put(path: string, content: string | object): Promise<void> {
   await fs.mkdir(dirname(path), { recursive: true })
@@ -95,7 +97,10 @@ describe('intutic gates install', () => {
     const { out, code } = await gates({ dryRun: true })
     expect(code).toBe(0)
     expect(out).toContain('would write ~/.intutic/hooks/policy-snapshot.rules')
+    expect(out).toContain(`would write ${kitkatSkill.replace(home, '~')}`)
     expect(out).toContain('Nothing was written')
+    expect(existsSync(kitkatSkill)).toBe(false)
+    expect(existsSync(join(ws, '.agents'))).toBe(false)
     expect(existsSync(snapshotRules)).toBe(false)
     expect(existsSync(cursorGate)).toBe(false)
     expect(existsSync(join(ws, '.claude', 'settings.json'))).toBe(false)
@@ -127,6 +132,17 @@ describe('intutic gates install', () => {
     expect(after.digest).toBe(before.digest)
     // Only the generation stamp in the header moves.
     expect(after.rules.replace(/Last sync: .*/, '')).toBe(before.rules.replace(/Last sync: .*/, ''))
+  })
+
+  it('writes the Kitkat and rule-author skills where missing, and keeps a copy the user had', async () => {
+    await saveConfig(['cursor'])
+    await put(ruleAuthorSkill, '# my own rule-author notes\n')
+    const { out, code } = await gates()
+    expect(code).toBe(0)
+    expect(out).toContain(`wrote ${kitkatSkill.replace(home, '~')}`)
+    expect(out).not.toContain(`wrote ${ruleAuthorSkill.replace(home, '~')}`)
+    expect(await fs.readFile(kitkatSkill, 'utf-8')).toMatch(/^---\nname: intutic-governance-kitkat\n/)
+    expect(await fs.readFile(ruleAuthorSkill, 'utf-8')).toBe('# my own rule-author notes\n')
   })
 
   it('--harness installs one recorded harness, refuses an unrecorded one, and --add records it', async () => {

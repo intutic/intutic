@@ -1,6 +1,6 @@
 ---
 title: Enforcement Actions
-description: The five verdicts Intutic can apply to every AI agent tool call — BYPASS, ENHANCE, HIJACK, REASK and KILL — and how they're decided.
+description: The verdicts Intutic can apply to every AI agent tool call — BYPASS, HIJACK, REASK and KILL from the proxy, ENHANCE from a control plane's evaluator — and how they're decided.
 ---
 
 # Enforcement Actions <Badge type="tip" text="Open-Core" />
@@ -10,7 +10,7 @@ Every tool call that flows through the Intutic proxy receives exactly one **enfo
 | Action | What happens | Agent sees |
 |---|---|---|
 | **BYPASS** | Request passes through unchanged | Normal response from the LLM |
-| **ENHANCE** | Request passes through with metadata, annotations, or warnings attached | Normal response + governance annotations in the trace |
+| **ENHANCE** | Request passes through with metadata, annotations, or warnings attached (a control plane's evaluator only) | Normal response + governance annotations in the trace |
 | **HIJACK** | Request is modified before reaching the LLM (e.g., DLP redaction, prompt rewriting) | Modified response — agent may notice content was changed |
 | **REASK** | The attempt is refused and the reason is handed back to the agent, which may retry a bounded number of times before the finding escalates to a block | An error it can read and act on, then another turn |
 | **KILL** | Request is blocked entirely | Error response with the reason for blocking |
@@ -21,8 +21,59 @@ A sixth value, **OBSERVED**, sits outside this ladder: it records a request the 
 
 ## How a verdict is decided
 
-A tool call is evaluated at the **hook gate** (`POST /api/v1/hook-gate`), which returns an
-allow/block decision synchronously:
+A tool call is decided on the machine it runs on, before it runs. Each harness hook gate, and each
+[gate SDK](/reference/gate-sdk) in an agent's own code, decides it from the policy snapshot
+(`~/.intutic/hooks/policy-snapshot.rules`) that `intutic gates install` and `intutic start` compile
+from `.intutic/sops/`. The gate SDKs run eight tiers in order, and the first refusal wins:
+
+```
+Tool call arrives at a gate SDK (@intutic/gate, intutic_clawde.gate)
+       │
+       ▼
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│ A0 SSO group │────▶│ A1 snapshot  │────▶│ R  rule      │────▶│ M  MCP       │───┐
+│    policy    │     │    rules     │     │    records   │     │    registry  │   │
+└──────┬───────┘     └──────┬───────┘     └──────┬───────┘     └──────┬───────┘   │
+       │ refused            │ refused            │ refused            │ refused   │
+       ▼                    ▼                    ▼                    ▼           │
+    blocked              blocked              blocked              blocked        │
+┌─────────────────────────────────────────────────────────────────────────────────┘
+│
+▼
+┌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐     ┌──────────────┐     ┌──────────────┐     ┌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐
+┆ A3 SOP rules ┆────▶│ A2 image     │────▶│ D  decide    │────▶┆ B  hook gate ┆
+┆ (control     ┆     │    integrity │     │    rules     │     ┆ (control     ┆
+┆  plane only) ┆     │              │     │              │     ┆  plane only) ┆
+└╌╌╌╌╌╌┬╌╌╌╌╌╌╌┘     └──────┬───────┘     └──────┬───────┘     └╌╌╌╌╌╌┬╌╌╌╌╌╌╌┘
+       │ refused            │ refused            │ refused            │ refused
+       ▼                    ▼                    ▼                    ▼
+    blocked              blocked              blocked              blocked
+
+  refused at no tier ──▶ allowed
+```
+
+- **A0, A1, R and M** are deterministic checks on the snapshot's records: the SSO group policy
+  (a member whose groups are unknown is refused a high-risk tool), the block and approval rules, the
+  `requires_before:`, `scope_paths_mode: enforce` and `plan_approval:` rule records, and the MCP
+  server registry and allowlist. A1 and R fail closed, and a snapshot that fails its integrity
+  check admits no MCP call.
+- **A2** checks the container images a deploy command names against the local allowlist, and fails
+  closed.
+- **D** runs only on a call every deterministic tier allowed: the snapshot's [`decide:` rules](/guide/decide),
+  asked of your self-hosted decide engine. An enforcing rule the engine cannot answer refuses.
+- **A3 and B** need a control plane: A3 reads the SOP rules from its register, and B calls its hook
+  gate (below). A gate SDK with no API key skips both.
+
+The harness hook gates (gate body v23) read the same snapshot and run its checks in one order in
+every harness: the deterministic refusals (the protected-path and shell-bypass floor, the snapshot's
+block rules, the `requires_before:` records, the MCP registry and allowlist), then holds, then the
+trajectory records (`scope_paths`, `plan_approval`), then decide. They never call the hook gate (see the note at the end
+of this section).
+
+### With a control plane: the hook gate
+
+With a control plane connected, a gate SDK's tier B evaluates the call at the **hook gate**
+(`POST /api/v1/hook-gate`), which returns an allow/block decision synchronously:
 
 ```
 Tool call arrives
@@ -79,9 +130,9 @@ have a control-plane client, by the TrueForge bridge, and by any integration of 
 harness hook gate calls it: Claude Code, Cursor, Cline, goose, OpenHands and every other
 hook-gated harness decide locally and report to the control plane asynchronously
 (`POST /api/v1/hook-events`), which keeps their tool path free of a network round-trip.
-Everything on this page describes the gate. The local path enforces the
+Everything in this subsection describes the gate. The local path enforces the
 protected-path and shell-bypass guards written into the generated hook script, plus the policy
-snapshot the sync daemon refreshes: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules, its
+snapshot, which the sync daemon refreshes from the control plane: the workspace's `BLOCK:` and `REQUIRE_APPROVAL:` rules, its
 policy guardrails, its SSO group policy, decided for the member the snapshot was issued to, and its MCP server registry
 and allowlist. A local gate refuses a
 high-risk tool when it does not know the member's groups. Promoted findings and the gate's DLP

@@ -50,6 +50,16 @@ describe('skillWriter', () => {
     expect(record?.createdDirs).toContain(node_path.join(testWorkspaceRoot, '.agents', 'skills', 'intutic-governance-kitkat'))
   })
 
+  it('with dryRun, names the missing skills and writes nothing', async () => {
+    const written = await writeBundledSkills(testWorkspaceRoot, { dryRun: true })
+    expect(written).toEqual([
+      node_path.join(testWorkspaceRoot, RULE_AUTHOR_SKILL_PATH),
+      node_path.join(testWorkspaceRoot, KITKAT_SKILL_PATH),
+    ])
+    await expect(node_fs.access(node_path.join(testWorkspaceRoot, '.agents'))).rejects.toThrow()
+    expect(await readOriginal(written[1]!, testWorkspaceRoot)).toBeNull()
+  })
+
   it('never overwrites an existing (possibly user-edited) skill file', async () => {
     await writeBundledSkills(testWorkspaceRoot)
     const dest = node_path.join(testWorkspaceRoot, RULE_AUTHOR_SKILL_PATH)
