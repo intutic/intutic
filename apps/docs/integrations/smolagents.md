@@ -35,6 +35,8 @@ Source `.env.intutic`, launch under `intutic exec`, or set `base_url` explicitly
 pip install intutic-clawde[smolagents]
 ```
 
+The `smolagents` extra requires Python 3.11 or later: it pulls in Pillow, and the patched Pillow (13.0.0) needs 3.11.
+
 **`ToolCallingAgent`** — tools are plain callables, wrapped the same way as every other framework:
 
 ```python

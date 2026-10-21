@@ -19,7 +19,7 @@ export const crewaiAdapter = makeSdkGatedAdapter({
   type: HarnessType.CREWAI,
   label: 'CrewAI',
   keywords: ['crewai'],
-  pipInstall: 'intutic-clawde[crewai]',
+  pipInstall: 'intutic-clawde crewai',
   importLine: 'from intutic_clawde.gate.adapters.crewai import install',
   usageSummary:
     'install() registers a before_tool_call hook that refuses denied calls before the ' +

@@ -22,7 +22,8 @@ Each module here is optional-import guarded: importing
 `intutic_clawde.gate.adapters.<x>` never raises even when `<x>`'s framework
 is not installed. Only *instantiating* the adapter class (or calling the
 guardrail factory) requires the framework — install the matching extra,
-e.g. ``pip install intutic-clawde[crewai]``.
+e.g. ``pip install intutic-clawde[langchain]``. CrewAI has no extra: install
+it alongside, ``pip install intutic-clawde crewai``.
 
 Modules (Wave 1 — verified against a real install, each with a non-mocked test suite):
   langchain.py       IntuticMiddleware (LangChain v1.x AgentMiddleware)

@@ -48,7 +48,9 @@ closed on this adapter's behalf, so the adapter does it itself.
 
 Optional import: importing this module never fails even without crewai
 installed. Only calling `install()` requires it —
-`pip install intutic-clawde[crewai]`.
+`pip install intutic-clawde crewai`. There is no `crewai` extra: every
+crewai release pins a uv below the fix for GHSA-hq85-5cpj-mr62, and an extra
+would put that uv in this package's lockfile.
 
 
 ## Functions

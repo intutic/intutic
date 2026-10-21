@@ -51,7 +51,7 @@ export interface SdkGatedFrameworkSpec {
   manifestFiles?: readonly string[]
   /**
    * `pip install <pipInstall>` shown in the generated comment — the extra
-   * name included, e.g. `"intutic-clawde[crewai]"`. Bare `"intutic-clawde"`
+   * name included, e.g. `"intutic-clawde[langchain]"`. Bare `"intutic-clawde"`
    * for a framework with no dedicated adapter module yet (its tools are
    * governed through the framework-agnostic `@guard`/`guard_tools` helpers
    * in the meantime).
