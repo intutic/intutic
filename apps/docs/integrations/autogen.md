@@ -35,6 +35,8 @@ Source `.env.intutic`, launch under `intutic exec`, or set `base_url` explicitly
 pip install intutic-clawde[autogen]
 ```
 
+The `autogen` extra requires Python 3.11 or later: it pulls in Pillow, and the patched Pillow (13.0.0) needs 3.11.
+
 **If your code is `AssistantAgent`-based (the common case):** `IntuticInterventionHandler` will not see these tool calls at all — `AssistantAgent` runs them through its `Workbench` in-process. Govern the workbench:
 
 ```python

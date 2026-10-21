@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Python SDK has no `crewai` extra.** Install crewai alongside it:
+  `pip install intutic-clawde crewai`. Every crewai release pins `uv` below
+  0.13.4, the fix for GHSA-hq85-5cpj-mr62, so the extra put a vulnerable uv
+  in the SDK's lockfile. The CrewAI adapter is unchanged.
+- **The `autogen` and `smolagents` extras require Python 3.11.** Both pull in
+  Pillow, every Pillow up to 12.3.0 is vulnerable (2026-10-20 advisories),
+  and the fix, 13.0.0, requires Python 3.11. The SDK itself and its other
+  extras still support Python 3.10.
+
+### Security
+
+- **Dependencies moved past the 2026-10-20 advisories:**
+  - follow-redirects 1.16.1, markdown-it 14.3.3 and hono 4.13.13.
+  - vite 6.4.4. The docs site's vitepress moves off vite 5 too: no patched
+    5.x exists, and the docs render identically on 6.4.4.
+  - certifi 2026.10.19 and Pillow 13.0.0.
+  - mcp 2.1.1, past GHSA-84m7-p3x7-pcfv. crewai's `mcp~=1.28.1` pin had held
+    it back.
+
 ## [3.0.3] - 2026-10-19
 
 ### Changed

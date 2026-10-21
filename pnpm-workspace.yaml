@@ -41,11 +41,11 @@ minimumReleaseAgeExclude:
 # requires. Note these live here and not under a "pnpm" key in package.json —
 # pnpm 11 silently ignores that field.
 #
-# vite and esbuild are deliberately absent: vitepress 1.6.4 hard-pins vite ^5.4.14
-# and 2.x is alpha-only, so the fix is not reachable. Both advisories are
-# dev-server-only, and apps/docs is a private devDependency that builds to static
-# HTML in CI — nothing serves the dev server. The 2026-10-20 launch-editor advisories
-# are dev-server-only too; vitest's vite 6 copy takes the fix below.
+# vite: vitepress 1.6.4 (the latest stable) asks for vite ^5.4.14, and no 5.x
+# release carries the 2026-10-20 launch-editor fixes, so every copy below 6.4.4
+# moves to the patched 6.x (override below). Checked 2026-10-21: the docs build
+# on 6.4.4 renders the same 157 pages as on 5.4.21 (identical once content
+# hashes, Vue scope ids and MathJax ids are masked), and `vitepress dev` serves.
 #
 # (Resolved 2026-07-28: @modelcontextprotocol/sdk moved to ^1.30.0 once it
 # cleared the 24h release-age window, taking @hono/node-server to 2.x and
@@ -93,7 +93,6 @@ overrides:
   follow-redirects: '^1.16.1' # 2026-10-20 advisories, fixed in 1.16.1
   # Via typedoc (SDK reference generation, dev-only), which accepts ^14.3.0.
   markdown-it: '^14.3.3' # 2026-10-20 advisories, fixed in 14.3.3
-  # vitest's own vite (dev-only) to the patched 6.x; GHSA-r825-w8mm-5pxw,
-  # GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv (launch-editor in the dev
-  # server). Keyed to 6.x so vitepress's vite 5 is left alone (see above).
-  'vite@>=6 <6.4.4': '^6.4.4'
+  # vitest's and vitepress's vite, to the patched 6.x (see the note above);
+  # GHSA-r825-w8mm-5pxw, GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv.
+  'vite@<6.4.4': '^6.4.4'
