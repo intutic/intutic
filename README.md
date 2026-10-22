@@ -32,7 +32,7 @@ Observability tools and LLM gateways (like LangSmith or Portkey) work on model t
 
 Intutic runs as a local or self-hosted proxy, written in Rust, between your agents and their model providers:
 
-`intutic gates install` installs a tool-call gate in each harness that supports one and writes its rules file from `.intutic/sops/`, with no control plane; `intutic start` rewrites them when a rule set changes.
+`intutic gates install` installs a tool-call gate in each harness that supports one, writes its rules file from `.intutic/sops/` and adds the bundled agent skills (Kitkat and rule authoring) where the workspace has none, with no control plane; `intutic start` rewrites them when a rule set changes.
 
 <!-- UNRELEASED:cloud
 With `intutic connect`, a sync daemon (`sync-daemon`) does the same and keeps the rules files in sync with a control plane.
