@@ -26,6 +26,11 @@ CVE-2026-25645, CVE-2026-44431 and CVE-2026-44432 — themselves require 3.10, s
 supporting 3.9 would have meant pinning known-vulnerable transports. Python 3.9
 reached end of life in October 2025.
 
+The `autogen` and `smolagents` extras require Python 3.11: both pull in Pillow,
+and the patched Pillow (13.0.0) needs 3.11. There is no `crewai` extra, because
+every crewai release pins a vulnerable `uv`. Install crewai alongside the SDK:
+`pip install intutic-clawde crewai`.
+
 ---
 
 ## Architecture & Primitives

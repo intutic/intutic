@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.4] - 2026-10-21
+
 ### Changed
 
 - **The Python SDK has no `crewai` extra.** Install crewai alongside it:
