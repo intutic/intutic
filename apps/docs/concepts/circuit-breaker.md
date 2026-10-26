@@ -95,7 +95,7 @@ The fastest check — a single Valkey key lookup.
 **Cost:** A single Valkey GET. No model call, no Postgres round trip.
 
 ```typescript
-// services/control-plane/src/routes/evaluate.ts
+// the control plane's evaluate route
 const budgetBlock = await valkey.get(budgetHardBlockKey(workspace_id))
 if (budgetBlock) {
   return c.json({ action: 'deny', reason: 'Workspace budget cap exceeded' })

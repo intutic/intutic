@@ -124,7 +124,7 @@ The package has two binaries, so `npx` needs `-p @intutic/mcp-governance-proxy` 
 
 ## Part of Intutic
 
-This package is part of the [Intutic](https://github.com/intutic/intutic) monorepo — an open-core AI governance control plane for developer teams.
+This package is part of the [Intutic](https://github.com/intutic/intutic) monorepo — policy as code for AI agents, enforced at the tool call.
 
 ## License
 

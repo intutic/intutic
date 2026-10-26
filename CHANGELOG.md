@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`POST /api/v1/plans/capture` answers 409 for a session the platform has not seen,**
+  with `UNKNOWN_SESSION` and what to do, in place of a 500 that echoed the query. The
+  generated API catalog documents the response.
+
+### Security
+
+- **Dependencies moved past the 2026-10-26 advisories** with overrides, because
+  Dependabot's security jobs ended in `update_not_possible` for each (every one is reached
+  through another package's range): undici 7.30.1, body-parser 2.4.0, fast-uri 3.1.9,
+  ip-address 10.7.4 and @vitest/mocker 4.1.12, and zod 4.6.6 for the 4.x copies in gate-js's
+  dev-only trees. zod 3.x has no patched release; `@intutic/shared-types` and
+  `@intutic/mcp-proxy` use it and stay flagged until they move to zod 4.
+
+### Changed
+
+- **The open-source docs build refuses plan names in running text** (Self-serve, Biz Org),
+  as it already refused hosted-service terms, and the pages that named them now keep those
+  sentences in the paid-only blocks.
+- **`SECURITY.md` lists 3.0.x as the supported line.** Package descriptions and footers no
+  longer describe the open-core packages as a control plane.
+
 ## [3.0.5] - 2026-10-26
 
 ### Fixed

@@ -5,7 +5,7 @@
  *
  * `SopRule` has carried an optional `argPattern` since mcp-proxy shipped, and
  * `packages/mcp-proxy/src/policy.ts` matches it against the serialised tool
- * input. `intutic/intutic-enterprise#14` added a ` WHERE ` clause to the SOP
+ * input. The control plane's SOP-title grammar gained a ` WHERE ` clause to the SOP
  * title grammar, so a rule can finally say "kubectl apply without a digest"
  * instead of only "any shell call":
  *
@@ -196,7 +196,7 @@ export async function fetchRegister(
 /**
  * True when the control plane emitted at least one usable `argPattern`.
  *
- * A control plane predating `intutic-enterprise#14` cannot produce one, so
+ * A control plane that predates the ` WHERE ` clause cannot produce one, so
  * this doubles as a deployment probe — surface it rather than letting the
  * tier be silently inert.
  */

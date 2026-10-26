@@ -60,8 +60,8 @@ const ENTERPRISE = existsSync(join(ROOT, 'services', 'control-plane'))
 const SHARED_ROOTS = ['packages', 'tools', 'services/sync-daemon', 'apps/docs', 'README.md']
 
 /**
- * Trees tools/scripts/sync-to-public.sh copies whole (plus those whose file
- * lists match file for file), so every file in them is public. The enterprise
+ * Trees the sync tooling copies whole (plus those whose file lists match
+ * file for file), so every file in them is public. The enterprise
  * run falls back to these when it has no public checkout to compare against.
  */
 const WHOLESALE = [

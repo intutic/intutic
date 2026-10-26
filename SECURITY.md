@@ -10,8 +10,8 @@ We provide security updates and patches for the following versions of Intutic pa
 
 | Version | Supported | Description / Patch SLA |
 | :--- | :---: | :--- |
-| `2.7.x` (Latest) | :white_check_mark: | **Active Support** — Current stable production release line. Critical security patches within 24–48 hours. |
-| `< 2.7.0` | :x: | **Unsupported / Pre-release** — Legacy or pre-release iterations. Users should upgrade to `2.7.x`. |
+| `3.0.x` (Latest) | :white_check_mark: | **Active Support** — Current stable production release line. Critical security patches within 24–48 hours. |
+| `< 3.0.0` | :x: | **Unsupported** — Earlier release lines. Users should upgrade to `3.0.x`. |
 
 ---
 

@@ -1534,7 +1534,7 @@ function supportsArgPatterns(rules): boolean;
 
 True when the control plane emitted at least one usable `argPattern`.
 
-A control plane predating `intutic-enterprise#14` cannot produce one, so
+A control plane that predates the ` WHERE ` clause cannot produce one, so
 this doubles as a deployment probe — surface it rather than letting the
 tier be silently inert.
 

@@ -1,6 +1,6 @@
 # Intutic iptables redirection rules for Linux
 # Redirects direct outbound HTTPS traffic to AI providers to the local Intutic proxy (port 4000).
-# Load with: sudo iptables-restore < /Users/ishangupta/intutic/tools/cli/resources/firewall/iptables.rules
+# Load with: sudo iptables-restore < <repo>/tools/cli/resources/firewall/iptables.rules
 
 *nat
 :PREROUTING ACCEPT [0:0]
