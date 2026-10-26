@@ -234,7 +234,7 @@ The request is permitted and passes through the proxy without modification. This
 **In the proxy verdict mapping:**
 
 ```typescript
-// services/control-plane/src/lib/valkeySubscriber.ts — mapVerdict(trace.verdict)
+// mapVerdict(trace.verdict), in the control plane
 case 'allowed':
   return 'BYPASS'
 ```
@@ -290,7 +290,7 @@ On the trace, the proxy records `hijacked` (HIJACK) when a detector's finding st
 **In the proxy verdict mapping:**
 
 ```typescript
-// services/control-plane/src/lib/valkeySubscriber.ts — mapVerdict(trace.verdict)
+// mapVerdict(trace.verdict), in the control plane
 case 'hijacked':
   return 'HIJACK'
 ```
@@ -328,7 +328,7 @@ measured on real traffic.
 **In the proxy verdict mapping:**
 
 ```typescript
-// services/control-plane/src/lib/valkeySubscriber.ts — mapVerdict(trace.verdict)
+// mapVerdict(trace.verdict), in the control plane
 case 'killed':
   return 'KILL'
 

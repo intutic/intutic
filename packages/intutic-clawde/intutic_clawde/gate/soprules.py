@@ -12,7 +12,7 @@ strongest deploy rule available was
 which blocks `make test` and `git status` too. A rule that broad gets switched
 off within a day, so in practice the policy could not be written at all.
 
-intutic/intutic-enterprise#14 added a ` WHERE ` clause to the title grammar, so
+The control plane's SOP-title grammar gained a ` WHERE ` clause, so
 the rule becomes sayable in the product:
 
     BLOCK:^shell$ WHERE kubectl\\s+apply(?!.*@sha256:):deploy must be pinned
@@ -196,7 +196,7 @@ def fetch_register(base_url: str, api_key: str, workspace_id: str,
 def supports_arg_patterns(rules: list[SopRule]) -> bool:
     """True when the control plane emitted at least one usable argPattern.
 
-    A control plane predating intutic-enterprise#14 cannot produce one, so this
+    A control plane that predates the ` WHERE ` clause cannot produce one, so this
     doubles as a deployment probe — surface it rather than letting the tier be
     silently inert.
     """

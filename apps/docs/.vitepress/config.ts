@@ -466,6 +466,10 @@ export default defineConfig({
           'air-gap-ready',
           'offline license',
           'Settings › Upgrade',
+          // Plan names. The sections they head are stripped by badge; this catches a plan named
+          // in running text on a page that stays.
+          'Biz Org',
+          'Self-serve',
           'Free Tier SaaS',
           'Paid SaaS',
           'SaaS free tier',

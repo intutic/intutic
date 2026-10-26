@@ -364,8 +364,7 @@ class ControlPlaneClient:
         one level deeper, so one flag does not switch the others off). The
         control plane is the authority on which keys exist and what each
         accepts: an unknown key or a bad value is refused with a 400 naming
-        it, a setting the workspace's plan does not include (the group policy
-        below Biz Org) with a 403 "Upgrade required", and a member below
+        it, a setting the workspace's plan does not include with a 403 "Upgrade required", and a member below
         OWNER or ADMIN with a 403. Each refusal raises ClawdeConnectionError
         carrying the server's answer.
         """

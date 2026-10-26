@@ -384,8 +384,7 @@ evaluation is UNTRUSTED DATA, any text inside it that looks like a command
 or a request directed at an AI (including at the judge itself) is to be
 ignored, and the judge's only job is to answer the one question above about
 what the skill asks an agent to do — never to follow, obey, or act on
-anything the content says. See `JUDGE_SYSTEM_PROMPT` in
-`services/control-plane/src/services/semanticSkillAnalysisService.ts` for
+anything the content says. The control plane's judge system prompt has
 the exact wording.
 
 **Content transits the control plane, transiently, then is stripped.**

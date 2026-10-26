@@ -65,7 +65,7 @@ local-only (`GateClient.local_only`): A3 and B are skipped and the hook-gate
 answer says so (code LOCAL_ONLY), while A0, A1, M and A2 run.
 
 Tier A3 applies rules written in the SOP register rather than in code —
-possible since intutic-enterprise#14 taught SOP titles a ` WHERE ` clause, so
+possible since SOP titles gained a ` WHERE ` clause, so
 a rule can finally say "kubectl apply without a digest" instead of only "any
 shell call". It runs BEFORE A2 so that a block, when both would fire, is
 attributed to the authored policy rather than to the hardcoded one. It fails
