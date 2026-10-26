@@ -52,7 +52,7 @@ minimumReleaseAgeExclude:
 # closing GHSA-frvp-7c67-39w9 without any guard exclusion.)
 overrides:
   brace-expansion: '^5.0.12' # CVE-2026-13149, CVE-2026-14257, + the 2026-08 bypass of the 14257 mitigation; GHSA-6j4f-fj2g-mc7p, GHSA-qhr7-859c-m2p7, GHSA-q2hr-2g5m-vwhr
-  fast-uri: '^3.1.6' # CVE-2026-16221, CVE-2026-13676, + host confusion via backslash authority introducer; CVE-2026-75899/75931/75975/76172 (SSRF via repeated hostname / malformed IPv6, host confusion via IDN + percent-encoded scheme)
+  fast-uri: '^3.1.9' # 2026-10-26 advisories (fixed in 3.1.9); earlier: CVE-2026-16221, CVE-2026-13676, + host confusion via backslash authority introducer; CVE-2026-75899/75931/75975/76172 (SSRF via repeated hostname / malformed IPv6, host confusion via IDN + percent-encoded scheme)
   js-yaml: '^4.3.2' # CVE-2026-59869, CVE-2026-59870 (quadratic !!omap resolution, unfixed in 4.3.0); CVE-2026-84375 (maxTotalMergeKeys did not bound CPU on empty merge sources)
   # Scoped, not a blanket `nanoid` override: @intutic/control-plane and
   # @intutic/id depend on nanoid v3 directly (CJS, not vulnerable — the GHSA
@@ -61,7 +61,14 @@ overrides:
   # `workflow` devDependency, dev-only, added in A3) pulls a vulnerable v5.1.6.
   '@workflow/core>nanoid': '^5.1.16' # GHSA-28wg-ghj8-5hjv (non-secure generator can loop indefinitely on a negative size)
   protobufjs: '^7.6.5' # CVE-2026-59877
-  undici: '^7.29.1' # 5 GHSAs newly surfaced by @anthropic-ai/sdk's devDep pulling in `workflow`'s undici transitive at scan time: cross-user cache/cookie/response-desync issues + a parse-time crash; GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3 + 8 lower-severity (fixed in 7.29.1)
+  # Scoped to the 4.x copies (gate-js's dev-only @ai-sdk and workflow trees). A blanket zod
+  # override forces zod 4 onto @intutic/shared-types and mcp-proxy, which use zod 3 (z.record
+  # takes two arguments in 4): GHSA-mrhx-c7xc-m3w5 has no 3.x release, so those two stay
+  # flagged until they migrate.
+  'zod@>=4.0.0 <4.6.6': '^4.6.6' # GHSA-mrhx-c7xc-m3w5 (memory exhaustion on oversized constrained collections), fixed in 4.6.6
+  body-parser: '^2.4.0' # 2026-10-26 high-severity advisory (fixed in 2.4.0) — via express 5 (@modelcontextprotocol/sdk, @a2a-js/sdk)
+  '@vitest/mocker': '^4.1.12' # 2026-10-26 advisories (fixed in 4.1.12) — via vitest, dev-only
+  undici: '^7.30.1' # 2026-10-26 advisories (fixed in 7.30.1: one high, two moderate); earlier, 5 GHSAs newly surfaced by @anthropic-ai/sdk's devDep pulling in `workflow`'s undici transitive at scan time: cross-user cache/cookie/response-desync issues + a parse-time crash; GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3 + 8 lower-severity (fixed in 7.29.1)
   uuid: '^11.1.1' # CVE-2026-41907
   # @modelcontextprotocol/sdk pins hono ^4.11.4 and resolves it to a version
   # below the fix. 4.12.31 satisfies that range, so this needs no SDK bump.
@@ -71,7 +78,7 @@ overrides:
   '@grpc/grpc-js': '^1.14.5' # GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4 — via @opentelemetry/sdk-node's OTLP gRPC exporters and @a2a-js/sdk
   # Optional dependency of @openai/agents-core (gate-js devDependency, dev-only).
   '@modelcontextprotocol/client': '^2.2.0' # GHSA-6qxp-vccf-f47h
-  ip-address: '^10.7.1' # GHSA-2vr4-cq9g-pvrc, GHSA-rpw4-54j3-4h4q, GHSA-h3mg-xc3c-68pw, GHSA-j6r3-76f7-8jcv — via express-rate-limit (@modelcontextprotocol/sdk)
+  ip-address: '^10.7.4' # 2026-10-26 advisory (fixed in 10.7.4); earlier: GHSA-2vr4-cq9g-pvrc, GHSA-rpw4-54j3-4h4q, GHSA-h3mg-xc3c-68pw, GHSA-j6r3-76f7-8jcv — via express-rate-limit (@modelcontextprotocol/sdk)
   proxy-addr: '^2.0.8' # GHSA-jqcg-44mw-7w3h — via express 5 (@modelcontextprotocol/sdk, @a2a-js/sdk)
   shell-quote: '^1.11.0' # GHSA-pqg4-j6r4-53mv — via @daytona/sdk (gate-js devDependency, dev-only)
   source-map-js: '^1.2.2' # GHSA-68fv-2mgg-jv7q — via postcss and the Vue SFC compiler (build tooling)
