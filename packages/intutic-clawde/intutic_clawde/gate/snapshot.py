@@ -36,6 +36,7 @@ the JS reader, and reported, so the failure is visible rather than silent.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import re
@@ -74,6 +75,13 @@ class Rule:
     # steps are searched for in order, in linear time, instead of `pattern`,
     # which re runs in time growing with the square of crafted text.
     steps: Optional[list] = None
+    # The WHERE clause of a SOP rule: the optional seventh column, base64 of a regex that
+    # must also match the call's serialized input (`tool_input_json`) for the rule to fire.
+    # None is "no argument condition". `arg_downgraded` marks one that did not decode or
+    # compile: the rule then applies by name alone, as in the shipped gates, because
+    # dropping a block rule over a broken narrowing clause would fail open.
+    arg_pattern: Optional[re.Pattern] = None
+    arg_downgraded: bool = False
 
 
 @dataclass
@@ -234,11 +242,18 @@ def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_dec
         if len(f) < 6 or not f[5]:
             continue
         flags = re.IGNORECASE if "i" in f[2] else 0
+        arg_pattern, arg_downgraded = None, False
+        if len(f) > 6 and f[6]:
+            try:
+                arg_pattern = re.compile(base64.b64decode(f[6], validate=True).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError, re.error):
+                arg_downgraded = True
         try:
             snap.rules.append(Rule(
                 id=f[0], severity=f[1], subject=f[3] or "any", reason=f[4],
                 pattern=re.compile(f[5], flags),
                 steps=compile_sequence(f[5], flags) if "s" in f[2] else None,
+                arg_pattern=arg_pattern, arg_downgraded=arg_downgraded,
             ))
         except re.error:
             snap.dropped_rules += 1
@@ -310,13 +325,20 @@ def load_snapshot(workspace_id: str = "", path: str | None = None, evaluates_dec
 
 
 def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
-             guard_disabled: bool = False, start: int = 0) -> Decision:
+             guard_disabled: bool = False, start: int = 0,
+             tool_input_json: Optional[str] = None) -> Decision:
     """Evaluate one tool call against the snapshot, as the rendered gates do.
 
     A shadow or warn match is collected and evaluation continues, so a later
     block or hold still decides the call. The first block or hold wins; with
     none, the first advisory match is returned. `start` resumes after an
     approved hold.
+
+    `tool_input_json`: the call's input as `json.dumps(tool_input,
+    separators=(",", ":"), ensure_ascii=False)`, the shape every gate matches a
+    rule's WHERE clause against. A rule with such a clause fires only when it
+    matches. A caller that passes None (older callers) gets the clause ignored, so the
+    rule applies by name alone, which is the behaviour before the column was read.
     """
     rules = list(snap.rules)
     if guard_disabled:
@@ -361,6 +383,9 @@ def evaluate(tool_name: str, target: str, command: str, snap: Snapshot,
             if rule.subject != "phrase" and not (
                 sequence_match(rule.steps, subject) if rule.steps is not None else rule.pattern.search(subject)
             ):
+                continue
+            if (rule.arg_pattern is not None and tool_input_json is not None
+                    and not rule.arg_pattern.search(tool_input_json)):
                 continue
             if rule.severity == SEV_SHADOW:
                 advisories.append(Decision(SEV_SHADOW, f"{rule.reason} [{rule.id}]", rule.id))

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Python SDK gate applies a snapshot rule's WHERE clause.** The `.rules` file
+  carries a SOP rule's `WHERE` clause as an optional seventh column, and the bash and
+  JavaScript gates fire the rule only when the clause also matches the serialized call.
+  The Python reader ignored the column, so a rule such as `shell WHERE kubectl
+  +apply(?!.*@sha256:)` acted as "every `shell` call" and refused `ls` and `make test`.
+  A clause that does not decode or compile still downgrades that rule to name-only,
+  as in the other gates, rather than dropping a block rule.
+- **`GateClient.from_env()` reads the OS keychain.** With CLI 3.x `credentials.json`
+  holds the marker `keychain` instead of the token, and the client sent it as the
+  bearer token, so every control-plane tier answered 401. It now reads the token the
+  CLI stored (macOS Keychain, `secret-tool` on Linux), as the VS Code extension does.
+- **`plan_approval:` exempts `read_file` and `list_directory`,** the LangChain and
+  LangGraph names for the read and listing tools, in every gate (shared types,
+  `@intutic/gate`, the Python SDK and the Python gate the daemon writes). Without them a
+  LangGraph agent could not read its way to a plan.
+
 ## [3.0.4] - 2026-10-21
 
 ### Changed

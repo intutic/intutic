@@ -326,3 +326,62 @@ class TestActionRuleShadowsPhrase:
         assert (d.severity, d.rule_id) == ("hold", self.FP)
         assert snap.evaluate("Bash", "", "git push --force origin main", s, False, d.next).severity is None
         assert snap.evaluate("Bash", "", "git push --force-with-lease origin main", s).severity is None
+
+
+class TestArgPattern:
+    """The seventh column: a SOP rule's WHERE clause, base64, matched against the serialized call.
+
+    Seen live (2026-10-25): the workspace rule `shell WHERE kubectl +apply(?!.*@sha256:)` arrived
+    as a name-only rule in this reader, so it refused every `shell` call, `ls` included.
+    """
+
+    PATTERN = r"kubectl +apply(?!.*@sha256:)"
+
+    def _rule(self, tmp_path, argb64=None, pattern=PATTERN):
+        import base64
+        col = base64.b64encode(pattern.encode()).decode() if argb64 is None else argb64
+        return snap.load_snapshot(WS, _rules_file(tmp_path, [
+            line("sop.x", "block", "-", "tool", "deploy must be digest-pinned", " (shell) ") + "\t" + col]))
+
+    @staticmethod
+    def _json(command):
+        return json.dumps({"command": command}, separators=(",", ":"), ensure_ascii=False)
+
+    def test_the_clause_is_parsed(self, tmp_path):
+        s = self._rule(tmp_path)
+        assert s.rules[0].arg_pattern is not None and s.rules[0].arg_downgraded is False
+
+    def test_fires_only_when_the_call_matches_the_clause(self, tmp_path):
+        s = self._rule(tmp_path)
+        hit = snap.evaluate("shell", "", "kubectl apply -f x.yaml", s, tool_input_json=self._json("kubectl apply -f x.yaml"))
+        assert hit.severity == snap.SEV_BLOCK
+
+    def test_a_shell_call_the_clause_does_not_describe_is_allowed(self, tmp_path):
+        s = self._rule(tmp_path)
+        for cmd in ("ls", "make test", "echo hi"):
+            assert snap.evaluate("shell", "", cmd, s, tool_input_json=self._json(cmd)).severity is None
+
+    def test_a_pinned_call_passes_the_negative_lookahead(self, tmp_path):
+        s = self._rule(tmp_path)
+        call = {"command": "kubectl apply -f x.yaml", "verified_images": ["r/x@sha256:" + "a" * 64]}
+        js = json.dumps(call, separators=(",", ":"), ensure_ascii=False)
+        assert snap.evaluate("shell", "", call["command"], s, tool_input_json=js).severity is None
+
+    def test_a_clause_that_does_not_compile_downgrades_the_rule_to_name_only(self, tmp_path):
+        # Dropping a block rule over a broken narrowing clause would fail open.
+        s = self._rule(tmp_path, pattern="(")
+        assert s.rules[0].arg_downgraded is True and s.rules[0].arg_pattern is None
+        assert snap.evaluate("shell", "", "ls", s, tool_input_json=self._json("ls")).severity == snap.SEV_BLOCK
+
+    def test_garbage_in_the_column_downgrades_it_too(self, tmp_path):
+        s = self._rule(tmp_path, argb64="not base64 !!")
+        assert s.rules[0].arg_downgraded is True
+
+    def test_a_caller_that_passes_no_input_gets_the_old_name_only_behaviour(self, tmp_path):
+        s = self._rule(tmp_path)
+        assert snap.evaluate("shell", "", "ls", s).severity == snap.SEV_BLOCK
+
+    def test_a_v3_line_with_no_seventh_column_is_name_only(self, tmp_path):
+        s = snap.load_snapshot(WS, _rules_file(tmp_path, [line("sop.y", "block", "-", "tool", "r", " (shell) ")]))
+        assert s.rules[0].arg_pattern is None
+        assert snap.evaluate("shell", "", "ls", s, tool_input_json=self._json("ls")).severity == snap.SEV_BLOCK

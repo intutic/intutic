@@ -44,7 +44,7 @@ SCOPE_MOVE_FROM_KEYS = ("source", "source_path", "from", "old_path")
 SCOPE_MOVE_TO_KEYS = ("destination", "destination_path", "to", "new_path")
 SCOPE_TARGET_MAX_BYTES = 512
 PLAN_EXEMPT_TOOLS = ("read", "readfile", "view", "cat", "open_file", "glob", "grep", "ls", "list_dir", "search",
-                     "todowrite")
+                     "todowrite", "read_file", "list_directory")
 FILE_WRITE_SHELL_PHRASES = ("sed -i", "perl -i", "perl -pi", "git apply", "git am", "git checkout", "git switch",
                             "git restore", "git reset", "git merge", "git pull", "git rebase", "git cherry-pick",
                             "git revert", "git stash pop", "git stash apply", "patch -p")

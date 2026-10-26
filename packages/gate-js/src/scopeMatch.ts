@@ -63,7 +63,7 @@ export const SCOPE_TARGET_MAX_BYTES = 512
  * Tools `plan_approval:` never refuses: the read tools and the search and
  * listing tools an agent needs to write a plan in the first place.
  */
-export const PLAN_EXEMPT_TOOLS: readonly string[] = ['read', 'readfile', 'view', 'cat', 'open_file', 'glob', 'grep', 'ls', 'list_dir', 'search', 'todowrite']
+export const PLAN_EXEMPT_TOOLS: readonly string[] = ['read', 'readfile', 'view', 'cat', 'open_file', 'glob', 'grep', 'ls', 'list_dir', 'search', 'todowrite', 'read_file', 'list_directory']
 
 /**
  * Shell phrases that change files in the working tree. With the mutation
@@ -364,7 +364,7 @@ export function scopeRelativePath(target: string, cwd: string, root: string): st
 /** Whether `plan_approval:` lets `tool` run before the plan is approved: one of {@link PLAN_EXEMPT_TOOLS}, ignoring case, bare or as an MCP tool (`mcp__<server>__grep`). */
 export function isPlanExemptTool(tool: string): boolean {
   const lower = tool.toLowerCase()
-  for (const t of ['read', 'readfile', 'view', 'cat', 'open_file', 'glob', 'grep', 'ls', 'list_dir', 'search', 'todowrite']) {
+  for (const t of ['read', 'readfile', 'view', 'cat', 'open_file', 'glob', 'grep', 'ls', 'list_dir', 'search', 'todowrite', 'read_file', 'list_directory']) {
     if (lower === t || lower.slice(-(t.length + 2)) === '__' + t) return true
   }
   return false

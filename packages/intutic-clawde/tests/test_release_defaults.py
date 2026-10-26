@@ -102,6 +102,26 @@ def test_gate_from_env_uses_the_control_plane_intutic_login_saved(tmp_path, monk
     assert GateClient.from_env(session_id="s_1").base_url == ENV
 
 
+def test_gate_from_env_reads_the_keychain_token_when_the_file_holds_the_marker(tmp_path, monkeypatch):
+    from intutic_clawde.gate import client as gate_client
+
+    _write_credentials(tmp_path, apiKey="keychain", workspaceId="ws_1", controlPlaneUrl=STORED)
+    asked = []
+    monkeypatch.setattr(gate_client, "_keychain_token", lambda ws: asked.append(ws) or "vk_from_keychain")
+    client = GateClient.from_env(session_id="s_1")
+    assert (client.api_key, asked) == ("vk_from_keychain", ["ws_1"])
+
+
+def test_gate_from_env_never_sends_the_marker_as_a_key(tmp_path, monkeypatch):
+    from intutic_clawde.gate import client as gate_client
+
+    _write_credentials(tmp_path, apiKey="keychain", workspaceId="ws_1", controlPlaneUrl=STORED)
+    monkeypatch.setattr(gate_client, "_keychain_token", lambda ws: "")
+    client = GateClient.from_env(session_id="s_1")
+    assert client.api_key != "keychain"
+    assert client.local_only is True
+
+
 def test_gate_from_env_without_key_is_local_only():
     client = GateClient.from_env(session_id="s_1")
     assert client.local_only is True

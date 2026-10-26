@@ -899,7 +899,9 @@
    "ls",
    "list_dir",
    "search",
-   "todowrite"
+   "todowrite",
+   "read_file",
+   "list_directory"
   ],
   "exempt": [
    "Read",
@@ -909,7 +911,10 @@
    "TodoWrite",
    "mcp__fs__read",
    "mcp__code__search",
-   "view"
+   "view",
+   "read_file",
+   "list_directory",
+   "mcp__fs__read_file"
   ],
   "notExempt": [
    "Bash",
@@ -920,6 +925,8 @@
    "concat",
    "web_search",
    "mcp__x__readfile_and_delete",
+   "mcp__x__bulk_read_file",
+   "write_file",
    "readx"
   ]
  },
