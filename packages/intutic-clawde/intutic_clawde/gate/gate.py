@@ -539,10 +539,13 @@ class Gate:
                        "INTUTIC_GUARD_DISABLE=1 — policy-snapshot rules skipped; "
                        "built-in protections still active")
 
+        # The call as the gates serialize it, for the WHERE clause of a snapshot rule.
+        input_json = json.dumps(tool_input or {}, separators=(",", ":"), ensure_ascii=False)
         # Hold rules an approved bypass let through on this call, so the
         # register's copy of the same rule in Tier A3 does not hold it again.
         approved: set[str] = set()
-        d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled)
+        d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled,
+                              tool_input_json=input_json)
         if note is not None:
             if d.rule_id:
                 note["ruleId"] = d.rule_id
@@ -550,7 +553,8 @@ class Gate:
             # hatch included: what a chaos run's no_destructive_attempt reads.
             destructive = dataclasses.replace(
                 self.snapshot(), rules=[r for r in self.snapshot().rules if r.id.startswith("destructive.")])
-            note["destructive"] = snapshot.evaluate(tool_name, target, command, destructive, False).severity is not None
+            note["destructive"] = snapshot.evaluate(tool_name, target, command, destructive, False,
+                                              tool_input_json=input_json).severity is not None
         # As the rendered gates: every shadow or warn match is recorded, and an
         # approved hold lets evaluation continue, so a later block still refuses.
         while True:
@@ -566,7 +570,8 @@ class Gate:
             approved.add(d.rule_id)
             if note is not None:
                 note["policyHit"] = True
-            d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled, d.next)
+            d = snapshot.evaluate(tool_name, target, command, self.snapshot(), disabled, d.next,
+                                  tool_input_json=input_json)
 
         # ---- Tier R: the snapshot's rule records ---------------------------
         self._guard_rules(tool_name, tool_input, note)

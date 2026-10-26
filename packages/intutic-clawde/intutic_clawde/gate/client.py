@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import urllib.parse
 import uuid
 from dataclasses import dataclass
@@ -150,6 +152,33 @@ class GateResponse:
     # call with it (`gateDecisionId`), so the control plane exports the
     # decision to SIEM once and files its incident once.
     decision_id: Optional[str] = None
+
+
+# `intutic login` (CLI 3.x) keeps the token in the OS keychain and leaves this word in
+# credentials.json's `apiKey`. Reading the field as a key sends `Bearer keychain`, and
+# every control-plane tier then answers 401. The names below are the ones
+# tools/cli/src/config/keychain.ts writes (the VS Code extension reads them the same way).
+KEYCHAIN_SENTINEL = "keychain"
+_KEYCHAIN_SERVICE = "intutic"
+_KEYCHAIN_ACCOUNT = "token"
+
+
+def _keychain_token(workspace_id: str) -> str:
+    """The token `intutic login` stored for this workspace, or "" when there is none."""
+    if not workspace_id:
+        return ""
+    target = f"{_KEYCHAIN_SERVICE}:workspace:{workspace_id}"
+    if sys.platform == "darwin":
+        cmd = ["security", "find-generic-password", "-a", _KEYCHAIN_ACCOUNT, "-s", target, "-w"]
+    elif sys.platform.startswith("linux"):
+        cmd = ["secret-tool", "lookup", "workspace", workspace_id, "service", _KEYCHAIN_SERVICE]
+    else:
+        return ""  # Windows: the CLI's PasswordVault entry is not read from here
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip()
 
 
 class GateClient:
@@ -489,6 +518,10 @@ class GateClient:
                 base = base or c.get("controlPlaneUrl", "")
             except OSError:
                 pass
+            if key == KEYCHAIN_SENTINEL:
+                # An unreadable keychain leaves the client local_only rather than
+                # sending the marker as a credential.
+                key = _keychain_token(ws)
 
         sess = session_id or os.environ.get("INTUTIC_SESSION_ID", "")
         if not sess:
