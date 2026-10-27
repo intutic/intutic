@@ -152,6 +152,7 @@ pub fn report_body(session_id: &str, trace_id: &str, calls: &[HijackedCall]) -> 
 /// has already been returned to the client — and a proxy that blocked on the
 /// control plane to record a *past* event would convert an observability
 /// outage into a latency outage.
+#[cfg(feature = "control-plane")]
 pub async fn report(
     client: &reqwest::Client,
     control_plane_url: &str,
@@ -198,6 +199,19 @@ pub async fn report(
             );
         }
     }
+}
+
+/// A build without the `control-plane` feature has nowhere to report to.
+#[cfg(not(feature = "control-plane"))]
+pub async fn report(
+    _client: &reqwest::Client,
+    _control_plane_url: &str,
+    _virtual_key: &crate::credential::VirtualKey,
+    _workspace_id: &str,
+    _session_id: &str,
+    _trace_id: &str,
+    _calls: &[HijackedCall],
+) {
 }
 
 #[cfg(test)]

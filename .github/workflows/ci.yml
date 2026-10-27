@@ -366,6 +366,12 @@ jobs:
       - name: cargo clippy (all targets, warnings are errors)
         run: cd packages/proxy && cargo clippy --all-targets --all-features -- -D warnings
 
+      # `--all-features` above is the build Intutic's own images ship (the
+      # control-plane clients compiled in); this is the open-core build, which
+      # is what a plain `cargo build` produces.
+      - name: cargo clippy, default features (no control-plane clients)
+        run: cd packages/proxy && cargo clippy --all-targets -- -D warnings
+
       - name: cargo build --release (embeds grammars via include_bytes!)
         run: cd packages/proxy && cargo build --release
 
@@ -407,6 +413,16 @@ jobs:
       # piped gate reports the pipeline's last exit status.
       - name: Response-echo corpus gate (output-echo FP set, both scan entry points)
         run: cd packages/proxy && cargo test --test response_echo_corpus_test
+
+      # The suites that drive the control-plane clients against a mock control
+      # plane do not exist in the default build. Last, and after cleaning the
+      # crate's own debug artifacts, so the runner's disk holds one set of test
+      # binaries at a time; the dependencies stay built.
+      - name: cargo test, control-plane feature (all suites)
+        run: |
+          cd packages/proxy
+          cargo clean -p intutic-proxy
+          cargo test --features control-plane
 
   python:
     name: Python SDK (intutic-clawde) - Run pytest

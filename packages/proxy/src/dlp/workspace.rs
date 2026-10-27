@@ -170,6 +170,7 @@ mod tests {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
+    #[cfg(feature = "control-plane")]
     mod fetch {
         use super::super::*;
         use wiremock::matchers::{method, path};

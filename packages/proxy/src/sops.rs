@@ -41,9 +41,12 @@ use crate::plugins::sql_guard::{SqlGuardPolicy, SqlGuardSeverity};
 use crate::store::{LocalStore, PinScope, PinnedSopBlock};
 use crate::wasm::context::RiskLevel;
 use serde::Serialize;
+#[cfg(feature = "control-plane")]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+#[cfg(feature = "control-plane")]
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 /// How long a resolved set is reused before the directory is re-read.
@@ -109,6 +112,7 @@ impl SopScope {
     /// default -- resolves to `Workspace`, today's exact behaviour. Never
     /// silently promotes an unrecognised value to `Org`: an unexpected
     /// string here must not become a ceiling nobody declared.
+    #[cfg(any(feature = "control-plane", test))]
     fn from_wire(raw: Option<&str>) -> Self {
         match raw {
             Some("org") => SopScope::Org,
@@ -1681,6 +1685,7 @@ fn all_sops() -> Vec<Sop> {
 /// local path) is the one place YAML-frontmatter parsing happens; duplicating
 /// that logic in TypeScript would be a second definition of what `deny_tools:`
 /// means that could quietly drift from this one.
+#[cfg(any(feature = "control-plane", test))]
 #[derive(serde::Deserialize)]
 struct WorkspaceSopEntry {
     title: String,
@@ -1695,6 +1700,7 @@ struct WorkspaceSopEntry {
     scope: Option<String>,
 }
 
+#[cfg(any(feature = "control-plane", test))]
 #[derive(serde::Deserialize)]
 struct WorkspaceSopsResponse {
     sops: Vec<WorkspaceSopEntry>,
@@ -1702,6 +1708,7 @@ struct WorkspaceSopsResponse {
 
 /// The SOPs a `GET /api/v1/workspace/sops-policy` answer carries, parsed as
 /// the local path parses a file and sorted by title.
+#[cfg(any(feature = "control-plane", test))]
 fn workspace_sops_from_body(workspace_id: &str, body: WorkspaceSopsResponse) -> Vec<Sop> {
     let mut sops: Vec<Sop> = body
         .sops
@@ -1716,6 +1723,7 @@ fn workspace_sops_from_body(workspace_id: &str, body: WorkspaceSopsResponse) -> 
     sops
 }
 
+#[cfg(feature = "control-plane")]
 struct WorkspaceCached {
     sops: Vec<Sop>,
     read_at: Instant,
@@ -1724,6 +1732,7 @@ struct WorkspaceCached {
     version: Option<u64>,
 }
 
+#[cfg(feature = "control-plane")]
 fn workspace_cache() -> &'static Mutex<HashMap<String, WorkspaceCached>> {
     static CACHE: OnceLock<Mutex<HashMap<String, WorkspaceCached>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -1750,6 +1759,7 @@ fn workspace_cache() -> &'static Mutex<HashMap<String, WorkspaceCached>> {
 /// is a worse failure mode than "enforce nothing for this one request and say
 /// so in the log," because the former can mask a policy the operator just
 /// tightened (e.g. added a `deny_tools:` after an incident).
+#[cfg(feature = "control-plane")]
 async fn fetch_workspace_sops(
     http_client: &reqwest::Client,
     control_plane_url: &str,
@@ -1809,6 +1819,19 @@ async fn fetch_workspace_sops(
         }
         None => Vec::new(),
     }
+}
+
+/// A build without the `control-plane` feature has nowhere to fetch a workspace's
+/// SOPs from: the same empty set a gateway gets with no control-plane URL.
+#[cfg(not(feature = "control-plane"))]
+async fn fetch_workspace_sops(
+    _http_client: &reqwest::Client,
+    _control_plane_url: &str,
+    _workspace_id: &str,
+    _virtual_key: &crate::credential::VirtualKey,
+    _policy_version: Option<u64>,
+) -> Vec<Sop> {
+    Vec::new()
 }
 
 /// Resolve the SOP set to enforce for a request, gateway-mode-aware.
@@ -1888,6 +1911,7 @@ pub fn fingerprint_sop_set(workspace_id: &str, sops: &[Sop]) -> String {
 
 /// Gateway-mode status piggyback for `heartbeat.rs`'s optional
 /// `sopCount`/`sopHash` fields.
+#[cfg(feature = "control-plane")]
 pub(crate) struct SopStatusSnapshot {
     pub sop_count: u32,
     pub sop_hash: String,
@@ -1918,6 +1942,7 @@ pub(crate) struct SopStatusSnapshot {
 /// enforcement confirmation. A dashboard consumer must not read this as
 /// "workspace X's SOPs are in sync" — a change here can just as easily mean
 /// a DIFFERENT workspace's cache entry expired and repopulated at that tick.
+#[cfg(feature = "control-plane")]
 pub(crate) fn sop_status_snapshot() -> Option<SopStatusSnapshot> {
     let mut fresh_sets: Vec<(String, Vec<Sop>)> = Vec::new();
 
@@ -4829,6 +4854,7 @@ mod cross_language_fixture_tests {
     }
 }
 
+#[cfg(feature = "control-plane")]
 #[cfg(test)]
 mod sop_status_snapshot_tests {
     use super::*;
@@ -5211,6 +5237,7 @@ mod org_ceiling_tests {
 /// without a server: an unreachable control plane makes a forced refetch
 /// return the fail-closed empty set, so "the cache was bypassed" is
 /// observable as "nothing came back".
+#[cfg(feature = "control-plane")]
 #[cfg(test)]
 mod workspace_cache_version_tests {
     use super::*;

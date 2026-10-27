@@ -20,14 +20,18 @@
 //! key, so that request's hold is not recorded either.
 
 use crate::credential::VirtualKey;
+#[cfg(feature = "control-plane")]
 use serde_json::{json, Value};
+#[cfg(feature = "control-plane")]
 use std::time::Duration;
 
 /// Per request to the control plane. A hold is already a refusal, so this
 /// only bounds how long the refusal takes to arrive.
+#[cfg(feature = "control-plane")]
 const TIMEOUT: Duration = Duration::from_secs(3);
 
 /// The hold-record version `POST /api/v1/decisions` accepts.
+#[cfg(feature = "control-plane")]
 const HOLD_RECORD_VERSION: u64 = 1;
 
 /// What one held call came to.
@@ -54,6 +58,7 @@ pub struct HeldCall<'a> {
 
 impl HeldCall<'_> {
     /// The bypass key's tool: lower-cased, as every hold producer writes it.
+    #[cfg(feature = "control-plane")]
     fn tool_normalized(&self) -> String {
         self.tool.trim().to_lowercase()
     }
@@ -67,8 +72,24 @@ fn new_hold_id() -> String {
     )
 }
 
+/// A build without the `control-plane` feature has no control plane to ask or to
+/// tell: the call stays held and unrecorded, as with none configured.
+#[cfg(not(feature = "control-plane"))]
+pub async fn request(
+    _client: &reqwest::Client,
+    _control_plane_url: Option<&str>,
+    _virtual_key: Option<&VirtualKey>,
+    _call: &HeldCall<'_>,
+) -> HoldOutcome {
+    HoldOutcome::Held {
+        hold_id: new_hold_id(),
+        recorded: false,
+    }
+}
+
 /// Let the call through on an approved bypass, or record a hold. Never fails:
 /// every error leaves the call held.
+#[cfg(feature = "control-plane")]
 pub async fn request(
     client: &reqwest::Client,
     control_plane_url: Option<&str>,
@@ -142,6 +163,7 @@ pub async fn request(
     HoldOutcome::Held { hold_id, recorded }
 }
 
+#[cfg(feature = "control-plane")]
 async fn find_bypass(
     client: &reqwest::Client,
     base: &str,
@@ -212,7 +234,9 @@ pub fn refusal(outcome: &HoldOutcome, rule_id: &str, reason: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "control-plane")]
     use wiremock::matchers::{header, method, path};
+    #[cfg(feature = "control-plane")]
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const HASH: &str = "ab12";
@@ -236,6 +260,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "control-plane")]
     fn bypass(expires: &str, hash: &str) -> Value {
         json!({ "bypasses": [{
             "workspaceId": "ws_1", "sopRuleId": "local:20_deploys.wasm",
@@ -244,6 +269,7 @@ mod tests {
         }]})
     }
 
+    #[cfg(feature = "control-plane")]
     async fn server(bypasses: Value) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -260,6 +286,7 @@ mod tests {
         server
     }
 
+    #[cfg(feature = "control-plane")]
     #[tokio::test]
     async fn a_held_call_is_recorded_with_its_bypass_key() {
         let server = server(json!({ "bypasses": [] })).await;
@@ -297,6 +324,7 @@ mod tests {
         assert!(refusal(&outcome, "r", "why").contains(hold_id.as_str()));
     }
 
+    #[cfg(feature = "control-plane")]
     #[tokio::test]
     async fn an_approved_identical_call_goes_through() {
         let future = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
@@ -316,6 +344,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "control-plane")]
     #[tokio::test]
     async fn an_expired_or_different_approval_does_not() {
         let past = (chrono::Utc::now() - chrono::Duration::minutes(1)).to_rfc3339();
@@ -336,6 +365,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "control-plane")]
     #[tokio::test]
     async fn a_hold_the_control_plane_dropped_is_not_reported_as_recorded() {
         let server = MockServer::start().await;
@@ -370,6 +400,7 @@ mod tests {
     /// A request made with a provider key has no virtual key to ask with. The
     /// call stays held and the control plane is not contacted at all, so the
     /// provider key never reaches it.
+    #[cfg(feature = "control-plane")]
     #[tokio::test]
     async fn without_a_virtual_key_the_call_stays_held_and_nothing_is_sent() {
         let server = server(json!({ "bypasses": [] })).await;

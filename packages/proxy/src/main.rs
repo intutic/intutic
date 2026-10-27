@@ -6,9 +6,11 @@
 //!
 //! Architecture: See docs/lld/02-proxy-gateway.lld.md
 
+#[cfg(feature = "control-plane")]
+use intutic_proxy::heartbeat;
 use intutic_proxy::{
-    chaos, config, dlp, egress_policy, firewall, gateway, heartbeat, listen, proxy, router,
-    routing, sops, store, telemetry, wasm,
+    chaos, config, dlp, egress_policy, firewall, gateway, listen, proxy, router, routing, sops,
+    store, telemetry, wasm,
 };
 
 use std::net::SocketAddr;
@@ -284,6 +286,24 @@ async fn main() -> anyhow::Result<()> {
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
     let config = config::load_config(&config_path)?;
     tracing::info!("Config loaded from {}", config_path);
+    // A proxy built without the control-plane clients cannot be managed, and
+    // running on regardless would serve a deployment its operator believes is
+    // authenticated and budgeted with neither.
+    #[cfg(not(feature = "control-plane"))]
+    if config
+        .intutic_settings
+        .policy
+        .control_plane_url
+        .as_deref()
+        .is_some_and(|u| !u.trim().is_empty())
+    {
+        anyhow::bail!(
+            "A control plane is configured (CONTROL_PLANE_URL or \
+             intutic_settings.policy.control_plane_url), but this proxy was built without the \
+             `control-plane` feature and has no code to talk to one. Unset it to run \
+             standalone, or use a build made with `--features control-plane`."
+        );
+    }
     // `model_list` entries that name a cloud model (`bedrock/…`, `vertex/…`,
     // `azure/…`) become aliases the router resolves (`cloud::resolve`).
     intutic_proxy::cloud::install_aliases(&config.model_list);
@@ -646,6 +666,7 @@ async fn main() -> anyhow::Result<()> {
     // Absent (the default: SaaS gateway, single-tenant local proxy, or a
     // self-hosted deployment that hasn't opted in), this is a no-op — no
     // background task, no outbound calls, unchanged from today.
+    #[cfg(feature = "control-plane")]
     match heartbeat::HeartbeatConfig::from_env() {
         Some(hb_cfg) => {
             tracing::info!(
