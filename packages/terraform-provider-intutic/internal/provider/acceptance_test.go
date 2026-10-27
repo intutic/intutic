@@ -2,7 +2,7 @@ package provider
 
 // Acceptance tests: real control plane, real terraform. They run only with
 // TF_ACC=1 and the connection details that
-// services/control-plane/scripts/terraform-acceptance-server.ts writes.
+// The control plane writes.
 //
 // Every test applies, re-plans to prove the plan is empty (no perpetual diff
 // from a server-side default), imports, and checks the import matches state.

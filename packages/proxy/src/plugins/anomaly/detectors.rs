@@ -4716,7 +4716,7 @@ mod code_as_action_tests {
 
 /// The control plane replays SOP front-matter keys over captured request
 /// contexts to preview what a front-matter guardrail would have done
-/// (`services/control-plane/src/lib/sopKeyReplay.ts`). Its
+/// (the control plane). Its
 /// semantics are a mirror of the detectors above, and a mirror drifts unless
 /// something holds the two together: this module runs the same vector file
 /// (`packages/shared-types/fixtures/sop-key-replay-vectors.json`) through

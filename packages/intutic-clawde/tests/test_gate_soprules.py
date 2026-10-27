@@ -15,7 +15,7 @@ Python rather than to the policy in the register, which inverts the point of
 the tier.
 
 These tests also pin parity with the control plane's matchSopRule
-(services/control-plane/src/lib/sopRuleTitle.ts) and mcp-proxy's matchRule:
+(the control plane) and mcp-proxy's matchRule:
 iteration order, first-match-wins, silent skip on uncompilable regex, and the
 JSON.stringify-shaped serialisation of the tool input.
 """

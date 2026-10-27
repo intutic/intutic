@@ -5,7 +5,7 @@
  * receives it: JSON, so a timestamp is a string and a field the handler left
  * `undefined` is absent (`.optional()`), not `null` (`.nullable()`). A route
  * declares its schema by answering through `respond(c, Schema, body)`
- * (`services/control-plane/src/lib/respond.ts`); the OpenAPI document
+ * (the control plane); the OpenAPI document
  * publishes it, `tsc` holds the handler's body to it, and the control plane's
  * tests reject a body that does not match it or carries a field it does not
  * declare. Write one from the handler and the service code it returns, never

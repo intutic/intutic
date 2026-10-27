@@ -16,7 +16,7 @@
  * module is only the part that applies it.
  *
  * Matching mirrors `matchSopRule` in
- * `services/control-plane/src/lib/sopRuleTitle.ts` (itself a deliberate
+ * The control plane (itself a deliberate
  * line-for-line mirror of `PolicyClient.matchRule` in
  * `packages/mcp-proxy/src/policy.ts`), deliberately:
  *

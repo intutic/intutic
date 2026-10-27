@@ -8,7 +8,7 @@
  *   - `intutic team workspaces <team_id> [--json]`
  *   - `intutic team create-workspace <team_id> --name <name>`
  *
- * Server side: services/control-plane/src/routes/teams.ts. Authorization
+ * Server side: the control plane. Authorization
  * has no org-level session to check — any member holding OWNER/ADMIN on
  * any active workspace under the org counts as an org admin
  * (`hasOrgAdminAccess`) — a deliberate RBAC decision.

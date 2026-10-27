@@ -22,7 +22,7 @@ visible on the dashboard, editable without touching agent code — and this
 module is only the part that applies it.
 
 Matching mirrors `matchSopRule` in
-`services/control-plane/src/lib/sopRuleTitle.ts` (itself a deliberate
+the control plane (itself a deliberate
 line-for-line mirror of `PolicyClient.matchRule` in
 `packages/mcp-proxy/src/policy.ts:107-124`), deliberately:
 

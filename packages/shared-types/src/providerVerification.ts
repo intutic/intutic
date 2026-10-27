@@ -8,7 +8,7 @@
  *
  * - `tools/cli/src/lib/providerProbe.ts` — the CLI legitimately holds a raw
  *   key locally before it is ever sent anywhere, and probes with it directly.
- * - `services/control-plane/src/lib/providerVerify.ts` — probes a credential
+ * - The control plane — probes a credential
  *   already stored in Valkey, server-side, so the raw value never has to
  *   leave the control plane a second time.
  *
@@ -18,7 +18,7 @@
  * make that request in its own runtime.
  *
  * Deliberately, no probe here targets `/v1/chat/completions` —
- * `services/control-plane/__tests__/unit/monitorSeparation.test.ts` treats
+ * The control plane treats
  * every fetch call to that literal URL shape as a judge/generation call
  * requiring classification. A verification probe is neither; it must not add
  * a site to that census.

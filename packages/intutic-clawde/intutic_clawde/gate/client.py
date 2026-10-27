@@ -58,7 +58,7 @@ DEFAULT_TIMEOUT = 2.0
 EVENT_TIMEOUT = 2.0
 JUDGE_TIMEOUT = 120.0
 
-# Mirrors HookEventSchema in services/control-plane/src/routes/hookEvents.ts:376.
+# Mirrors HookEventSchema in the control plane.
 VALID_EVENTS = {
     "tool_blocked", "tool_allowed", "tool_flagged", "tool_would_block",
     "config_tamper", "network_bypass", "guards_disabled",

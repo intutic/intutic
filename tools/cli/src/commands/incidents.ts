@@ -7,7 +7,7 @@
  *   - `intutic incidents show <incidentId> [--json]`
  *
  * Server side: `GET /api/v1/incidents` and `GET /api/v1/incidents/:id`
- * (services/control-plane/src/routes/incidents.ts), OWNER, ADMIN and EM only.
+ * (the control plane), OWNER, ADMIN and EM only.
  * The list is ranked by review priority, not time, and bounded by a review
  * budget; the CLI says so when the budget withholds incidents, as the
  * dashboard does. `--severity` and `--type` are checked here before any

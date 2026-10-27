@@ -849,7 +849,7 @@ export async function runPolicyInstall(opts: {
 
 /**
  * Shape `POST /api/v1/wasm-rules/:id/replay` returns on success — mirrors
- * `ReplaySummary` in `services/control-plane/src/services/ruleBundleGates.ts`
+ * `ReplaySummary` in the control plane
  * plus the two fields the route adds (`ruleId`, `since`).
  */
 interface ReplayResult {

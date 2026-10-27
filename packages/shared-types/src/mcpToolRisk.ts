@@ -5,7 +5,7 @@
  * tool added or removed, a description or input schema changed — the control
  * plane scores the change with {@link scoreToolSetChange} and stores the score
  * and its reasons on the registry's change record
- * (`services/control-plane/src/services/mcpRegistryService.ts`).
+ * (the control plane).
  *
  * Rules only, no model: the same two tool sets always produce the same score
  * and the same reasons, in the same order, so a score can be reproduced from

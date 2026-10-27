@@ -10,7 +10,7 @@
  *   - `intutic inventory disconnects [--limit <n>] [--json]`
  *
  * Server side: `GET /api/v1/inventory/{summary,devices,harnesses,mcp-servers,skills,disconnects}`
- * (services/control-plane/src/routes/inventory.ts); the harness and MCP
+ * (the control plane); the harness and MCP
  * server lists filter on the server and serve the same CSV the dashboard
  * downloads (`format=csv`). The skills list filters by machine and text only
  * and has no CSV, as on the dashboard.

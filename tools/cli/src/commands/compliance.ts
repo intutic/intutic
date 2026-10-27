@@ -11,12 +11,12 @@
  *   - `intutic compliance download <run_id>` — a stored archive.
  *   - `intutic compliance verify <file>` — check an archive offline.
  *
- * Server side: services/control-plane/src/routes/compliance.ts —
+ * Server side: the control plane —
  * `GET .../frameworks/:frameworkId/coverage` (`?format=` json, markdown, csv
  * or pdf; a live report is unsigned, the signed copies are the ones sealed in
  * the evidence pack), `POST .../soc2-collect` and `GET .../soc2-export/:runId`
  * (OWNER/ADMIN). The archive's rules are in
- * services/control-plane/src/services/soc2EvidenceService.ts: a sha256
+ * The control plane: a sha256
  * manifest over canonical JSON, and an Ed25519 signature over
  * `intutic-soc2-evidence-v1\n<archiveSha256>` only when the deployment has a
  * signing key. `verify` applies the same rules with nothing but the file and

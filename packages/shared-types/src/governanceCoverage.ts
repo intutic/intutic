@@ -7,7 +7,7 @@
  * compute them from the same underlying signal — an agent's reported
  * `facets` — with what used to be the identical mapping written out twice:
  *
- *   - `services/control-plane/src/services/harnessGradeSweep.ts`'s
+ *   - The control plane's
  *     `deriveEnforcementInputs`, run hourly for every workspace, reading
  *     `agents.facets` back out of Postgres.
  *   - `services/sync-daemon/src/syncCycle.ts`'s `reportHarnessAgents`,
@@ -24,11 +24,11 @@
  *
  * `EnforcementFacets` is deliberately a NEW, narrower structural type, not a
  * re-export of either service's own facets type. Neither service's
- * `AgentFacets` moves here — `services/control-plane/src/lib/agentPosture.ts`'s
+ * `AgentFacets` moves here — the control plane's
  * and `services/sync-daemon/src/agentReporter.ts`'s each carry a great deal
  * more shape (skills, sops, budgets, memory, …) than this mapping needs, and
  * `services/sync-daemon` is publicly mirrored byte-identical into the
- * open-core `intutic` repo and must not import from `services/control-plane`
+ * open-core `intutic` repo and must not import from the control plane
  * (or any enterprise-only package) — so there is no single existing type both
  * sides could share directly even if one of them exported it. Both services'
  * `AgentFacets` are structurally assignable to `EnforcementFacets` as it
@@ -40,7 +40,7 @@
 
 /**
  * The narrow slice of an agent's reported `facets` this mapping reads. Both
- * `services/control-plane/src/lib/agentPosture.ts#AgentFacets` and
+ * The control plane and
  * `services/sync-daemon/src/agentReporter.ts`'s local `AgentFacets` are
  * structurally assignable to this — neither type moves here, this is a new
  * narrower type they both already satisfy.

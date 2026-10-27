@@ -30,7 +30,7 @@
 //! independent and a failure in one never blocks the other.
 //!
 //! Raw HTTPS + pod ServiceAccount token, no Kubernetes client crate — the
-//! same minimal-client idiom `services/control-plane/src/lib/k8sClient.ts`
+//! same minimal-client idiom the control plane
 //! uses for cross-cluster cell provisioning (constructor injection for
 //! tests, `from_env()`/pod-mount reads for production).
 //!

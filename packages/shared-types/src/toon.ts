@@ -17,7 +17,7 @@
  *
  * # Why this module exists at all
  *
- * It used to live in `services/control-plane/src/lib/toon.ts`, with the decoder
+ * It used to live in the control plane, with the decoder
  * hand-copied into `tools/cli/src/lib/api.ts` and `apps/dashboard/src/lib/api.ts`
  * — three implementations of one wire format, bound together by a comment saying
  * they must not diverge.

@@ -385,7 +385,7 @@ return {1}
 /// A GET against a key nobody writes is indistinguishable from a GET against a
 /// key not yet set, which is why nothing at runtime could report this. Pinned
 /// against the TypeScript builders by
-/// `services/control-plane/__tests__/unit/valkeyKeyParity.test.ts`.
+/// The control plane.
 ///
 /// Written by `finopsService.incrementSpend` (`workspaceBudgetDailyKey`).
 fn budget_daily_key(workspace_id: &str) -> String {
@@ -1829,7 +1829,7 @@ impl ControlPlaneCache for ValkeyControlPlaneCache {
 
         // Present but unparseable must DENY, unlike feature_flags above — the
         // pre-scoping code treated key existence alone as valid, which is
-        // exactly the fail-open shape this fixes. `services/control-plane`'s
+        // exactly the fail-open shape this fixes. The control plane's
         // `POST /break-glass/approve` is the only writer and always writes
         // {requestId, workspaceId, policyId, expiresAt}.
         let json = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
@@ -2186,7 +2186,7 @@ mod loop_key_contract {
     use super::*;
 
     /// These strings are a cross-repo contract with
-    /// `services/control-plane/src/services/loopGovernanceService.ts`. The
+    /// The control plane. The
     /// control plane wrote only the state blob while this proxy read the two
     /// scalars, so budgets never enforced and the dashboard Kill never
     /// reached the request path. The detector unit tests could not catch it:

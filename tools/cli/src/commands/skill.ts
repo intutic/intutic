@@ -100,7 +100,7 @@ export interface SkillReportEntry {
    * `enableLocalSkillAuditDelete` already is below) — never for `kind:
    * 'script'` rows, which stay S2/S3/S4's domain. Capped client-side to the
    * same 65536-char bound `SkillFileReportSchema` enforces server-side
-   * (`services/control-plane/src/routes/harnessConfig.ts`), so an oversized
+   * (the control plane), so an oversized
    * file 400s never a request; it is silently capped, the same
    * refusal-vs-cap posture `capContentForTransport`'s own doc comment
    * explains.

@@ -17,7 +17,7 @@
  * (`--engine-url`, default Ollama on this machine); its key stays in
  * `INTUTIC_DECIDE_API_KEY` and is never written. `local_judge` is deliberately NOT
  * exposed through `PATCH /api/v1/gateways/:id/config`
- * (`services/control-plane/src/lib/gateway.ts`) — this command respects that
+ * (the control plane) — this command respects that
  * boundary by construction, not by omission.
  *
  * The catalog's `ref` (`${provider}/${id}`, e.g. `ollama/llama3.1`) is

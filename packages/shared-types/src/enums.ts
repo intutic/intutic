@@ -50,7 +50,7 @@ export type RiskLevel = typeof RiskLevel[keyof typeof RiskLevel]
  * `OBSERVED` (migration 156) is deliberately OUTSIDE that severity ladder —
  * it does not mean "PCAS acted with this severity", it means "PCAS took no
  * action because the request never produced a response to act on". It is
- * `mapVerdict`'s (`services/control-plane/src/lib/valkeySubscriber.ts`)
+ * `mapVerdict`'s (the control plane)
  * target for the proxy's `"upstream_error"` verdict — a provider 5xx or an
  * unservable-model rejection. Before this value existed, `mapVerdict`'s
  * fail-closed default mapped every unrecognised verdict to `KILL`, so every

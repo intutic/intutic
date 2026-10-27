@@ -357,7 +357,7 @@ describe('runPolicyInstall end to end', () => {
  * `runPolicyReplay` end to end, against a mocked `postWithStatus`. The point
  * of this suite is the status-branch wiring — 404, the 422 `not_enough_traffic`
  * shape, and 200 — not the route's own logic, which
- * `services/control-plane/__tests__/integration/ruleGeneration.test.ts` and
+ * The control plane and
  * `replaySummary.test.ts` already cover.
  */
 describe('runPolicyReplay end to end', () => {

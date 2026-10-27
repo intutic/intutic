@@ -8,7 +8,7 @@
  *   - `intutic usage pull-requests [--period daily|monthly] [--refresh] [--json]`
  *
  * Server side: `GET /api/v1/usage/{members,teams,branches,commits,pull-requests}`
- * (services/control-plane/src/routes/usage.ts). OWNER, ADMIN and EM see the
+ * (the control plane). OWNER, ADMIN and EM see the
  * whole workspace; anyone else sees their own calls only (`scope: self`), and
  * `teams` is refused below EM.
  *

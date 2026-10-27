@@ -112,7 +112,7 @@ interface AgentFacets {
     /**
      * sha256 of the `SKILL.md` content this row describes, as the judge
      * receives it (`skillContentForTransport`: the first 65536 characters) (Phase S5) —
-     * lets `services/control-plane/src/routes/agents.ts` look up
+     * lets the control plane look up
      * a previously-judged semantic verdict
      * (`services/semanticSkillAnalysisService.ts`'s `skills:semantic:*`
      * Valkey entry) keyed by the exact content this cycle read, without this

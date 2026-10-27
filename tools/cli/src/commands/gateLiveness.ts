@@ -3,7 +3,7 @@
  * reporting, and whether a silent-gate alert is open for it.
  *
  * Server side: `GET /api/v1/governance/gate-liveness`
- * (services/control-plane/src/routes/gateLiveness.ts), OWNER, ADMIN or EM.
+ * (the control plane), OWNER, ADMIN or EM.
  * The hourly sweep alerts on a gate that goes silent; this is the read side,
  * for when no notification rule is set up or the alert has not fired yet.
  *

@@ -6,7 +6,7 @@
  *   - `intutic settings set <key> [value] [--file <path>] [--json]`
  *
  * Server side: `GET` / `PUT /api/v1/workspace/settings`
- * (services/control-plane/src/routes/workspace.ts). One generic pair rather
+ * (the control plane). One generic pair rather
  * than a command per setting: the route's strict schema is the authority on
  * which keys exist and what each accepts, and refuses an unknown key or a bad
  * value with a 400 naming it, so the CLI stays correct as settings are added.

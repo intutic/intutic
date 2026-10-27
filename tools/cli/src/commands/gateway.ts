@@ -13,7 +13,7 @@
  *   - `intutic gateway assign --gateway <gateway_id>|--clear [--org <org_id>]`
  *   - `intutic gateway resolve [--json]`
  *
- * Server side: services/control-plane/src/routes/gateways.ts,
+ * Server side: the control plane,
  * routes/gatewayHeartbeat.ts, routes/orgs.ts (`PATCH .../gateway`). A
  * gateway token (`gwk_...`) is a distinct credential from the `vk_`/JWT
  * this command authenticates with — it is printed exactly once, on

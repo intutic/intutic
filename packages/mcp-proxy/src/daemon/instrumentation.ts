@@ -1,7 +1,7 @@
 /**
  * OpenTelemetry Code-Level Instrumentation — mcp-daemon only.
  *
- * Same pattern as services/control-plane/src/instrumentation.ts.
+ * Same pattern as the control plane.
  * Deliberately NOT imported
  * by src/index.ts (the `intutic-mcp-proxy` stdio JSON-RPC proxy) -- that
  * process reserves stdout exclusively for protocol frames, and

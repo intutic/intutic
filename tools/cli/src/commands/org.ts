@@ -14,8 +14,8 @@
  * "Create Organization" modal does: start verification, publish the TXT
  * record it's given, confirm it resolves, then create the org.
  *
- * Server side: services/control-plane/src/services/domainVerificationService.ts,
- * services/control-plane/src/routes/orgs.ts.
+ * Server side: the control plane,
+ * The control plane.
  *
  * @module
  */

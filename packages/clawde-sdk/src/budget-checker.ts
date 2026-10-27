@@ -7,7 +7,7 @@ interface CacheEntry {
   timestamp: number
 }
 
-/** `GET /api/v1/budget`'s real response shape (services/control-plane/src/routes/budget.ts). */
+/** `GET /api/v1/budget`'s real response shape (the control plane). */
 interface WorkspaceBudgetStatus {
   budget_remaining_usd: number
   alert_triggered: boolean

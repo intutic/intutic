@@ -1553,7 +1553,7 @@ decisionCmd
 // ── Gateway commands ─────────────────────────────────────────────────────
 //
 // Self-hosted gateway registration/management. Previously reachable only by
-// hand-written curl against services/control-plane/src/routes/gateways.ts —
+// hand-written curl against the control plane —
 // see commands/gateway.ts's module doc.
 const gatewayCmd = program
   .command('gateway', needsControlPlane)

@@ -464,7 +464,7 @@ func TestMissingAPIKeyIsExplained(t *testing.T) {
 func testAccPreCheck(t *testing.T) {
 	for _, v := range []string{"INTUTIC_CONTROL_PLANE_URL", "INTUTIC_API_KEY"} {
 		if os.Getenv(v) == "" {
-			t.Fatalf("%s must be set for acceptance tests; see services/control-plane/scripts/terraform-acceptance-server.ts", v)
+			t.Fatalf("%s must be set for acceptance tests; see the acceptance-test server script", v)
 		}
 	}
 }

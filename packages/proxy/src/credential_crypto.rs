@@ -1,7 +1,7 @@
 //! Envelope encryption for the provider credentials stored in Valkey.
 //!
 //! The control plane encrypts every value it writes to
-//! `workspace:credentials:{ws}` (`services/control-plane/src/lib/credentialEncryption.ts`),
+//! `workspace:credentials:{ws}` (the control plane),
 //! so Valkey's append-only file and its region mirrors never hold a provider
 //! key in the clear. This module is the proxy's half of the same format:
 //!

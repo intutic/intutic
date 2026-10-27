@@ -307,7 +307,7 @@ export interface SkillOptSuggestion {
   filePath: string
   // 'apply_unconfirmed' / 'apply_failed' — the daemon's apply-result
   // ack is what confirms an edit actually landed; 'applied' means confirmed,
-  // not merely queued. See services/control-plane/src/services/
+  // not merely queued. See the control plane
   // skillOptService.ts's applyConfigEdit.
   status: 'pending' | 'applied' | 'dismissed' | 'apply_unconfirmed' | 'apply_failed'
   source: 'waste_pattern' | 'metaclaw' | 'manual_review'

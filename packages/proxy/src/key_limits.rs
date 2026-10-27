@@ -148,7 +148,7 @@ pub fn window(period: BudgetPeriod, now: DateTime<Utc>) -> (String, DateTime<Utc
 /// The workspace counters are the control plane's `workspaceBudgetDailyKey` /
 /// `workspaceBudgetMonthlyKey`; the key and member ones are its `keySpendKey`
 /// / `memberSpendKey`. Pinned against the TypeScript builders by
-/// `services/control-plane/__tests__/unit/valkeyKeyParity.test.ts`.
+/// The control plane.
 pub fn spend_counter_key(
     budget: &HardBudget,
     workspace_id: &str,

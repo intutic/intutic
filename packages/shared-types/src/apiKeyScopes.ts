@@ -17,7 +17,7 @@
  * A request made with a key needs BOTH: the owner's role must allow the route
  * and the key's scopes must cover it. A dashboard session has no scopes; only
  * its role applies. The control plane maps every route to the scopes that
- * cover it (`services/control-plane/src/lib/routeScopes.ts`) and refuses an
+ * cover it (the control plane) and refuses an
  * uncovered request with 403 `INSUFFICIENT_SCOPE`.
  *
  * Mirrored by the Terraform provider's `validKeyScopes` (checked by
