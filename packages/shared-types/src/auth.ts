@@ -128,7 +128,7 @@ export const RegisterInputSchema = z.object({
   workspaceName: z.string().min(1).max(128),
   workspaceSlug: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/),
   signupSource: z.string().max(32).optional(),
-  marketingAttribution: z.record(z.any()).optional(),
+  marketingAttribution: z.record(z.string(), z.any()).optional(),
 })
 
 /** Registration request input. */
@@ -233,7 +233,7 @@ export const SignupInputSchema = z.object({
   acceptTerms: AcceptTermsField,
   workspaceName: z.string().min(1).max(64).optional(),
   signupSource: z.string().max(32).optional(),
-  marketingAttribution: z.record(z.any()).optional(),
+  marketingAttribution: z.record(z.string(), z.any()).optional(),
 })
 
 /** PLG signup params type. */
@@ -285,7 +285,7 @@ export const OrgSignupInputSchema = z.object({
     .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i, 'must be a bare domain like acme.com')
     .optional(),
   signupSource: z.string().max(32).optional(),
-  marketingAttribution: z.record(z.any()).optional(),
+  marketingAttribution: z.record(z.string(), z.any()).optional(),
 })
 
 /** Org signup params type. */

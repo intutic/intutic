@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`@intutic/shared-types`, `@intutic/mcp-governance-proxy` and `@intutic/sync-daemon` use zod 4.**
+  The response schemas keep their shape on the wire. Code that imports a schema from
+  `@intutic/shared-types` needs zod 4 (`^4.6.6`) for `.parse`, `.safeParse` and `z.infer`: a
+  `ZodError`'s `issues[].path` may now hold symbols, and a schema that keyed a record by an
+  enum is a partial record, as before.
+
 ### Fixed
 
 - **`POST /api/v1/plans/capture` answers 409 for a session the platform has not seen,**

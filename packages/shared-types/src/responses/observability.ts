@@ -31,7 +31,7 @@ export const IncidentResponse = z.object({
   resolved_by: z.string().nullable(),
   resolved_at: IsoTimestamp.nullable(),
   escalation_chain: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .nullable()
     .describe('Where the incident came from and how it was escalated (jsonb; its keys depend on the source); a resolve adds `resolution_notes`.'),
   created_at: IsoTimestamp,
@@ -124,7 +124,7 @@ export type TraceListResponse = z.infer<typeof TraceListResponse>
 const TraceStepResponse = z.object({
   logId: z.string(),
   toolName: z.string(),
-  toolArguments: z.unknown().describe('The tool call\'s arguments as logged (jsonb).'),
+  toolArguments: z.unknown().optional().describe('The tool call\'s arguments as logged (jsonb).'),
   riskCategory: z.string().nullable(),
   verdict: z.string(),
   confidence: z.number(),
@@ -204,9 +204,9 @@ export const TraceDetailResponse = z.object({
   enforcementAction: z.string().describe('BYPASS, ENHANCE, HIJACK, REASK, KILL or OBSERVED.'),
   anomalyDetected: z.string().nullable(),
   anomalyConfidenceScore: z.number().nullable(),
-  taxonomyMetadata: z.unknown().describe('jsonb, null when none.'),
-  rootCauseAttribution: z.unknown().describe('jsonb, null when none.'),
-  correctivePromptCard: z.unknown().describe('jsonb, null when none.'),
+  taxonomyMetadata: z.unknown().optional().describe('jsonb, null when none.'),
+  rootCauseAttribution: z.unknown().optional().describe('jsonb, null when none.'),
+  correctivePromptCard: z.unknown().optional().describe('jsonb, null when none.'),
   reasoningTokens: z.number().int().nullable().optional(),
   cacheReadInputTokens: z.number().int().nullable().optional(),
   cacheCreationInputTokens: z.number().int().nullable().optional(),

@@ -754,9 +754,9 @@ async function authoredFields(opts: AuthorOpts): Promise<Record<string, unknown>
   return body
 }
 
-function zodMessage(error: { issues: Array<{ path: Array<string | number>; message: string }> }): string {
+function zodMessage(error: { issues: Array<{ path: PropertyKey[]; message: string }> }): string {
   const first = error.issues[0]
-  return `${first?.path.length ? `${first.path.join('.')}: ` : ''}${first?.message ?? 'invalid'}`
+  return `${first?.path.length ? `${first.path.map(String).join('.')}: ` : ''}${first?.message ?? 'invalid'}`
 }
 
 function printChecks(checks: GuardrailCheckResult[]): void {

@@ -49,8 +49,8 @@ export const WasmRuleReplayResponse = z.object({
   contextCount: z.number().int(),
   wouldActCount: z.number().int(),
   wouldActRate: z.number(),
-  verdictCounts: z.record(z.number().int()).describe('Verdict code (0 allow, 1 block, 3 reask; 2 deprecated) → contexts that produced it.'),
-  sampleMatches: z.array(z.record(z.unknown())).describe('Up to 20 contexts the rule acted on.'),
+  verdictCounts: z.record(z.string(), z.number().int()).describe('Verdict code (0 allow, 1 block, 3 reask; 2 deprecated) → contexts that produced it.'),
+  sampleMatches: z.array(z.record(z.string(), z.unknown())).describe('Up to 20 contexts the rule acted on.'),
   argumentsWithheld: z.number().int().describe('Contexts that carry tool-call argument keys and sizes, not values.'),
   argumentsNote: z.string().optional().describe('Present when `argumentsWithheld` is above zero.'),
 })
@@ -158,7 +158,7 @@ export type SopRuleResponse = z.infer<typeof SopRuleResponse>
  */
 const McpCuration = z.object({
   allowedTools: z.array(z.string()).describe('Empty means unrestricted.'),
-  toolDescriptionOverrides: z.record(z.string()),
+  toolDescriptionOverrides: z.record(z.string(), z.string()),
   allowedServers: z.array(z.string()).describe('Empty means unrestricted.'),
   mcpInjectionPatterns: z.array(z.string()),
   mcpRegistry: z.object({
@@ -166,7 +166,7 @@ const McpCuration = z.object({
     approvedServers: z.array(z.string()),
     blockedServers: z.array(z.string()),
     heldServers: z.array(z.string()),
-    disabledTools: z.record(z.array(z.string())).describe('Server name → tools disabled within it.'),
+    disabledTools: z.record(z.string(), z.array(z.string())).describe('Server name → tools disabled within it.'),
   }),
   mcpBudgets: z.object({
     budgets: z.array(
@@ -183,7 +183,7 @@ const McpCuration = z.object({
     warnAtPct: z.number().int(),
   }),
   piiDetectors: z
-    .record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
+    .partialRecord(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
     .nullable()
     .describe('Detector id → action; null when the stored setting no longer validates.'),
   wasmRules: z.array(
@@ -205,7 +205,7 @@ const McpCuration = z.object({
   mcpProxyFailBehavior: z.enum(['open', 'closed']).optional(),
   mcpInjectionAction: z.enum(['warn', 'block']).optional(),
   mcpAnomalyMode: z.enum(['enforce', 'warn', 'off']).optional(),
-  mcpAnomalyOverrides: z.record(z.enum(['steer', 'reask', 'kill', 'off'])).optional(),
+  mcpAnomalyOverrides: z.record(z.string(), z.enum(['steer', 'reask', 'kill', 'off'])).optional(),
 })
 
 /** `GET /api/v1/sop/rules`: the rule set and MCP curation the MCP proxy polls. */
@@ -316,8 +316,8 @@ export const DecisionDetailResponse = z.object({
   entry_id: z.string(),
   session_id: z.string().nullable(),
   workspace_id: z.string(),
-  original_tool_call: z.unknown().describe('The held tool call, as the gate reported it.'),
-  hijacked_tool_call: z.unknown(),
+  original_tool_call: z.unknown().optional().describe('The held tool call, as the gate reported it.'),
+  hijacked_tool_call: z.unknown().optional(),
   outcome: z.string(),
   trace_id: z.string().nullable(),
   rationale: z.string().nullable(),

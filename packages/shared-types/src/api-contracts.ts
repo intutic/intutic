@@ -114,23 +114,23 @@ export const CreateTraceSchema = z.object({
   // ── Anomaly ──
   anomalyDetected: z.string().nullable().optional(),
   anomalyConfidenceScore: z.number().min(0).max(1).nullable().optional(),
-  taxonomyMetadata: z.record(z.unknown()).nullable().optional(),
+  taxonomyMetadata: z.record(z.string(), z.unknown()).nullable().optional(),
 
   // ── Forensics ──
-  rawPayloadJson: z.record(z.unknown()).nullable().optional(),
+  rawPayloadJson: z.record(z.string(), z.unknown()).nullable().optional(),
 
   // ── 4D Attribution ──
   appId: z.string().nullable().optional(),
   agentChainId: z.string().nullable().optional(),
-  agentChain: z.record(z.unknown()).nullable().optional(),
+  agentChain: z.record(z.string(), z.unknown()).nullable().optional(),
 
   // ── Cache ──
   cacheHit: z.boolean().optional(),
   cacheSavingsUsd: z.number().nonnegative().optional(),
 
   // ── Root cause ──
-  rootCauseAttribution: z.record(z.unknown()).nullable().optional(),
-  correctivePromptCard: z.record(z.unknown()).nullable().optional(),
+  rootCauseAttribution: z.record(z.string(), z.unknown()).nullable().optional(),
+  correctivePromptCard: z.record(z.string(), z.unknown()).nullable().optional(),
 })
 
 /** Inferred type for a create-trace request payload. */

@@ -230,7 +230,7 @@ export const TrialStatusResponse = z.object({
   trialExpiresAt: IsoTimestamp.nullable(),
   daysRemaining: z.number().int().describe('Days left in the trial; 0 with none.'),
   isTrialActive: z.boolean(),
-  features: z.record(z.boolean()).describe('What the plan includes, by feature flag.'),
+  features: z.record(z.string(), z.boolean()).describe('What the plan includes, by feature flag.'),
   limits: z
     .object({ maxTokensPerDay: z.number().int(), maxSessionsPerDay: z.number().int() })
     .describe('The limits `POST /api/v1/policy/check` enforces; -1 is unlimited.'),
