@@ -183,7 +183,7 @@ const McpCuration = z.object({
     warnAtPct: z.number().int(),
   }),
   piiDetectors: z
-    .record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
+    .partialRecord(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
     .nullable()
     .describe('Detector id → action; null when the stored setting no longer validates.'),
   wasmRules: z.array(
