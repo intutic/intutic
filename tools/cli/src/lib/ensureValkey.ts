@@ -18,7 +18,7 @@
  * @module
  */
 
-import { execSync, spawn } from 'node:child_process'
+import { execFileSync, execSync, spawn } from 'node:child_process'
 import * as node_net from 'node:net'
 import { log } from './logger.js'
 
@@ -99,10 +99,10 @@ export async function ensureValkey(port = 6379): Promise<EnsureValkeyResult> {
           execSync('docker start intutic-valkey', { stdio: 'ignore' })
         } else {
           log.info('Docker detected — starting a Valkey container (intutic-valkey)…')
-          execSync(
-            `docker run -d --name intutic-valkey -p ${port}:6379 valkey/valkey:8-alpine`,
-            { stdio: 'ignore' },
-          )
+          // Arguments, not a command line: `port` is a parameter of an exported function.
+          execFileSync('docker', ['run', '-d', '--name', 'intutic-valkey', '-p', `${port}:6379`, 'valkey/valkey:8-alpine'], {
+            stdio: 'ignore',
+          })
         }
 
         if (await waitForValkey(port)) {
