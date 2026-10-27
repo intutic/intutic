@@ -145,3 +145,7 @@ apps/docs/public/favicon.svg
 
 # Architect (architecture-decision copilot) CLI output
 graphify-out/
+
+# Standalone CLI binary staging and output (tools/cli/scripts/build-binary.mjs)
+tools/cli/.build-binary/
+tools/cli/dist-binary/

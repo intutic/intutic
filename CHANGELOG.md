@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The standalone `cli-*` release binaries run every command.** They were `pkg` packages of the
+  compiled CLI, and `pkg` cannot run a lazily imported module: `intutic status`, `intutic init` and
+  every other command crashed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`, while `--version` and
+  `--help` worked, which is all the release smoke test checked. The binary is now the CLI bundled
+  into one module (`pnpm --filter @intutic/cli run build:binary`) and the macOS smoke test runs
+  `intutic status`.
+
 - **`POST /api/v1/plans/capture` answers 409 for a session the platform has not seen,**
   with `UNKNOWN_SESSION` and what to do, in place of a 500 that echoed the query. The
   generated API catalog documents the response.
