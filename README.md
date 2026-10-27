@@ -14,7 +14,7 @@
 
 <br>
 
-<img src="assets/demo.gif" alt="Intutic Hero Demo — Real-time AI Agent Circuit Breaker" width="100%">
+<img src="assets/demo.gif" alt="A hook gate allows an in-scope edit and refuses an out-of-scope edit and an irreversible kubectl delete, from one SOP" width="100%">
 
 </div>
 
