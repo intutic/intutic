@@ -537,6 +537,10 @@ run('tier matrix', () => {
     }))
     plans = plans.filter((x) => x.billing && x.billing !== 'none')
     if (plans.length < 2) throw new Error(`read ${plans.length} paid plans from ${PLAN_SKU_MAP}; the parsing broke`)
+  } else if (!existsSync(join(ROOT, PLANS_JSON))) {
+    // Open-core checkout without the plan catalog: nothing names the columns, so there is nothing to compare.
+    console.log(`[SKIP] neither ${PLAN_SKU_MAP} nor ${PLANS_JSON} is in this checkout: the tier-matrix columns are not checked.`)
+    return
   } else {
     // Open-core checkout: no control plane. The docs' own plan data names the columns.
     plans = JSON.parse(read(PLANS_JSON)).map((x) => ({ id: x.id, name: x.name, billing: x.billing }))

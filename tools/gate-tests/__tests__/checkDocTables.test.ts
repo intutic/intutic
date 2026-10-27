@@ -211,6 +211,13 @@ describe('docs tables and diagrams', () => {
     expect(r.out).toContain('[SKIP] services/control-plane/src/lib/planSkuMap.ts is not in this checkout')
   })
 
+  it('skips the tier matrix, and passes, when the checkout has no plan catalog at all', async () => {
+    await rm(join(root, 'apps/docs/data/plans.json'))
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(0)
+    expect(r.out).toContain('the tier-matrix columns are not checked')
+  })
+
   it('fails an enforcement-action table missing an action, or naming one the enum lacks', async () => {
     await edit('apps/docs/guide/policies.md', '| **HIJACK** | steered |', '| **REDIRECT** | steered |')
     await fails('apps/docs/guide/policies.md:5: the enforcement-action table lists REDIRECT')

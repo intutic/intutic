@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-docs-links.js')
-const gate = (await import(SCRIPT)) as { check(root: string): { links: number; problems: string[] } }
+const gate = (await import(SCRIPT)) as { check(root: string): { links: number; problems: string[]; skipped: number } }
 
 describe('docs links', () => {
   let root: string
@@ -49,10 +49,11 @@ describe('docs links', () => {
         'Inline `[nor this](/nope)` either.',
       ].join('\n'),
     )
-    expect(gate.check(root)).toEqual({ links: 6, problems: [] })
+    expect(gate.check(root)).toEqual({ links: 6, problems: [], skipped: 0 })
   })
 
   it('fails a missing page, a missing anchor, a repo-relative source link, and a stray character', async () => {
+    await put('services/control-plane/package.json', '{}') // the full tree, so a missing page is a mistake
     await put(
       'apps/docs/guide/budgets.md',
       [
@@ -67,5 +68,10 @@ describe('docs links', () => {
     expect(problems[1]).toContain('no heading #_2-circuit-breaker-enforcement')
     expect(problems[2]).toContain('packages/proxy/src/metering.rs')
     expect(problems[3]).toContain('no heading #setup"')
+  })
+
+  it('counts, and does not fail, a link to a page missing from an open-core checkout', async () => {
+    await put('apps/docs/guide/budgets.md', '# Budgets\n[a](/guide/sso) [b](/guide/loops#setup)\n')
+    expect(gate.check(root)).toEqual({ links: 2, problems: [], skipped: 1 })
   })
 })
