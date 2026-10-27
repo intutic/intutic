@@ -2,7 +2,7 @@
  * Trajectory Monitor — Daemon-side session watcher.
  *
  * Runs in the `intutic connect` process, not a Worker thread:
- * `tools/cli/src/commands/connect.ts` subscribes to the Valkey pub/sub
+ * the `connect` command (the control-plane CLI plugin) subscribes to the Valkey pub/sub
  * `trace:live:*` channels and passes each event to `handleTraceEvent`. Events
  * are buffered per session in a sliding window, and trajectory summaries are
  * submitted to the control plane for analysis.

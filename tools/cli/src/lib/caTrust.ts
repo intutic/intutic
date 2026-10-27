@@ -3,12 +3,12 @@
  *
  * Two trust scopes:
  * - `'user'` — per-user, non-elevated. Already shipping today via
- *   `commands/connect.ts` (macOS login keychain, Windows `certutil`), run
+ *   `intutic connect` (macOS login keychain, Windows `certutil`), run
  *   silently on every `intutic connect`. Linux has no per-user store its TLS
  *   clients share, so connect uses `ensureLinuxCaTrust` instead: the system
  *   store when it runs as root, otherwise the exact commands to run.
  * - `'system'` — machine-wide, requires root/admin. New here — this is the
- *   half `enterprise install` (`commands/enterprise.ts`) needs and the
+ *   half `enterprise install` needs and the
  *   deleted `enterprise-install.ts` (commit `8481b5d9`) used to provide.
  *
  * `caTrustCommandFor` is exported specifically so `doctor.ts`'s remediation

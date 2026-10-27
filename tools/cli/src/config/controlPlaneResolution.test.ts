@@ -3,7 +3,8 @@
  * INTUTIC_CONTROL_PLANE_URL, then a workspace set up with `init --dev`, then
  * the URL saved by `intutic login`. Each command below runs for real against
  * a temporary ~/.intutic, and the first request it makes shows which control
- * plane it chose.
+ * plane it chose. (The commands that only exist in the control-plane plugin
+ * are held to the same rule by the plugin's own copy of this test.)
  *
  * Before, about half the commands ignored the workspace's dev setting, and
  * the other half put it ahead of the environment.
@@ -13,20 +14,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { runFindingsList } from '../commands/findings.js'
 import { runTracesList } from '../commands/traces.js'
-import { runIntegrityRoots } from '../commands/integrity.js'
-import { runGatewayList } from '../commands/gateway.js'
-import { runTeamList } from '../commands/team.js'
-import { runOrgCreate } from '../commands/org.js'
-import { runWhoami } from '../commands/whoami.js'
-import { runCredentialsList } from '../commands/credentials.js'
-import { runPredictCost } from '../commands/predict-cost.js'
-import { runRoutingAdoptionReport } from '../commands/routing.js'
-import { runSopsPull } from '../commands/sops.js'
 import { runBudget } from '../commands/budget.js'
-import { runPolicyReplay } from '../commands/policy.js'
-import { runGuardrailsSourcesList } from '../commands/guardrails.js'
 import { getClient as getSkillClient } from '../commands/skill.js'
 import { runStatus } from '../commands/status.js'
 
@@ -35,21 +24,9 @@ vi.mock('../lib/process.js', () => ({ getActiveAgentProcesses: () => [], isSyncD
 type Run = (dev?: boolean) => Promise<unknown>
 
 const COMMANDS: Array<[string, Run]> = [
-  ['findings list', (dev) => runFindingsList({ dev })],
   ['traces list', (dev) => runTracesList({ dev })],
-  ['integrity roots', (dev) => runIntegrityRoots({ dev })],
-  ['gateway list', (dev) => runGatewayList({ dev })],
-  ['team list', (dev) => runTeamList({ dev, org: 'org_test' })],
-  ['org create', (dev) => runOrgCreate({ dev, orgName: 'Acme', domain: 'acme.example' })],
-  ['whoami', (dev) => runWhoami({ dev })],
-  ['credentials list', (dev) => runCredentialsList({ dev })],
-  ['predict-cost', (dev) => runPredictCost({ dev, model: 'm', tokens: '10' })],
-  ['routing adoption-report', (dev) => runRoutingAdoptionReport({ dev, candidateModel: 'm' })],
-  ['sops pull', (dev) => runSopsPull({ dev })],
   ['budget', (dev) => runBudget({ dev })],
-  ['policy replay', (dev) => runPolicyReplay('wasm_1', { dev })],
-  ['guardrails sources list', (dev) => runGuardrailsSourcesList({ dev })],
-  ['loop (skill client)', async (dev) => (await getSkillClient(dev)).get('/api/v1/probe')],
+  ['skill client (loop commands share it)', async (dev) => (await getSkillClient(dev)).get('/api/v1/probe')],
 ]
 
 const LOCAL = 'http://localhost:3001'

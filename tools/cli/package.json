@@ -6,6 +6,31 @@
   "bin": {
     "intutic": "./dist/cli.js"
   },
+  "//exports": "Not a public API. These subpaths are the modules the optional @intutic/cli-control-plane plugin builds on (src/lib/controlPlanePlugin.ts says how it is loaded). Add one only for a module the plugin needs; they follow the CLI version, not semver.",
+  "exports": {
+    "./package.json": "./package.json",
+    "./commands/policy": { "types": "./dist/commands/policy.d.ts", "default": "./dist/commands/policy.js" },
+    "./commands/setup": { "types": "./dist/commands/setup.d.ts", "default": "./dist/commands/setup.js" },
+    "./commands/skill": { "types": "./dist/commands/skill.d.ts", "default": "./dist/commands/skill.js" },
+    "./config/paths": { "types": "./dist/config/paths.d.ts", "default": "./dist/config/paths.js" },
+    "./config/store": { "types": "./dist/config/store.d.ts", "default": "./dist/config/store.js" },
+    "./harness/detector": { "types": "./dist/harness/detector.d.ts", "default": "./dist/harness/detector.js" },
+    "./harness/writeHarnessConfigs": { "types": "./dist/harness/writeHarnessConfigs.d.ts", "default": "./dist/harness/writeHarnessConfigs.js" },
+    "./lib/api": { "types": "./dist/lib/api.d.ts", "default": "./dist/lib/api.js" },
+    "./lib/authMessages": { "types": "./dist/lib/authMessages.d.ts", "default": "./dist/lib/authMessages.js" },
+    "./lib/caTrust": { "types": "./dist/lib/caTrust.d.ts", "default": "./dist/lib/caTrust.js" },
+    "./lib/controlPlanePlugin": { "types": "./dist/lib/controlPlanePlugin.d.ts", "default": "./dist/lib/controlPlanePlugin.js" },
+    "./lib/deviceReport": { "types": "./dist/lib/deviceReport.d.ts", "default": "./dist/lib/deviceReport.js" },
+    "./lib/enforcementState": { "types": "./dist/lib/enforcementState.d.ts", "default": "./dist/lib/enforcementState.js" },
+    "./lib/ensureValkey": { "types": "./dist/lib/ensureValkey.d.ts", "default": "./dist/lib/ensureValkey.js" },
+    "./lib/inventory": { "types": "./dist/lib/inventory.d.ts", "default": "./dist/lib/inventory.js" },
+    "./lib/localProxy": { "types": "./dist/lib/localProxy.d.ts", "default": "./dist/lib/localProxy.js" },
+    "./lib/logger": { "types": "./dist/lib/logger.d.ts", "default": "./dist/lib/logger.js" },
+    "./lib/onboarding": { "types": "./dist/lib/onboarding.d.ts", "default": "./dist/lib/onboarding.js" },
+    "./lib/policySnapshot": { "types": "./dist/lib/policySnapshot.d.ts", "default": "./dist/lib/policySnapshot.js" },
+    "./lib/process": { "types": "./dist/lib/process.d.ts", "default": "./dist/lib/process.js" },
+    "./lib/proxyBinary": { "types": "./dist/lib/proxyBinary.d.ts", "default": "./dist/lib/proxyBinary.js" }
+  },
   "scripts": {
     "lint": "eslint src",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -49,7 +74,6 @@
     "@clack/prompts": "^1.7.0",
     "chokidar": "^5.0.0",
     "commander": "^13",
-    "ioredis": "^5.11.1",
     "picocolors": "^1",
     "yaml": "^2.9.0"
   },

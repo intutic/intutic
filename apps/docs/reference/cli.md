@@ -33,8 +33,9 @@ read-only commands and manage their own login and keys.
 ## Plan badges
 
 Commands without a badge run on your machine with no account. A badge on a command means it calls
-a control plane, which the open core does not include, and needs `intutic login` first. Every
-command ships in the open-core CLI; the badge says what it needs to work.
+a control plane, which the open core does not include, and needs `intutic login` first. These
+commands are not in the open-core CLI package: they come from `@intutic/cli-control-plane`,
+installed next to it. Without that package, running one prints where it comes from and exits.
 
 <!-- ENTERPRISE_ONLY_START -->
 The badge names the plan, as in [Plan badges](/guide/plans#badges):

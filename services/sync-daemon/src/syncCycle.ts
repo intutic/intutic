@@ -2,7 +2,7 @@
  * syncCycle.ts — the per-cycle work `intutic connect` runs against the
  * control plane.
  *
- * `intutic connect` (tools/cli/src/commands/connect.ts) owns the loop: it
+ * `intutic connect` (the control-plane CLI plugin's connect command) owns the loop: it
  * polls the control plane, listens for pushed config over the WebSocket, and
  * on each cycle calls the helpers below. They live here, not in the CLI, so
  * they can be tested without starting a daemon and so the gate-side caches

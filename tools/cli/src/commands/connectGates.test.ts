@@ -35,7 +35,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { HarnessType } from '@intutic/shared-types'
 import { gateKindForHarness } from '@intutic/sync-daemon'
-import { writeHarnessConfigs } from './connect.js'
+import { writeHarnessConfigs } from '../harness/writeHarnessConfigs.js'
 
 const { base, home, ws } = fake
 const PROXY = 'http://127.0.0.1:4000'

@@ -7,38 +7,29 @@
  * @module
  */
 
-import type {
-  SyncConfigPayload,
-  DaemonStatus,
-  SopHashReport,
-} from '@intutic/shared-types'
+import type { SyncConfigPayload } from '@intutic/shared-types'
 import { toonDecode as sharedToonDecode } from '@intutic/shared-types'
 import { injectTraceHeaders } from './otelPropagation.js'
 
 /** API client for control plane communication. */
 export interface ApiClient {
   fetchConfig(workspaceId: string): Promise<SyncConfigPayload>
-  reportStatus(status: DaemonStatus): Promise<{ ack: boolean; configVersion: number }>
-  reportHashes(report: SopHashReport): Promise<{ driftCount: number }>
-  getMe(): Promise<{ email: string; memberId: string; workspaceId: string; role: string }>
-  login(email: string, password: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; member: { memberId: string; workspaceId: string; email: string; role: string } }>
   /** Generic GET request for arbitrary API paths. */
   get<T>(path: string): Promise<T>
   /**
    * GET that hands back the status instead of throwing on it.
    *
-   * For endpoints where a non-2xx *is* the answer: `/api/v1/integrity/chain`
-   * returns 409 with the whole chain walk in the body when a root names a
-   * predecessor that is not there. `get()` throws on any non-2xx, which would
-   * leave the caller digging the break out of an error message.
+   * For endpoints where a non-2xx *is* the answer: a chain check that returns
+   * 409 with the whole walk in the body when a link is missing. `get()` throws
+   * on any non-2xx, which would leave the caller digging the break out of an
+   * error message.
    */
   getWithStatus<T>(path: string): Promise<{ status: number; body: T }>
   /**
    * GET for a file download: the body as bytes.
    *
    * `get()` parses JSON, which a report served as markdown, CSV or PDF is
-   * not (`/api/v1/compliance/frameworks/:id/coverage?format=pdf`). A non-2xx
-   * throws exactly as `get()` does, since those errors are JSON.
+   * not. A non-2xx throws exactly as `get()` does, since those errors are JSON.
    */
   getFile(path: string): Promise<Uint8Array>
   /** Generic POST request for arbitrary API paths. */
@@ -46,16 +37,15 @@ export interface ApiClient {
   /**
    * POST that hands back the status instead of throwing on it.
    *
-   * Same rationale as `getWithStatus`: `POST /api/v1/wasm-rules/:id/replay`
-   * returns 422 with `{error: 'not_enough_traffic', contextCount, minRequired}`
-   * when the workspace has too little sampled history, and that body is the
+   * Same rationale as `getWithStatus`: a route that answers 422 with a body
+   * saying what is missing (too little sampled history, say) has given the
    * answer a caller needs to report, not a failure to unwrap and discard.
    */
   postWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
   /**
-   * PUT and DELETE that hand back the status, for the same reason:
-   * `PUT /api/v1/policy-guardrails/guardrails/:id` answers 400 with the
-   * validator's named checks and 409 with a `code`, and both are the answer.
+   * PUT and DELETE that hand back the status, for the same reason: an update
+   * that answers 400 with the validator's named checks and 409 with a `code`
+   * has given two answers, not two failures.
    */
   putWithStatus<T>(path: string, body?: unknown): Promise<{ status: number; body: T }>
   delWithStatus<T>(path: string): Promise<{ status: number; body: T }>
@@ -146,22 +136,6 @@ export function createApiClient(controlPlaneUrl: string, apiKey: string): ApiCli
   return {
     async fetchConfig(workspaceId: string): Promise<SyncConfigPayload> {
       return request<SyncConfigPayload>('POST', '/api/v1/sync/config', { workspaceId })
-    },
-
-    async reportStatus(status: DaemonStatus): Promise<{ ack: boolean; configVersion: number }> {
-      return request('POST', '/api/v1/sync/status', status)
-    },
-
-    async reportHashes(report: SopHashReport): Promise<{ driftCount: number }> {
-      return request('POST', '/api/v1/sync/sop-hash', report)
-    },
-
-    async getMe(): Promise<{ email: string; memberId: string; workspaceId: string; role: string }> {
-      return request('GET', '/api/v1/auth/me')
-    },
-
-    async login(email: string, password: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; member: { memberId: string; workspaceId: string; email: string; role: string } }> {
-      return request('POST', '/api/v1/auth/login', { email, password })
     },
 
     async get<T>(path: string): Promise<T> {
@@ -263,8 +237,8 @@ export function toonDecode(toon: string): Record<string, unknown>[] {
  * Extracted from `request` because it was inline and therefore untestable, and
  * it was wrong: the old code assigned the decoded rows and only THEN deleted
  * `data`. `listProperty` names where the rows should land, and for
- * `/api/v1/incidents` that name IS `data` — so the rows were written and
- * immediately deleted, and any incidents response over the 20-row TOON
+ * one list route that name IS `data` — so the rows were written and
+ * immediately deleted, and any such response over the 20-row TOON
  * threshold arrived as `{meta:{total:22}}`. Zero rows, no error.
  * `/api/v1/traces` escaped only because its listProperty is `traces`.
  *

@@ -9,7 +9,7 @@
  * asset is fetched on first run from the GitHub Release for this package's
  * version, which .github/workflows/publish.yml uploads for all five targets.
  *
- * The download mirrors tools/cli/src/commands/connect.ts: same asset names
+ * The download mirrors the CLI's `intutic connect` (control-plane plugin): same asset names
  * (which MUST match the `artifact_name` values in the publish workflow's
  * build-rust-proxy matrix), same URL scheme, and the same ~/.intutic/bin cache
  * — so `intutic connect` and `npx @intutic/proxy` never download twice.

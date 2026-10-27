@@ -39,6 +39,8 @@ const REFERENCE = 'apps/docs/reference/configuration.md'
 const SOURCES = [
   { dir: 'packages/proxy/src', lang: 'rust', section: /^### Proxy\b/ },
   { dir: 'tools/cli/src', lang: 'ts', section: /^### CLI\b/ },
+  // The commands that need a control plane (private); see PLUGIN_ONLY.
+  { dir: 'tools/cli-control-plane/src', lang: 'ts', section: /^### CLI\b/, optional: true },
   { dir: 'packages/gate-js/src', lang: 'ts', section: /^### Gate SDK\b/ },
   { dir: 'services/sync-daemon/src', lang: 'ts', section: /^### Sync daemon\b/ },
   { dir: 'packages/mcp-proxy/src', lang: 'ts', section: /^### MCP proxy\b/ },
@@ -55,6 +57,17 @@ const SOURCES = [
 const CONSTANT_SOURCES = ['packages/shared-types/src']
 
 const EXT = { rust: '.rs', ts: '.ts', python: '.py' }
+
+/**
+ * Variables only the control-plane plugin (tools/cli-control-plane, which the
+ * private checkout has and this one does not) reads. Without the plugin tree
+ * nothing reads them, so neither a table row for one nor an INTERNAL entry for
+ * one can be checked there; with it, both are checked like any other.
+ */
+const PLUGIN_ONLY = new Set([
+  'INTUTIC_LOOP_BASE_COMMIT', // intutic loop verify
+  'SUDO_USER', // intutic enterprise install, through the elevation helper
+])
 
 /** Read by a scanned source but deliberately absent from the reference. */
 const INTERNAL = new Map([
@@ -212,15 +225,17 @@ function main() {
     readFileSync(join(ROOT, REFERENCE), 'utf8'),
     present.map((s) => s.section),
   )
+  const pluginAbsent = !present.some((source) => source.dir === 'tools/cli-control-plane/src')
+  const unreadOk = (name) => pluginAbsent && PLUGIN_ONLY.has(name)
   const failures = []
   for (const [name, file] of [...reads].sort()) {
     if (!mentioned.has(name) && !INTERNAL.has(name)) failures.push(`${name} (read in ${file}) is not in ${REFERENCE}`)
   }
   for (const [name, line] of tabled) {
-    if (!reads.has(name)) failures.push(`${REFERENCE}:${line} documents ${name}, which nothing in ${present.map((s) => s.dir).join(', ')} reads`)
+    if (!reads.has(name) && !unreadOk(name)) failures.push(`${REFERENCE}:${line} documents ${name}, which nothing in ${present.map((s) => s.dir).join(', ')} reads`)
   }
   for (const name of INTERNAL.keys()) {
-    if (!reads.has(name)) failures.push(`INTERNAL lists ${name}, which nothing reads any more; remove the entry`)
+    if (!reads.has(name) && !unreadOk(name)) failures.push(`INTERNAL lists ${name}, which nothing reads any more; remove the entry`)
   }
 
   if (failures.length) {

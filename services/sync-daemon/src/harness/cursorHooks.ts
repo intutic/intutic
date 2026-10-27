@@ -68,7 +68,7 @@ export function systemHooksDirFor(platform: NodeJS.Platform): string {
 /**
  * Build a Cursor hooks.json config object.
  *
- * Exported so `enterprise install` (`tools/cli/src/lib/mdmManifest.ts`) can
+ * Exported so `enterprise install` (the control-plane CLI plugin's mdmManifest) can
  * populate its generated MDM hooks manifest from the SAME shape this file
  * writes, rather than a hand-retyped literal — which is exactly how that
  * manifest drifted before (it named `pre-tool-check.js`, this file's real

@@ -20,7 +20,6 @@ import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
 import { createApiClient, type ApiClient } from '../lib/api.js'
 import { writeFileAtomic } from '@intutic/sync-daemon/lib/atomicWrite'
-import { resolveSnapshotRulesPath, SNAPSHOT_RULES_FILE } from '../lib/policySnapshot.js'
 
 /**
  * Message of a caught value.
@@ -36,11 +35,12 @@ function errMessage(err: unknown): string {
 /**
  * The control plane these commands talk to, and the credentials for it.
  *
- * Lifted out of `getClient` because `policy snapshot` needs the workspace id and
- * the raw key rather than an API client — and resolving them a second way is how
- * one command ends up pointed at production while its neighbour is on --dev.
+ * Lifted out of `getClient` because `policy snapshot` (in the control-plane
+ * plugin) needs the workspace id and the raw key rather than an API client — and
+ * resolving them a second way is how one command ends up pointed at production
+ * while its neighbour is on --dev.
  */
-async function resolveTarget(
+export async function resolveTarget(
   dev?: boolean,
 ): Promise<{ controlPlaneUrl: string; apiKey: string; workspaceId: string }> {
   const creds = await loadCredentials()
@@ -55,76 +55,9 @@ async function resolveTarget(
   }
 }
 
-async function getClient(dev?: boolean) {
+export async function getClient(dev?: boolean) {
   const { controlPlaneUrl, apiKey } = await resolveTarget(dev)
   return createApiClient(controlPlaneUrl, apiKey)
-}
-
-/**
- * `intutic policy snapshot` — compile this workspace's policy to disk.
- *
- * The snapshot is the dynamic tier: every harness gate reads
- * `~/.intutic/hooks/policy-snapshot.rules` and enforces the compiled floor and
- * nothing else when it is missing. Until this command existed the only thing
- * that ever wrote it was `intutic connect`, so arming the gates meant running a
- * daemon that also rewrites five harnesses' hook configs, starts a drift
- * watcher and provisions Valkey. This does the one thing.
- */
-export async function runPolicySnapshot(opts: { dev?: boolean }): Promise<void> {
-  log.header('Intutic — Refresh Policy Snapshot')
-
-  const { controlPlaneUrl, apiKey, workspaceId } = await resolveTarget(opts.dev)
-
-  // The gates consult INTUTIC_SNAPSHOT_RULES before the default path, so writing
-  // to the default while they read elsewhere would produce a snapshot nothing
-  // enforces — the precise silent failure this command exists to end.
-  const rulesPath = resolveSnapshotRulesPath()
-  const snapshotDir = path.dirname(rulesPath)
-  if (path.basename(rulesPath) !== SNAPSHOT_RULES_FILE) {
-    log.warn(
-      `INTUTIC_SNAPSHOT_RULES names "${path.basename(rulesPath)}", but the writer always produces ` +
-        `"${SNAPSHOT_RULES_FILE}" — the gates will read a file this command does not write.`
-    )
-  }
-
-  // Imported here rather than at module scope: @intutic/sync-daemon pulls in ws,
-  // ioredis and chokidar, and every other `intutic policy` subcommand would pay
-  // that startup cost without ever touching a snapshot.
-  const { refreshPolicySnapshot } = await import('@intutic/sync-daemon')
-
-  const rulesFile = path.join(snapshotDir, SNAPSHOT_RULES_FILE)
-  const readRules = () => fs.readFile(rulesFile, 'utf-8').catch(() => null)
-  const before = await readRules()
-  const result = await refreshPolicySnapshot({ controlPlaneUrl, apiKey, workspaceId, snapshotDir })
-
-  // `refreshPolicySnapshot` never throws — policy refresh must not be able to
-  // take down the daemon's sync loop — so null is the only failure signal it
-  // has. Reporting that as success is how a machine comes to enforce nothing
-  // while the command meant to arm it said it worked.
-  if (!result) {
-    log.error('Snapshot NOT written — GET /api/v1/policy/resolve returned nothing usable.')
-    log.field('Control plane', controlPlaneUrl)
-    log.field('Workspace', workspaceId)
-    // A failed refresh is not always a no-op: when the control plane refuses
-    // the key (401/403), the snapshot is rewritten with the member's SSO groups
-    // unknown. Say what happened on disk rather than promising it didn't.
-    if ((await readRules()) === before) {
-      log.info('Any previous snapshot is untouched and still enforced.')
-    } else {
-      log.warn(
-        "The snapshot was rewritten: the control plane refused this machine's key, so the member's SSO " +
-          'groups are now unknown and every high-risk tool they cleared is refused. Its other rules are still enforced.',
-      )
-    }
-    log.info('Check the control plane is reachable and the key is still valid: `intutic whoami`.')
-    process.exit(1)
-  }
-
-  log.success(`Policy snapshot written — ${result.ruleCount} rule(s) now enforced by every gate.`)
-  log.field('Digest', result.digest)
-  log.field('Workspace', workspaceId)
-  log.field('Path', path.join(snapshotDir, SNAPSHOT_RULES_FILE))
-  log.info('Confirm the gates accept it with `intutic doctor`.')
 }
 
 /**
@@ -845,125 +778,6 @@ export async function runPolicyInstall(opts: {
   log.info(
     'If your proxy config.yaml sets intutic_settings.wasm_local_dir, make sure it matches this path (or set INTUTIC_WASM_DIR for both).'
   )
-}
-
-/**
- * Shape `POST /api/v1/wasm-rules/:id/replay` returns on success — mirrors
- * `ReplaySummary` in the control plane
- * plus the two fields the route adds (`ruleId`, `since`).
- */
-interface ReplayResult {
-  ruleId: string
-  since: string | null
-  contextCount: number
-  wouldActCount: number
-  wouldActRate: number
-  verdictCounts: Record<string, number>
-  sampleMatches: Record<string, unknown>[]
-  /** Contexts whose tool calls carry argument keys and sizes, not values. Absent from an older control plane. */
-  argumentsWithheld?: number
-  /** Why that matters and how to change it; present when `argumentsWithheld` is above zero. */
-  argumentsNote?: string
-}
-
-const VERDICT_NAMES: Record<string, string> = {
-  '0': 'allow',
-  '1': 'block',
-  '2': 'block (deprecated code 2)',
-  '3': 'reask',
-}
-
-/**
- * `intutic policy replay <ruleId>` — "prove before enforce": run an installed
- * or not-yet-active rule against a sample of this workspace's own recent
- * traffic and report what it would have done, without touching enforcement.
- *
- * Uses `postWithStatus` rather than `post`: the 422 the route returns for too
- * little sampled traffic is an answer this command exists to report, not a
- * request failure to throw past.
- */
-export async function runPolicyReplay(
-  ruleId: string,
-  opts: { limit?: string; since?: string; dev?: boolean },
-): Promise<void> {
-  log.header(`Intutic — Replay Policy Rule: ${ruleId}`)
-
-  const client = await getClient(opts.dev)
-
-  const body: { limit?: number; since?: string } = {}
-  if (opts.limit !== undefined) {
-    const limit = parseInt(opts.limit, 10)
-    if (isNaN(limit) || limit <= 0) {
-      log.error(`Invalid --limit "${opts.limit}". Must be a positive integer.`)
-      process.exit(1)
-    }
-    body.limit = limit
-  }
-  if (opts.since !== undefined) {
-    body.since = opts.since
-  }
-
-  try {
-    const { status, body: result } = await client.postWithStatus<
-      ReplayResult | { error: string; message?: string; contextCount?: number; minRequired?: number }
-    >(`/api/v1/wasm-rules/${ruleId}/replay`, body)
-
-    if (status === 404) {
-      log.error(`Rule "${ruleId}" not found in this workspace.`)
-      process.exit(1)
-    }
-
-    if (status === 422) {
-      const err = result as { error: string; message?: string; contextCount?: number; minRequired?: number }
-      if (err.error === 'not_enough_traffic') {
-        log.warn('Not enough sampled traffic to estimate a would-act rate.')
-        log.field('Sampled contexts', String(err.contextCount ?? 0))
-        log.field('Required', String(err.minRequired ?? 0))
-        log.info(
-          'Contexts are sampled at WASM_CONTEXT_SNAPSHOT_RATE (default 5%) as traffic flows ' +
-            'through the proxy — this grows with time and traffic, not with --limit.',
-        )
-      } else {
-        log.error(`Replay could not evaluate the rule: ${err.message ?? err.error}`)
-      }
-      process.exit(1)
-    }
-
-    if (status === 403) {
-      // Two different refusals share the status: the plan (FEATURE_NOT_AVAILABLE)
-      // and the role (requireRole's FORBIDDEN, whose `detail` names the roles).
-      const denial = result as { error?: string; code?: string; detail?: string }
-      if (denial.code === 'FEATURE_NOT_AVAILABLE') {
-        log.error(`Replay refused: ${denial.error ?? 'your plan does not include custom WASM rules'}`)
-      } else {
-        log.error(`Replay refused: ${denial.detail ?? 'your role cannot replay rules'}`)
-      }
-      process.exit(1)
-    }
-
-    if (status !== 200) {
-      log.error(`Replay failed (${status}): ${JSON.stringify(result)}`)
-      process.exit(1)
-    }
-
-    const summary = result as ReplayResult
-    log.success(`Replayed against ${summary.contextCount} sampled context(s).`)
-    log.field('Since', summary.since ?? '(all sampled history)')
-    log.field('Would act (block/reask/other)', `${summary.wouldActCount} (${(summary.wouldActRate * 100).toFixed(1)}%)`)
-    for (const [code, count] of Object.entries(summary.verdictCounts)) {
-      log.field(`  verdict ${code} (${VERDICT_NAMES[code] ?? 'unmapped'})`, String(count))
-    }
-    if (summary.argumentsNote) {
-      log.warn(summary.argumentsNote)
-    }
-    if (summary.sampleMatches.length > 0) {
-      log.info(`First ${summary.sampleMatches.length} non-allow context(s):`)
-      console.log(JSON.stringify(summary.sampleMatches, null, 2))
-    }
-  } catch (err) {
-    log.error(`Failed to replay rule: ${errMessage(err)}`)
-    process.exit(1)
-  }
 }
 
 export async function runPolicyListLocal(): Promise<void> {

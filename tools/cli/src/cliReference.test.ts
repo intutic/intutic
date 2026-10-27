@@ -3,11 +3,17 @@
 // section, and every option it takes is named in that section. Commands were
 // added without docs, and docs kept options the CLI no longer had; checking
 // the registered tree rather than cli.ts's text is what makes this exact.
+//
+// The control-plane commands register from the optional @intutic/cli-control-plane
+// plugin (lib/controlPlanePlugin.ts). Without it, their sections are held to the
+// plugin's list of command names instead; with it, to the registered tree like
+// every other command.
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { Command } from 'commander'
+import { CONTROL_PLANE_COMMANDS } from './lib/controlPlanePlugin.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const reference = readFileSync(resolve(here, '../../../apps/docs/reference/cli.md'), 'utf8')
@@ -73,13 +79,20 @@ function sectionFor(path: string, all: Map<string, string>): string | undefined 
   return undefined
 }
 
+/** A path the plugin provides (`budget set`), or one beneath a command it provides (`guardrails sources list`). */
+function isPluginCommand(path: string): boolean {
+  return CONTROL_PLANE_COMMANDS.some((name) => path === name || path.startsWith(`${name} `))
+}
+
 describe('cli.md matches the registered command tree', async () => {
   const program = await loadProgram()
   const commands = runnable(program).filter(({ path }) => !SHORTCUTS.has(path))
   const all = sections()
+  // `login` is the plugin's: registered only when the plugin is installed.
+  const withPlugin = program.commands.some((c) => c.name() === 'login')
 
   it('finds the command tree', () => {
-    expect(commands.length).toBeGreaterThan(50)
+    expect(commands.length).toBeGreaterThan(40)
   })
 
   // The other direction: a section for a command the CLI no longer has (or
@@ -88,7 +101,26 @@ describe('cli.md matches the registered command tree', async () => {
   // while both directions hold.
   it.each([...all.keys()].map((heading) => [headingPath(heading)]))('`intutic %s` in cli.md is a registered command', (path) => {
     const registered = new Set(nodes(program).map((n) => n.join(' ')))
-    expect(registered.has(path) || SHORTCUTS.has(path), `cli.md documents \`intutic ${path}\`, which cli.ts does not register`).toBe(true)
+    // Without the plugin its commands are not registered; their names are the CLI's own list.
+    const provided = !withPlugin && isPluginCommand(path)
+    expect(registered.has(path) || SHORTCUTS.has(path) || provided, `cli.md documents \`intutic ${path}\`, which cli.ts does not register`).toBe(true)
+  })
+
+  // The list a CLI without the plugin answers from has to be the plugin's
+  // commands: each name documented, so it cannot name a command that is gone.
+  it.each(CONTROL_PLANE_COMMANDS.map((name) => [name]))('the plugin command `intutic %s` has a section in cli.md', (name) => {
+    const documented = [...all.keys()].some((heading) => {
+      const path = headingPath(heading)
+      return path === name || path.startsWith(`${name} `)
+    })
+    expect(documented || sectionFor(name, all) !== undefined, `CONTROL_PLANE_COMMANDS names \`${name}\`, which cli.md does not document`).toBe(true)
+  })
+
+  it('registers a plugin command only from the plugin', () => {
+    const registered = nodes(program).map((n) => n.join(' '))
+    const own = registered.filter((path) => CONTROL_PLANE_COMMANDS.includes(path))
+    // All of them, or none: a CLI half-loaded with the plugin's commands is a broken install.
+    expect(own.length === 0 || own.length === CONTROL_PLANE_COMMANDS.length, `registered ${own.length} of ${CONTROL_PLANE_COMMANDS.length} plugin commands`).toBe(true)
   })
 
   it.each(commands.map(({ path, cmd }) => [path, cmd] as const))('documents `intutic %s` and every option it takes', (path, cmd) => {

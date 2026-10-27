@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile, mkdir, access, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writeHarnessConfigs } from '../commands/connect.js'
+import { writeHarnessConfigs } from './writeHarnessConfigs.js'
 
 const PROXY_URL = 'http://127.0.0.1:4000'
 
