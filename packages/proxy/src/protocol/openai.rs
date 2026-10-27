@@ -19,26 +19,29 @@ impl OpenAIAdapter {
             anthropic_req["model"] = json!(model);
         }
 
-        // 2. Extract messages (or inputs)
-        let messages_key = if is_responses_api {
-            "input"
-        } else {
-            "messages"
-        };
+        // 2. Extract messages. A Responses body is a different shape — its
+        // system prompt in `instructions`, `input` a string or a list of typed
+        // items — and is read by `responses_input_to_anthropic`.
         let empty_vec = vec![];
-        let raw_messages = openai_req
-            .get(messages_key)
-            .and_then(|v| v.as_array())
-            .unwrap_or(&empty_vec);
+        let raw_messages = if is_responses_api {
+            &empty_vec
+        } else {
+            openai_req
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .unwrap_or(&empty_vec)
+        };
 
-        let mut system_prompts = Vec::new();
-        let mut anthropic_messages = Vec::new();
+        let (mut system_prompts, mut anthropic_messages) = if is_responses_api {
+            responses_input_to_anthropic(openai_req)
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         for msg in raw_messages {
             let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
 
-            // Responses API developer role maps to system prompt
-            if role == "system" || (is_responses_api && role == "developer") {
+            if role == "system" {
                 if let Some(content) = msg.get("content") {
                     if let Some(txt) = content.as_str() {
                         system_prompts.push(txt.to_string());
@@ -71,8 +74,7 @@ impl OpenAIAdapter {
             // model hit this — LangGraph, LangChain, the OpenAI SDK, Cursor —
             // because the failure needs a *second* turn to appear and a
             // single-turn smoke test looks fine.
-            let is_tool_output =
-                role == "tool" || (is_responses_api && role == "function_call_output");
+            let is_tool_output = role == "tool";
 
             // Handle content mapping
             if let Some(content) = msg.get("content").filter(|_| !is_tool_output) {
@@ -151,7 +153,7 @@ impl OpenAIAdapter {
                 "user"
             };
 
-            // Tool execution output (role = tool / function_call_output)
+            // Tool execution output (role = tool)
             if is_tool_output {
                 anthropic_role = "user";
                 let tool_use_id = msg
@@ -221,12 +223,14 @@ impl OpenAIAdapter {
             anthropic_req["system"] = json!(system_prompts.join("\n"));
         }
 
-        // 3. Translate tools / functions
+        // 3. Translate tools / functions. Chat Completions nests a function
+        // tool's fields under `function`; Responses puts them on the tool
+        // itself (`{"type":"function","name",...}`).
         let mut anthropic_tools = Vec::new();
         if let Some(tools) = openai_req.get("tools").and_then(|v| v.as_array()) {
             for t in tools {
                 if t.get("type").and_then(|v| v.as_str()) == Some("function") {
-                    if let Some(func) = t.get("function") {
+                    if let Some(func) = t.get("function").or(is_responses_api.then_some(t)) {
                         if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
                             let mapped_tool = json!({
                                 "name": name,
@@ -295,6 +299,7 @@ impl OpenAIAdapter {
         if let Some(max_tokens) = openai_req
             .get("max_tokens")
             .or_else(|| openai_req.get("max_completion_tokens"))
+            .or_else(|| openai_req.get("max_output_tokens"))
         {
             anthropic_req["max_tokens"] = max_tokens.clone();
         } else {
@@ -313,6 +318,9 @@ impl OpenAIAdapter {
         requested_model: &str,
         is_responses_api: bool,
     ) -> Value {
+        if is_responses_api {
+            return anthropic_response_to_responses(anthropic_resp, requested_model);
+        }
         let mut openai_resp = json!({});
 
         // Set ID and Object type
@@ -322,12 +330,7 @@ impl OpenAIAdapter {
             .unwrap_or("chatcmpl-unknown");
         openai_resp["id"] = json!(id);
 
-        let object_type = if is_responses_api {
-            "response"
-        } else {
-            "chat.completion"
-        };
-        openai_resp["object"] = json!(object_type);
+        openai_resp["object"] = json!("chat.completion");
         openai_resp["created"] = json!(chrono::Utc::now().timestamp());
         openai_resp["model"] = json!(requested_model);
 
@@ -550,6 +553,274 @@ impl OpenAIAdapter {
     }
 }
 
+/// A Responses request's `instructions` and `input` as Anthropic `system`
+/// prompts and `messages`.
+///
+/// `input` is a string (one user message) or a list of items, each with a
+/// `type`: `message` (the default when absent: a role and content parts
+/// `input_text` / `output_text` / `input_image`), `function_call` (the
+/// model's tool call, an assistant `tool_use` block) and
+/// `function_call_output` (its result, a user `tool_result` block), both
+/// keyed by `call_id`. Items with no Messages equivalent — `reasoning`, which
+/// is dropped like Anthropic thinking blocks, and built-in tool calls — are
+/// skipped.
+///
+/// Consecutive items of one role become one message, so the assistant's
+/// `function_call`s for a turn are one message of `tool_use` blocks and their
+/// outputs the next one, which Anthropic requires: a `tool_use` must be
+/// answered by a `tool_result` in the message right after it.
+fn responses_input_to_anthropic(req: &Value) -> (Vec<String>, Vec<Value>) {
+    let mut system = Vec::new();
+    if let Some(instructions) = req
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        system.push(instructions.to_string());
+    }
+
+    let mut turns: Vec<(&'static str, Vec<Value>)> = Vec::new();
+    let mut push = |role: &'static str, blocks: Vec<Value>| {
+        if blocks.is_empty() {
+            return;
+        }
+        match turns.last_mut() {
+            Some((last, content)) if *last == role => content.extend(blocks),
+            _ => turns.push((role, blocks)),
+        }
+    };
+
+    match req.get("input") {
+        Some(Value::String(text)) if !text.is_empty() => {
+            push("user", vec![json!({"type": "text", "text": text})]);
+        }
+        Some(Value::Array(items)) => {
+            for item in items {
+                match item
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("message")
+                {
+                    "message" => {
+                        let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+                        let blocks = responses_content_blocks(item.get("content"));
+                        if role == "system" || role == "developer" {
+                            system.extend(
+                                blocks
+                                    .iter()
+                                    .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                    .map(str::to_string),
+                            );
+                        } else if role == "assistant" {
+                            push("assistant", blocks);
+                        } else {
+                            push("user", blocks);
+                        }
+                    }
+                    "function_call" => {
+                        let id = item.get("call_id").or_else(|| item.get("id"));
+                        let name = item.get("name").and_then(|v| v.as_str());
+                        if let (Some(id), Some(name)) = (id.and_then(|v| v.as_str()), name) {
+                            let input: Value = item
+                                .get("arguments")
+                                .and_then(|a| a.as_str())
+                                .and_then(|a| serde_json::from_str(a).ok())
+                                .unwrap_or_else(|| json!({}));
+                            push(
+                                "assistant",
+                                vec![json!({
+                                    "type": "tool_use",
+                                    "id": id,
+                                    "name": name,
+                                    "input": input
+                                })],
+                            );
+                        }
+                    }
+                    "function_call_output" => {
+                        let id = item
+                            .get("call_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let content = match item.get("output") {
+                            Some(Value::String(s)) => json!(s),
+                            Some(parts @ Value::Array(_)) => {
+                                json!(responses_content_blocks(Some(parts)))
+                            }
+                            Some(other) => json!(other.to_string()),
+                            None => json!(""),
+                        };
+                        push(
+                            "user",
+                            vec![json!({
+                                "type": "tool_result",
+                                "tool_use_id": id,
+                                "content": content
+                            })],
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+
+    let messages = turns
+        .into_iter()
+        .map(|(role, blocks)| {
+            let content = if blocks.len() == 1 && blocks[0]["type"] == "text" {
+                blocks[0]["text"].clone()
+            } else {
+                json!(blocks)
+            };
+            json!({"role": role, "content": content})
+        })
+        .collect();
+    (system, messages)
+}
+
+/// A Responses message's `content` (a string or a list of parts) as
+/// Anthropic content blocks: `input_text` / `output_text` (and `text`) as
+/// text, `input_image` as an image from its data or https URL. Other parts
+/// (files, refusals, uploaded-file ids) have no block here and are skipped.
+fn responses_content_blocks(content: Option<&Value>) -> Vec<Value> {
+    match content {
+        Some(Value::String(text)) if !text.is_empty() => {
+            vec![json!({"type": "text", "text": text})]
+        }
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|part| match part.get("type").and_then(|v| v.as_str())? {
+                "input_text" | "output_text" | "text" => {
+                    let text = part.get("text").and_then(|v| v.as_str())?;
+                    (!text.is_empty()).then(|| json!({"type": "text", "text": text}))
+                }
+                "input_image" => {
+                    let url = part.get("image_url").and_then(|v| v.as_str())?;
+                    image_block(url)
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// An Anthropic image block for an image URL: a `data:` URL as base64, an
+/// http(s) URL as a URL source.
+fn image_block(url: &str) -> Option<Value> {
+    if let Some(rest) = url.strip_prefix("data:") {
+        let (meta, data) = rest.split_once(',')?;
+        let media_type = meta.split(';').next().filter(|m| !m.is_empty());
+        return Some(json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type.unwrap_or("image/jpeg"),
+                "data": data
+            }
+        }));
+    }
+    (url.starts_with("https://") || url.starts_with("http://"))
+        .then(|| json!({"type": "image", "source": {"type": "url", "url": url}}))
+}
+
+/// An Anthropic Messages response as a Responses API response: each text
+/// block an assistant `message` item with an `output_text` part, each
+/// `tool_use` block a `function_call` item whose `call_id` is the block's id
+/// (what the client's `function_call_output` answers). `max_tokens` is
+/// `status: "incomplete"`. As for Chat Completions, a single forced
+/// structured-output tool call is returned as text.
+fn anthropic_response_to_responses(anthropic_resp: &Value, requested_model: &str) -> Value {
+    let id = anthropic_resp
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("resp_unknown");
+    let empty = vec![];
+    let blocks = anthropic_resp
+        .get("content")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+
+    let message = |n: usize, text: &str| {
+        json!({
+            "type": "message",
+            "id": format!("{id}_{n}"),
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text, "annotations": []}]
+        })
+    };
+    let mut output = Vec::new();
+    for block in blocks {
+        match block.get("type").and_then(|v| v.as_str()) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                    output.push(message(output.len(), text));
+                }
+            }
+            Some("tool_use") => {
+                if let (Some(call_id), Some(name)) = (
+                    block.get("id").and_then(|v| v.as_str()),
+                    block.get("name").and_then(|v| v.as_str()),
+                ) {
+                    let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
+                    output.push(json!({
+                        "type": "function_call",
+                        "id": format!("fc_{call_id}"),
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": serde_json::to_string(&input).unwrap_or_default(),
+                        "status": "completed"
+                    }));
+                }
+            }
+            // thinking and redacted_thinking blocks are stripped, as for Chat.
+            _ => {}
+        }
+    }
+    if let [only] = output.as_slice() {
+        if only["type"] == "function_call"
+            && (only["name"] == "json_output" || only["name"] == "json_schema")
+        {
+            let text = only["arguments"].as_str().unwrap_or("").to_string();
+            output = vec![message(0, &text)];
+        }
+    }
+
+    let usage = anthropic_resp.get("usage");
+    let tokens = |k: &str| {
+        usage
+            .and_then(|u| u.get(k))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    };
+    let cached = tokens("cache_read_input_tokens");
+    let input = tokens("input_tokens") + cached + tokens("cache_creation_input_tokens");
+    let output_tokens = tokens("output_tokens");
+
+    let mut resp = json!({
+        "id": id,
+        "object": "response",
+        "created_at": chrono::Utc::now().timestamp(),
+        "model": requested_model,
+        "status": "completed",
+        "output": output,
+        "usage": {
+            "input_tokens": input,
+            "input_tokens_details": {"cached_tokens": cached},
+            "output_tokens": output_tokens,
+            "total_tokens": input + output_tokens
+        }
+    });
+    if anthropic_resp.get("stop_reason").and_then(|v| v.as_str()) == Some("max_tokens") {
+        resp["status"] = json!("incomplete");
+        resp["incomplete_details"] = json!({"reason": "max_output_tokens"});
+    }
+    resp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,18 +943,329 @@ mod tool_result_pairing_tests {
         assert_eq!(out["messages"][0]["content"], "hello");
     }
 
-    /// The Responses-API spelling of the same thing.
+    /// The Responses-API spelling of the same thing: `function_call_output` is
+    /// the item's `type`, and it answers by `call_id`.
     #[test]
     fn a_function_call_output_is_also_a_lone_tool_result() {
         let req = json!({
             "model": "claude-haiku-4-5",
             "input": [
-                {"role": "function_call_output", "tool_call_id": "fc_1", "content": "done"}
+                {"type": "function_call", "call_id": "fc_1", "name": "read", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "fc_1", "output": "done"}
             ]
         });
         let out = OpenAIAdapter::translate_request_to_anthropic(&req, true);
-        let blocks = out["messages"][0]["content"].as_array().unwrap();
+        let blocks = out["messages"][1]["content"].as_array().unwrap();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0]["type"], "tool_result");
+        assert_eq!(blocks[0]["tool_use_id"], "fc_1");
+        assert_eq!(blocks[0]["content"], "done");
+    }
+}
+
+#[cfg(test)]
+mod responses_translation_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A Codex CLI turn after one tool call: the system prompt in
+    /// `instructions`, typed `input` items with `input_text` / `output_text`
+    /// parts, a `reasoning` item, a `function_call` and its
+    /// `function_call_output`, and flat function tools.
+    fn codex_request() -> Value {
+        json!({
+            "model": "claude-sonnet-4-5",
+            "instructions": "You are Codex, a coding agent running in the Codex CLI.",
+            "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "<environment_context>\n  <cwd>/work/app</cwd>\n</environment_context>"}
+                ]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "Run the tests and tell me what fails."}
+                ]},
+                {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "gAAAAB"},
+                {"type": "message", "role": "assistant", "id": "msg_1", "content": [
+                    {"type": "output_text", "text": "I'll run the test suite.", "annotations": []}
+                ]},
+                {"type": "function_call", "id": "fc_1", "call_id": "call_abc", "name": "shell",
+                 "arguments": "{\"command\":[\"bash\",\"-lc\",\"npm test\"],\"workdir\":\"/work/app\"}"},
+                {"type": "function_call_output", "call_id": "call_abc",
+                 "output": "{\"output\":\"1 failing: auth.spec.ts\",\"metadata\":{\"exit_code\":1}}"}
+            ],
+            "tools": [{
+                "type": "function",
+                "name": "shell",
+                "description": "Runs a shell command and returns its output.",
+                "strict": false,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "array", "items": {"type": "string"}},
+                        "workdir": {"type": "string"}
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }
+            }],
+            "tool_choice": "auto",
+            "parallel_tool_calls": false,
+            "reasoning": {"effort": "medium", "summary": "auto"},
+            "store": false,
+            "stream": true,
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": "0199c0de-0000-7000-8000-000000000000"
+        })
+    }
+
+    #[test]
+    fn a_codex_turn_translates_whole() {
+        let out = OpenAIAdapter::translate_request_to_anthropic(&codex_request(), true);
+
+        assert_eq!(
+            out["system"],
+            "You are Codex, a coding agent running in the Codex CLI."
+        );
+        assert_eq!(
+            out["messages"],
+            json!([
+                {"role": "user", "content": [
+                    {"type": "text", "text": "<environment_context>\n  <cwd>/work/app</cwd>\n</environment_context>"},
+                    {"type": "text", "text": "Run the tests and tell me what fails."}
+                ]},
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "I'll run the test suite."},
+                    {"type": "tool_use", "id": "call_abc", "name": "shell",
+                     "input": {"command": ["bash", "-lc", "npm test"], "workdir": "/work/app"}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_abc",
+                     "content": "{\"output\":\"1 failing: auth.spec.ts\",\"metadata\":{\"exit_code\":1}}"}
+                ]}
+            ])
+        );
+        assert_eq!(
+            out["tools"],
+            json!([{
+                "name": "shell",
+                "description": "Runs a shell command and returns its output.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "array", "items": {"type": "string"}},
+                        "workdir": {"type": "string"}
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }
+            }])
+        );
+        assert_eq!(out["stream"], true);
+        assert_eq!(out["max_tokens"], 4096);
+        // Responses-only fields have no Messages counterpart and are not sent.
+        for key in [
+            "input",
+            "instructions",
+            "reasoning",
+            "store",
+            "include",
+            "tool_choice",
+        ] {
+            assert!(out.get(key).is_none(), "{key} leaked into {out}");
+        }
+    }
+
+    #[test]
+    fn a_string_input_is_one_user_message() {
+        let req = json!({"model": "claude-sonnet-4-5", "input": "hello", "max_output_tokens": 256});
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, true);
+        assert_eq!(
+            out["messages"],
+            json!([{"role": "user", "content": "hello"}])
+        );
+        assert_eq!(out["max_tokens"], 256);
+        assert!(out.get("system").is_none());
+    }
+
+    #[test]
+    fn developer_and_system_messages_join_the_instructions() {
+        let req = json!({
+            "model": "claude-sonnet-4-5",
+            "instructions": "Be brief.",
+            "input": [
+                {"role": "developer", "content": [{"type": "input_text", "text": "Use metric units."}]},
+                {"role": "system", "content": "Never guess."},
+                {"role": "user", "content": "How far is it?"}
+            ]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, true);
+        assert_eq!(out["system"], "Be brief.\nUse metric units.\nNever guess.");
+        assert_eq!(
+            out["messages"],
+            json!([{"role": "user", "content": "How far is it?"}])
+        );
+    }
+
+    #[test]
+    fn parallel_calls_and_their_outputs_pair_up() {
+        let req = json!({
+            "model": "claude-sonnet-4-5",
+            "input": [
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "read both"}]},
+                {"type": "function_call", "call_id": "call_a", "name": "read", "arguments": "{\"path\":\"a\"}"},
+                {"type": "function_call", "call_id": "call_b", "name": "read", "arguments": "{\"path\":\"b\"}"},
+                {"type": "function_call_output", "call_id": "call_a", "output": "A"},
+                {"type": "function_call_output", "call_id": "call_b",
+                 "output": [{"type": "input_text", "text": "B"}]}
+            ]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, true);
+        let msgs = out["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3, "{msgs:?}");
+        let uses: Vec<_> = msgs[1]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| (b["type"].clone(), b["id"].clone()))
+            .collect();
+        assert_eq!(
+            uses,
+            vec![
+                (json!("tool_use"), json!("call_a")),
+                (json!("tool_use"), json!("call_b"))
+            ]
+        );
+        assert_eq!(msgs[2]["role"], "user");
+        assert_eq!(
+            msgs[2]["content"],
+            json!([
+                {"type": "tool_result", "tool_use_id": "call_a", "content": "A"},
+                {"type": "tool_result", "tool_use_id": "call_b",
+                 "content": [{"type": "text", "text": "B"}]}
+            ])
+        );
+    }
+
+    #[test]
+    fn input_images_become_image_blocks() {
+        let req = json!({
+            "model": "claude-sonnet-4-5",
+            "input": [{"role": "user", "content": [
+                {"type": "input_text", "text": "what is this?"},
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="},
+                {"type": "input_image", "image_url": "https://example.com/cat.jpg"}
+            ]}]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, true);
+        assert_eq!(
+            out["messages"][0]["content"],
+            json!([
+                {"type": "text", "text": "what is this?"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}},
+                {"type": "image", "source": {"type": "url", "url": "https://example.com/cat.jpg"}}
+            ])
+        );
+    }
+
+    /// Chat Completions keeps its nested tool shape, and a flat tool there is
+    /// not read as one.
+    #[test]
+    fn chat_tools_stay_nested() {
+        let req = json!({
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {"type": "function", "function": {"name": "nested", "parameters": {"type": "object"}}},
+                {"type": "function", "name": "flat", "parameters": {"type": "object"}}
+            ]
+        });
+        let out = OpenAIAdapter::translate_request_to_anthropic(&req, false);
+        let names: Vec<_> = out["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].clone())
+            .collect();
+        assert_eq!(names, vec![json!("nested")]);
+    }
+
+    #[test]
+    fn a_messages_answer_is_a_responses_body() {
+        let anthropic = json!({
+            "id": "msg_01",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-4-5",
+            "content": [
+                {"type": "thinking", "thinking": "hmm", "signature": "sig"},
+                {"type": "text", "text": "The auth spec fails; checking it."},
+                {"type": "tool_use", "id": "toolu_01", "name": "shell",
+                 "input": {"command": ["bash", "-lc", "cat auth.spec.ts"]}}
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 100, "cache_read_input_tokens": 900, "output_tokens": 40}
+        });
+        let out =
+            OpenAIAdapter::translate_response_to_openai(&anthropic, "claude-sonnet-4-5", true);
+        assert_eq!(out["object"], "response");
+        assert_eq!(out["status"], "completed");
+        assert_eq!(out["model"], "claude-sonnet-4-5");
+        assert!(out.get("choices").is_none(), "{out}");
+        assert_eq!(
+            out["output"],
+            json!([
+                {"type": "message", "id": "msg_01_0", "status": "completed", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "The auth spec fails; checking it.", "annotations": []}]},
+                {"type": "function_call", "id": "fc_toolu_01", "call_id": "toolu_01", "name": "shell",
+                 "arguments": "{\"command\":[\"bash\",\"-lc\",\"cat auth.spec.ts\"]}", "status": "completed"}
+            ])
+        );
+        assert_eq!(
+            out["usage"],
+            json!({"input_tokens": 1000, "input_tokens_details": {"cached_tokens": 900},
+                   "output_tokens": 40, "total_tokens": 1040})
+        );
+
+        // The call the client runs comes back next turn by its `call_id`, and
+        // pairs with the `tool_use` it was.
+        let next = json!({
+            "model": "claude-sonnet-4-5",
+            "input": [
+                out["output"][0].clone(),
+                out["output"][1].clone(),
+                {"type": "function_call_output", "call_id": "toolu_01", "output": "it('logs in')"}
+            ]
+        });
+        let req = OpenAIAdapter::translate_request_to_anthropic(&next, true);
+        assert_eq!(req["messages"][0]["content"][1]["id"], "toolu_01");
+        assert_eq!(req["messages"][1]["content"][0]["tool_use_id"], "toolu_01");
+    }
+
+    #[test]
+    fn a_max_tokens_stop_is_incomplete() {
+        let anthropic = json!({
+            "id": "msg_02",
+            "content": [{"type": "text", "text": "partial"}],
+            "stop_reason": "max_tokens",
+            "usage": {"input_tokens": 5, "output_tokens": 16}
+        });
+        let out =
+            OpenAIAdapter::translate_response_to_openai(&anthropic, "claude-sonnet-4-5", true);
+        assert_eq!(out["status"], "incomplete");
+        assert_eq!(out["incomplete_details"]["reason"], "max_output_tokens");
+        assert_eq!(out["output"][0]["content"][0]["text"], "partial");
+    }
+
+    /// Chat Completions answers are unchanged.
+    #[test]
+    fn a_chat_answer_keeps_its_choices() {
+        let anthropic = json!({
+            "id": "msg_03",
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        });
+        let out =
+            OpenAIAdapter::translate_response_to_openai(&anthropic, "claude-sonnet-4-5", false);
+        assert_eq!(out["object"], "chat.completion");
+        assert_eq!(out["choices"][0]["message"]["content"], "hi");
     }
 }

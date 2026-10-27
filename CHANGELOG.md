@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `/v1/responses` request for a Claude model keeps its input.** Translated to
+  Anthropic Messages, the request was read as Chat Completions: the system prompt in
+  `instructions`, a string `input`, `input_text` / `output_text` parts and the
+  `function_call` items were dropped, `function_call_output` became a user message with
+  no result, and the Responses API's flat function tools were not sent, so Codex reached
+  the model with empty messages and no tools. All of them are now translated, a
+  `function_call` paired with its output as `tool_use` and `tool_result`. A
+  non-streamed answer comes back as a Responses body (`output` with `output_text`
+  messages and `function_call` items) rather than Chat Completions `choices`; a streamed
+  one still comes back as Chat Completions chunks.
+
 - **`POST /api/v1/plans/capture` answers 409 for a session the platform has not seen,**
   with `UNKNOWN_SESSION` and what to do, in place of a 500 that echoed the query. The
   generated API catalog documents the response.
