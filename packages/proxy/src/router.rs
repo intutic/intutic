@@ -427,37 +427,26 @@ async fn attest_sandbox(
         }
     }
 
-    forward_attest(&state, &url, &virtual_key).await
-}
-
-/// A build without the `control-plane` feature has no client to forward with.
-#[cfg(not(feature = "control-plane"))]
-async fn forward_attest(
-    _state: &AppState,
-    _url: &str,
-    _virtual_key: &VirtualKey,
-) -> (StatusCode, axum::Json<serde_json::Value>) {
-    (
-        StatusCode::BAD_GATEWAY,
-        axum::Json(json!({"error": "control plane unreachable"})),
-    )
-}
-
-#[cfg(feature = "control-plane")]
-async fn forward_attest(
-    state: &AppState,
-    url: &str,
-    virtual_key: &VirtualKey,
-) -> (StatusCode, axum::Json<serde_json::Value>) {
+    // A build without the `control-plane` feature has no client to forward with.
+    #[cfg(not(feature = "control-plane"))]
+    {
+        let _ = (&url, &virtual_key);
+        (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(json!({"error": "control plane unreachable"})),
+        )
+    }
     // `url` is built from `CONTROL_PLANE_URL`, operator configuration, and
     // `http://localhost:3001` is the documented development value; the same
     // header already travels to the same URL from the auth middleware.
+    #[cfg(feature = "control-plane")]
     let resp = virtual_key
-        .authorize(state.http_client.patch(url)) // codeql[rust/cleartext-transmission]
+        .authorize(state.http_client.patch(&url)) // codeql[rust/cleartext-transmission]
         .timeout(std::time::Duration::from_millis(3000))
         .send()
         .await;
 
+    #[cfg(feature = "control-plane")]
     match resp {
         Ok(r) => {
             let status =
