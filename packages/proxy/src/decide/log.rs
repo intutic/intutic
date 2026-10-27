@@ -1032,6 +1032,7 @@ pub fn upload_body(lines: &[String], with_args: bool) -> Value {
 
 /// Sends `body` to `{control_plane_url}/api/v1/decide/events` with the
 /// request's virtual key. `Err` says why it did not land; nothing retries it.
+#[cfg(feature = "control-plane")]
 pub async fn upload(
     client: &reqwest::Client,
     control_plane_url: &str,
@@ -1051,6 +1052,17 @@ pub async fn upload(
     } else {
         Err(format!("the decide log upload returned {}", resp.status()))
     }
+}
+
+/// A build without the `control-plane` feature has nowhere to send the lines.
+#[cfg(not(feature = "control-plane"))]
+pub async fn upload(
+    _client: &reqwest::Client,
+    _control_plane_url: &str,
+    _virtual_key: &crate::credential::VirtualKey,
+    _body: &Value,
+) -> Result<(), String> {
+    Err("this build has no control-plane client".to_string())
 }
 
 #[cfg(test)]

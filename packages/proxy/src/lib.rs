@@ -56,8 +56,11 @@ pub mod firewall;
 /// L2 hosted-gateway front door — vk_-only enforcement
 pub mod gateway;
 /// Self-hosted gateway heartbeat client
+#[cfg(feature = "control-plane")]
 pub mod heartbeat;
 pub mod hostname_filter;
+// Only the heartbeat's token self-rotation writes the rotated token back.
+#[cfg(feature = "control-plane")]
 pub mod k8s_token_writer;
 /// Local `~/.intutic/config.json` reader — cached daily-budget cap and
 /// approved-models allowlist for standalone deployments (Wave 6.3,

@@ -61,7 +61,9 @@ use crate::refusal::InterventionMode;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, RwLock};
+#[cfg(feature = "control-plane")]
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How long one call's (or one response's) decide rules may take, unless
@@ -388,16 +390,20 @@ impl ServedDecide {
 }
 
 /// How long a workspace's served rules are reused: the workspace SOP cache's TTL.
+#[cfg(feature = "control-plane")]
 const SERVED_CACHE_TTL: Duration = Duration::from_secs(30);
 /// How long the policy resolve may take: the workspace SOP fetch's timeout.
+#[cfg(feature = "control-plane")]
 const SERVED_FETCH_TIMEOUT: Duration = Duration::from_millis(2000);
 
+#[cfg(feature = "control-plane")]
 struct ServedCached {
     served: ServedDecide,
     read_at: Instant,
     version: Option<u64>,
 }
 
+#[cfg(feature = "control-plane")]
 fn served_cache() -> &'static Mutex<HashMap<String, ServedCached>> {
     static CACHE: OnceLock<Mutex<HashMap<String, ServedCached>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -408,6 +414,7 @@ fn served_cache() -> &'static Mutex<HashMap<String, ServedCached>> {
 /// request's virtual key, cached for 30 seconds while the workspace's policy
 /// version holds, as the workspace SOP fetch is. A failed fetch is not
 /// cached and serves nothing: every rule then has no pins and runs as shadow.
+#[cfg(feature = "control-plane")]
 pub async fn fetch_served(
     client: &reqwest::Client,
     control_plane_url: &str,
@@ -466,6 +473,19 @@ pub async fn fetch_served(
             ServedDecide::default()
         }
     }
+}
+
+/// A build without the `control-plane` feature has no policy resolve to ask:
+/// nothing is served, as when it does not answer.
+#[cfg(not(feature = "control-plane"))]
+pub async fn fetch_served(
+    _client: &reqwest::Client,
+    _control_plane_url: &str,
+    _workspace_id: &str,
+    _virtual_key: &crate::credential::VirtualKey,
+    _policy_version: Option<u64>,
+) -> ServedDecide {
+    ServedDecide::default()
 }
 
 /// Why a tool call in a response is refused.

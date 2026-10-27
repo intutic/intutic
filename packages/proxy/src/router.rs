@@ -23,7 +23,9 @@ use serde_json::json;
 
 use tower_http::trace::TraceLayer;
 
-use crate::credential::{RequestCredential, VirtualKey};
+#[cfg(feature = "control-plane")]
+use crate::credential::RequestCredential;
+use crate::credential::VirtualKey;
 use crate::proxy::AppState;
 use crate::tls_mitm::handle_connect;
 
@@ -292,6 +294,7 @@ async fn run_probes(
 /// request-shape contract — are unit-testable without constructing a full
 /// `AppState`. Returns the forward URL and the bearer to send on success, or
 /// the exact `(status, body)` this handler should return on failure.
+#[cfg(feature = "control-plane")]
 fn validate_attest_request(
     control_plane_url: Option<&str>,
     peer: std::net::IpAddr,
@@ -299,11 +302,8 @@ fn validate_attest_request(
     body: &serde_json::Value,
     headers: &HeaderMap,
 ) -> Result<(String, VirtualKey), (StatusCode, serde_json::Value)> {
-    if !crate::listen::is_loopback_peer(peer) && !listener_open {
-        return Err((
-            StatusCode::FORBIDDEN,
-            json!({"error": "attestation is accepted only from this machine or a network the proxy listens on"}),
-        ));
+    if let Some(refusal) = attest_peer_refusal(peer, listener_open) {
+        return Err(refusal);
     }
     let Some(control_plane_url) = control_plane_url else {
         return Err((
@@ -346,6 +346,37 @@ fn validate_attest_request(
         session_id
     );
     Ok((url, virtual_key))
+}
+
+/// The refusal for a caller that is neither this machine nor on a network the
+/// listener was opened to.
+fn attest_peer_refusal(
+    peer: std::net::IpAddr,
+    listener_open: bool,
+) -> Option<(StatusCode, serde_json::Value)> {
+    (!crate::listen::is_loopback_peer(peer) && !listener_open).then(|| {
+        (
+            StatusCode::FORBIDDEN,
+            json!({"error": "attestation is accepted only from this machine or a network the proxy listens on"}),
+        )
+    })
+}
+
+/// A build without the `control-plane` feature has no control plane to forward
+/// an attestation to, so past the peer check it answers as a proxy with none
+/// configured does.
+#[cfg(not(feature = "control-plane"))]
+fn validate_attest_request(
+    _control_plane_url: Option<&str>,
+    peer: std::net::IpAddr,
+    listener_open: bool,
+    _body: &serde_json::Value,
+    _headers: &HeaderMap,
+) -> Result<(String, VirtualKey), (StatusCode, serde_json::Value)> {
+    Err(attest_peer_refusal(peer, listener_open).unwrap_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        json!({"error": "no control plane configured"}),
+    )))
 }
 
 async fn attest_sandbox(
@@ -396,11 +427,33 @@ async fn attest_sandbox(
         }
     }
 
+    forward_attest(&state, &url, &virtual_key).await
+}
+
+/// A build without the `control-plane` feature has no client to forward with.
+#[cfg(not(feature = "control-plane"))]
+async fn forward_attest(
+    _state: &AppState,
+    _url: &str,
+    _virtual_key: &VirtualKey,
+) -> (StatusCode, axum::Json<serde_json::Value>) {
+    (
+        StatusCode::BAD_GATEWAY,
+        axum::Json(json!({"error": "control plane unreachable"})),
+    )
+}
+
+#[cfg(feature = "control-plane")]
+async fn forward_attest(
+    state: &AppState,
+    url: &str,
+    virtual_key: &VirtualKey,
+) -> (StatusCode, axum::Json<serde_json::Value>) {
     // `url` is built from `CONTROL_PLANE_URL`, operator configuration, and
     // `http://localhost:3001` is the documented development value; the same
     // header already travels to the same URL from the auth middleware.
     let resp = virtual_key
-        .authorize(state.http_client.patch(&url)) // codeql[rust/cleartext-transmission]
+        .authorize(state.http_client.patch(url)) // codeql[rust/cleartext-transmission]
         .timeout(std::time::Duration::from_millis(3000))
         .send()
         .await;
@@ -457,6 +510,7 @@ mod attest_sandbox_tests {
         assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
     }
 
+    #[cfg(feature = "control-plane")]
     #[test]
     fn refuses_a_body_with_no_session_id() {
         let body = json!({});
@@ -465,6 +519,7 @@ mod attest_sandbox_tests {
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
     }
 
+    #[cfg(feature = "control-plane")]
     #[test]
     fn refuses_a_request_with_no_authorization_header() {
         let body = json!({"sessionId": "ses_1"});
@@ -473,6 +528,7 @@ mod attest_sandbox_tests {
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
     }
 
+    #[cfg(feature = "control-plane")]
     #[test]
     fn builds_the_forward_url_from_control_plane_and_session_id() {
         let body = json!({"sessionId": "ses_abc123"});
@@ -491,6 +547,7 @@ mod attest_sandbox_tests {
 
     /// The sandbox attests with its virtual key. A provider key in the header
     /// is refused, never forwarded to the control plane.
+    #[cfg(feature = "control-plane")]
     #[test]
     fn refuses_a_bearer_that_is_not_a_virtual_key() {
         let body = json!({"sessionId": "ses_1"});
@@ -500,6 +557,7 @@ mod attest_sandbox_tests {
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
     }
 
+    #[cfg(feature = "control-plane")]
     #[test]
     fn trims_a_trailing_slash_on_the_control_plane_url_so_the_path_has_no_double_slash() {
         let body = json!({"sessionId": "ses_1"});
@@ -517,6 +575,7 @@ mod attest_sandbox_tests {
 
     /// A call with no bearer is refused before anything is forwarded, from
     /// any peer.
+    #[cfg(feature = "control-plane")]
     #[test]
     fn refuses_an_unauthenticated_call() {
         let body = json!({"sessionId": "ses_1"});
@@ -530,6 +589,7 @@ mod attest_sandbox_tests {
 
     /// From another machine, attestation needs a listener opened to its
     /// network (a Linux sandbox's bridge); a loopback-only proxy refuses it.
+    #[cfg(feature = "control-plane")]
     #[test]
     fn refuses_a_network_peer_unless_the_listener_was_opened_to_it() {
         let body = json!({"sessionId": "ses_1"});

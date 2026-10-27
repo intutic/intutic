@@ -9,6 +9,15 @@ license = "MIT"
 # crate: nothing outside this repository builds against it.
 publish = false
 
+[features]
+default = []
+# The clients that talk to the Intutic control plane: gateway heartbeat, key
+# and policy lookups, the judge, decide uploads, SOP and hold sync. Off by
+# default: the open-core proxy builds and runs standalone without them, and a
+# build without the feature refuses to start when a control plane is
+# configured (src/main.rs). Intutic's own images build with it on.
+control-plane = []
+
 [lib]
 name = "intutic_proxy"
 path = "src/lib.rs"
@@ -146,6 +155,118 @@ wat = "1"
 wasmtime = "36"
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# Test targets that drive the control-plane clients (the heartbeat, the key and
+# policy lookups, the judge, decide uploads, holds) against a mock control
+# plane. Without the feature those clients are not compiled in, so these have
+# nothing to talk to and are skipped.
+[[test]]
+name = "daily_cap_missing_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "decide_gateway_served_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "decide_gateway_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "decide_gateway_unreadable_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "gateway_live_config_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "graph_gates_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "guardrail_layer_vectors_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "hook_rule_response_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "judge_finalize_deadline_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "judge_nonstream_finalize_only_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "judge_plan_gate_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "judge_stream_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "lane_holds_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "local_judge_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "loop_pause_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "opaque_refusal_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "org_sop_ceiling_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "policy_check_auth_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "provider_key_egress_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "qualified_prerequisite_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "response_gate_holdback_flush_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "sql_guard_response_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "sso_group_response_gate_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "synthetic_answer_stream_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "workspace_pii_local_off_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "workspace_pii_test"
+required-features = ["control-plane"]
+
+[[test]]
+name = "workspace_sops_isolation_test"
+required-features = ["control-plane"]
 
 [[bench]]
 name = "snip_bench"

@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI. Without it, running one prints what it is, that the plugin provides it, and how a control
   plane is named, and exits 1. Everything open (`init`, `start`, `gates`, `decide`, `policy`
   `compile`/`test`/`install`, `traces`, `budget`, `exec`, ...) is unchanged.
+- **The proxy compiles in its control-plane clients only with `--features control-plane`.**
+  A plain `cargo build` is the open-core proxy: standalone, with no code that calls a
+  control plane (the gateway heartbeat, key and policy lookups, the judge, decide uploads,
+  holds, the `/intutic` slash commands). It refuses to start when `CONTROL_PLANE_URL` (or
+  `intutic_settings.policy.control_plane_url`) is set, rather than serve a deployment that
+  expects authentication and budgets without them. Standalone behaviour is unchanged. A proxy
+  built with the feature behaves as before; Intutic's own images are built with it. A release
+  binary built without it cannot be pointed at a control plane, which includes the proxy
+  `intutic connect` starts with `CONTROL_PLANE_URL` set.
+
 - **`@intutic/shared-types`, `@intutic/mcp-governance-proxy` and `@intutic/sync-daemon` use zod 4.**
   The response schemas keep their shape on the wire. Code that imports a schema from
   `@intutic/shared-types` needs zod 4 (`^4.6.6`) for `.parse`, `.safeParse` and `z.infer`: a

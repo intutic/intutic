@@ -475,6 +475,7 @@ mod tests {
         assert_eq!(gate.decide("Bash").clearance, Clearance::Granted);
     }
 
+    #[cfg(feature = "control-plane")]
     mod fetch {
         use super::super::*;
         use wiremock::matchers::{header, method, path};

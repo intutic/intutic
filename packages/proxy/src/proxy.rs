@@ -21,6 +21,7 @@ use axum::{
 };
 use futures_util::stream::StreamExt;
 use reqwest::Client;
+#[cfg(feature = "control-plane")]
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -652,6 +653,7 @@ fn resolve_harness_type(headers: &HeaderMap, provider: &Provider) -> String {
 
 // ─── Policy check ─────────────────────────────────────────────────────
 
+#[cfg(feature = "control-plane")]
 #[derive(Debug, Serialize)]
 struct PolicyCheckRequest {
     workspace_id: String,
@@ -668,6 +670,7 @@ struct PolicyCheckRequest {
     loop_run_id: Option<String>,
 }
 
+#[cfg(feature = "control-plane")]
 #[allow(dead_code)] // policy_id retained for future structured audit logging
 #[derive(Debug, Deserialize)]
 struct PolicyCheckResponse {
@@ -694,6 +697,7 @@ struct PolicyCheckResponse {
 /// - `Err(())` — could not ask. The caller must fail CLOSED, exactly as it does for
 ///   an unreachable cache; admitting a key we could not validate would be an
 ///   authentication bypass.
+#[cfg(feature = "control-plane")]
 async fn validate_key_via_control_plane(
     client: &Client,
     control_plane_url: &str,
@@ -756,6 +760,18 @@ async fn validate_key_via_control_plane(
     parse_key_context(resp, key.as_str()).await
 }
 
+/// A build without the `control-plane` feature has no client to ask with, and
+/// is never configured with a control plane (`main.rs` refuses to start), so no
+/// caller reaches this; if one did, it fails closed like any unreachable one.
+#[cfg(not(feature = "control-plane"))]
+async fn validate_key_via_control_plane(
+    _client: &Client,
+    _control_plane_url: &str,
+    _key: &VirtualKey,
+) -> Result<Option<VirtualKeyRecord>, ()> {
+    Err(())
+}
+
 /// What authenticating a virtual key outside the LLM request path found.
 pub(crate) enum KeyCheck {
     /// The control plane (or its cache) recognises the key.
@@ -798,6 +814,7 @@ pub(crate) async fn authenticate_virtual_key(state: &AppState, key: &VirtualKey)
 }
 
 /// Turn a 200 from `/auth/key-context` into an identity-only key record.
+#[cfg(feature = "control-plane")]
 async fn parse_key_context(
     resp: reqwest::Response,
     token: &str,
@@ -816,6 +833,7 @@ async fn parse_key_context(
 
 /// The key record a `/auth/key-context` body describes; `None` when it names
 /// no workspace.
+#[cfg(any(feature = "control-plane", test))]
 pub(crate) fn key_record_from_context(
     body: &serde_json::Value,
     token: &str,
@@ -874,6 +892,7 @@ pub(crate) fn key_record_from_context(
 // Request-scoped values forwarded to a single control-plane call, with one
 // call site. Grouping them into a struct would add a type whose only purpose is
 // to satisfy the argument-count threshold.
+#[cfg(feature = "control-plane")]
 #[allow(clippy::too_many_arguments)]
 async fn policy_check(
     client: &Client,
@@ -1801,7 +1820,7 @@ fn judge_unavailable_note(reason: &str) -> String {
 /// because the key is never sent to the control plane.
 async fn judge_chunk_verdict(
     client: &reqwest::Client,
-    check_url: &str,
+    control_plane_url: &str,
     virtual_key: Option<&VirtualKey>,
     body: &serde_json::Value,
     kind: &str,
@@ -1809,9 +1828,34 @@ async fn judge_chunk_verdict(
     let Some(virtual_key) = virtual_key else {
         return serde_json::json!({"verdict": "UNAVAILABLE", "error": "request not made with an Intutic virtual key — segment not checked"});
     };
+    ask_judge_chunk(client, control_plane_url, virtual_key, body, kind).await
+}
+
+/// A build without the `control-plane` feature has no judge to ask: the
+/// segment is unchecked, as when the judge cannot be reached.
+#[cfg(not(feature = "control-plane"))]
+async fn ask_judge_chunk(
+    _client: &reqwest::Client,
+    _control_plane_url: &str,
+    _virtual_key: &VirtualKey,
+    _body: &serde_json::Value,
+    _kind: &str,
+) -> serde_json::Value {
+    serde_json::json!({"verdict": "UNAVAILABLE", "error": "judge unreachable — segment not checked"})
+}
+
+#[cfg(feature = "control-plane")]
+async fn ask_judge_chunk(
+    client: &reqwest::Client,
+    control_plane_url: &str,
+    virtual_key: &VirtualKey,
+    body: &serde_json::Value,
+    kind: &str,
+) -> serde_json::Value {
+    let check_url = format!("{control_plane_url}/api/v1/judge/chunk");
     tracing::info!(url = %check_url, "Sending {kind} to judge");
     match virtual_key
-        .authorize(client.post(check_url))
+        .authorize(client.post(&check_url))
         .json(body)
         .send()
         .await
@@ -1859,6 +1903,7 @@ pub fn judge_finalize_deadline_ms() -> Option<u64> {
 /// (clippy's own `too_many_arguments` — a real signal here, not noise: the
 /// SaaS and local branches each use a different subset, and a struct makes
 /// which fields belong to "the finalize request" visible at every call site).
+#[cfg_attr(not(feature = "control-plane"), allow(dead_code))] // read by the control-plane judge
 struct FinalizeJudgeParams<'a> {
     http_client: &'a reqwest::Client,
     control_plane_url: &'a str,
@@ -1920,6 +1965,25 @@ async fn resolve_finalize_judge_note(p: FinalizeJudgeParams<'_>) -> Option<Strin
             "the request was not made with an Intutic virtual key, so the judge could not be asked",
         ));
     };
+    finalize_via_control_plane(p, virtual_key).await
+}
+
+/// A build without the `control-plane` feature has no judge to ask.
+#[cfg(not(feature = "control-plane"))]
+async fn finalize_via_control_plane(
+    _p: FinalizeJudgeParams<'_>,
+    _virtual_key: &VirtualKey,
+) -> Option<String> {
+    Some(judge_unavailable_note(
+        "this build has no control-plane client",
+    ))
+}
+
+#[cfg(feature = "control-plane")]
+async fn finalize_via_control_plane(
+    p: FinalizeJudgeParams<'_>,
+    virtual_key: &VirtualKey,
+) -> Option<String> {
     let finalize_url = format!("{}/api/v1/judge/finalize", p.control_plane_url);
     tracing::info!(url = %finalize_url, "Sending finalize call to judge");
     let finalize_res = virtual_key
@@ -3886,6 +3950,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 }
             }
 
+            #[cfg(feature = "control-plane")]
             if matches!(cmd, crate::commands::Command::Fix) && !prompt.is_empty() {
                 if let (Some(cp_url), Some(virtual_key)) = (
                     state
@@ -6300,7 +6365,9 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // not be bypassed by a token approved to skip one rule.
 
     if !bypass_everything {
+        #[cfg(feature = "control-plane")]
         let policy_cfg = &state.config.intutic_settings.policy;
+        #[cfg(feature = "control-plane")]
         if let Some(cp_url) = &policy_cfg.control_plane_url {
             match policy_check(
                 &state.http_client,
@@ -6334,6 +6401,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         } else {
             tracing::debug!("No CONTROL_PLANE_URL configured — skipping policy check");
         }
+        #[cfg(not(feature = "control-plane"))]
+        tracing::debug!("No CONTROL_PLANE_URL configured — skipping policy check");
     }
 
     // ── Step 5a: SSO group policy for the response gate ─────────────
@@ -8166,7 +8235,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 let handle = spawn(async move {
                                     let verdict = judge_chunk_verdict(
                                         &client,
-                                        &format!("{}/api/v1/judge/chunk", cp_url),
+                                        &cp_url,
                                         virtual_key_for_chunk.as_ref(),
                                         &serde_json::json!({
                                             "workspaceId": ws_id,
@@ -9233,7 +9302,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
                         let verdict = judge_chunk_verdict(
                             &http_client_clone,
-                            &format!("{}/api/v1/judge/chunk", control_plane_url_clone),
+                            &control_plane_url_clone,
                             virtual_key_clone.as_ref(),
                             &serde_json::json!({
                                 "workspaceId": workspace_id_clone,
@@ -11849,6 +11918,7 @@ mod tests {
         assert_eq!(session_credential_field(&openai), None);
         assert_eq!(session_credential_field(&deepseek), None);
     }
+    #[cfg(feature = "control-plane")]
     mod key_context_byok {
         async fn parse(body: &str) -> Option<bool> {
             let resp = reqwest::Response::from(

@@ -14,8 +14,11 @@ use axum::extract::ConnectInfo;
 use axum::http::{Method, Request, StatusCode};
 use serde_json::json;
 use tower::Service;
+#[cfg(feature = "control-plane")]
 use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::MockServer;
+#[cfg(feature = "control-plane")]
+use wiremock::{Mock, ResponseTemplate};
 
 fn virtual_key(workspace: &str) -> String {
     ["vk_", "0123456789abcdef0123456789abcdef", "_", workspace].concat()
@@ -74,6 +77,7 @@ fn connect(proxy_authorization: Option<&str>) -> Request<Body> {
     b.body(Body::empty()).unwrap()
 }
 
+#[cfg(feature = "control-plane")]
 async fn patches(cp: &MockServer) -> usize {
     cp.received_requests()
         .await
@@ -102,6 +106,7 @@ async fn connect_from_this_machine_is_admitted() {
     assert_eq!(res.status(), StatusCode::OK);
 }
 
+#[cfg(feature = "control-plane")]
 #[tokio::test]
 async fn an_unauthenticated_attestation_is_refused() {
     let cp = MockServer::start().await;
@@ -123,6 +128,7 @@ async fn an_attestation_from_another_machine_is_refused() {
 
 /// A key of the right shape that the control plane does not recognise never
 /// reaches the attestation endpoint.
+#[cfg(feature = "control-plane")]
 #[tokio::test]
 async fn a_key_the_control_plane_rejects_cannot_attest() {
     let cp = MockServer::start().await;
@@ -141,6 +147,7 @@ async fn a_key_the_control_plane_rejects_cannot_attest() {
 /// Another workspace's valid key is authenticated and forwarded, and the
 /// control plane refuses it because the session is not that workspace's: the
 /// refusal reaches the caller and nothing is attested.
+#[cfg(feature = "control-plane")]
 #[tokio::test]
 async fn another_workspaces_key_cannot_attest_the_session() {
     let cp = MockServer::start().await;
@@ -168,6 +175,7 @@ async fn another_workspaces_key_cannot_attest_the_session() {
 /// The sandbox's own flow: a loopback peer (Docker Desktop delivers the
 /// container's `host.docker.internal` connection from loopback) with the
 /// workspace key attests.
+#[cfg(feature = "control-plane")]
 #[tokio::test]
 async fn the_sandbox_attests_with_its_workspace_key() {
     let cp = MockServer::start().await;

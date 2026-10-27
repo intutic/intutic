@@ -11,9 +11,14 @@
 //!
 //! A standalone proxy has no control plane, so nothing here runs.
 
+#[cfg(feature = "control-plane")]
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+#[cfg(feature = "control-plane")]
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+#[cfg(feature = "control-plane")]
+use std::time::Instant;
 
 use serde_json::Value;
 
@@ -33,6 +38,7 @@ pub enum Answer {
     Refused(reqwest::StatusCode),
 }
 
+#[cfg(feature = "control-plane")]
 struct Cached {
     answer: Answer,
     read_at: Instant,
@@ -42,6 +48,7 @@ struct Cached {
 }
 
 /// Keyed by the SHA-256 of the virtual key, never the key itself.
+#[cfg(feature = "control-plane")]
 fn cache() -> &'static Mutex<HashMap<String, Cached>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Cached>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -61,6 +68,7 @@ fn cache() -> &'static Mutex<HashMap<String, Cached>> {
 /// cached and a stale one is not served, the same discipline as the workspace
 /// SOP fetch, so a policy an operator just tightened is never masked by an
 /// old copy.
+#[cfg(feature = "control-plane")]
 pub async fn fetch(
     client: &reqwest::Client,
     control_plane_url: &str,
@@ -114,6 +122,20 @@ pub async fn fetch(
         },
     );
     Ok(answer)
+}
+
+/// A build without the `control-plane` feature has no client to ask with, and
+/// is never configured with a control plane to ask (`main.rs` refuses to
+/// start), so no caller reaches this.
+#[cfg(not(feature = "control-plane"))]
+pub async fn fetch(
+    _client: &reqwest::Client,
+    _control_plane_url: &str,
+    _virtual_key: &crate::credential::VirtualKey,
+    _timeout: Duration,
+    _policy_version: Option<u64>,
+) -> Result<Answer, String> {
+    Err("this build has no control-plane client".to_string())
 }
 
 /// The workspace's intervention mode from a key-context body
@@ -318,7 +340,9 @@ pub fn revert_rate_of(rates: &str, role: &str, subject: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "control-plane")]
     use wiremock::matchers::{method, path};
+    #[cfg(feature = "control-plane")]
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
@@ -443,6 +467,7 @@ mod tests {
         assert_eq!(member_role(&serde_json::json!({"workspaceId": "ws"})), None);
     }
 
+    #[cfg(feature = "control-plane")]
     fn key(token: &str) -> crate::credential::VirtualKey {
         crate::credential::RequestCredential::classify(token)
             .virtual_key()
@@ -452,6 +477,7 @@ mod tests {
 
     /// The SSO group gate and the PII detector actions read one answer: two
     /// readers of the same key within the TTL make one request.
+    #[cfg(feature = "control-plane")]
     #[tokio::test]
     async fn every_reader_shares_one_fetch_per_key() {
         let server = MockServer::start().await;
@@ -524,6 +550,7 @@ mod tests {
         assert!(!stored(serde_json::json!({"storeToolArguments": "true"})));
     }
 
+    #[cfg(feature = "control-plane")]
     #[tokio::test]
     async fn a_refusal_is_an_answer_and_a_server_error_is_not() {
         let server = MockServer::start().await;

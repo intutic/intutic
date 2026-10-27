@@ -94,6 +94,13 @@ cargo test
 
 # Run benchmarks
 cargo bench
+
+# Build with the clients for an Intutic control plane (key and policy lookups,
+# the judge, decide uploads, holds, the gateway heartbeat). Off by default: a
+# build without them runs standalone and refuses to start when CONTROL_PLANE_URL
+# is set.
+cargo build --features control-plane
+cargo test --features control-plane
 ```
 
 ## Binary

@@ -5,7 +5,22 @@
 //! returned for the proxy to frame as an LLM response, so the harness
 //! displays it naturally.
 
+#[cfg(feature = "control-plane")]
 use tracing::{debug, warn};
+
+/// A build without the `control-plane` feature has no control plane to answer
+/// the command: it is not processed, so the message goes on to the LLM as-is.
+#[cfg(not(feature = "control-plane"))]
+pub async fn handle(
+    _http_client: &reqwest::Client,
+    _control_plane_url: &str,
+    _session_id: &str,
+    _workspace_id: &str,
+    _message: &str,
+    _virtual_key: &crate::credential::VirtualKey,
+) -> Option<String> {
+    None
+}
 
 /// Handle a `/intutic` slash command.
 ///
@@ -14,6 +29,7 @@ use tracing::{debug, warn};
 ///
 /// Returns `None` if the command couldn't be processed (fail-open:
 /// the message will be forwarded to the LLM as-is).
+#[cfg(feature = "control-plane")]
 pub async fn handle(
     http_client: &reqwest::Client,
     control_plane_url: &str,
