@@ -265,7 +265,7 @@ describe('Daemon-Shim Integration Tests', () => {
   })
 
   // Same workspace settings, the other proxy mode. This is the parity the
-  // control-plane's shared helper (`services/control-plane/src/lib/
+  // control-plane's shared helper (the control plane
   // mcpCuration.ts`) exists to guarantee: a workspace must not see different
   // MCP curation depending only on which proxy mode it happens to run.
   it('decide() enforces the identical server allowlist in non-daemon (stdio) mode', async () => {

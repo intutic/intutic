@@ -4,7 +4,7 @@
  * An LLM reading corporate policy prose is allowed to propose exactly two
  * things: a verbatim quote anchored to a passage it was shown, and a clause in
  * this closed IR. Everything after that is deterministic code: the validator
- * (`services/control-plane/src/lib/guardrailValidator.ts`) checks the quote by
+ * (the control plane) checks the quote by
  * containment and the IR against the grammar the proxy and the harness gates
  * already enforce, the renderers in `./guardrailRender.ts` turn it into the
  * exact bytes those enforcers read, and cross-language parity fixtures prove
@@ -56,7 +56,7 @@ import { decideHashInput, validateDecideRule, DECIDE_APPROVAL_RE, DECIDE_MAX_ASK
 
 /**
  * The `action:` tokens the proxy's classifier synthesises from tool calls.
- * Moved here from `services/control-plane/src/services/learnedHoldService.ts`
+ * Moved here from the control plane
  * so the IR, the validator and the hold miner read one list; that file
  * re-exports it. A token outside this set and outside the observed tool names
  * compiles into a control that can never fire. The last five

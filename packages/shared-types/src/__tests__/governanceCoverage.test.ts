@@ -2,11 +2,11 @@
  * governanceCoverage.ts — pin the enforcement-input mapping.
  *
  * These mirror the four "enforcement input derivation" cases in
- * `services/control-plane/__tests__/unit/harnessGradeSweep.test.ts` (the
+ * The control plane (the
  * original home of this logic before it moved here), adapted to call
  * `deriveEnforcementInputs` directly rather than through
  * `resolveEnforcementTier` — that helper stays in
- * `services/control-plane/src/services/harnessGradeService.ts` and is not
+ * The control plane and is not
  * something this leaf package can depend on.
  *
  * @module

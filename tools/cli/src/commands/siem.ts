@@ -12,7 +12,7 @@
  *   - `intutic siem delete <destination_id> [--json]`
  *   - `intutic siem rotate-secret <destination_id> [--json]`
  *
- * Server side: services/control-plane/src/routes/siem.ts. Writes need OWNER
+ * Server side: the control plane. Writes need OWNER
  * or ADMIN. The adapter config carries credentials (a HEC token, an API key),
  * so it is read from a JSON file rather than taken on the command line, where
  * it would land in shell history. The server encrypts it, masks it on every

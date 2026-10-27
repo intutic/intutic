@@ -1,7 +1,7 @@
 /**
  * Multi-provider credential registry (multi-provider key wizard).
  *
- * `services/control-plane/src/routes/providerCredentials.ts` originally
+ * The control plane originally
  * hardcoded exactly 3 providers (anthropic/openai/gemini), each a single
  * bearer API key — sufficient for those three, but LiteLLM's real provider
  * surface includes providers needing MULTIPLE credential fields (Azure
@@ -97,7 +97,7 @@ export interface ProviderDefinition {
  * format — `fetch_provider_credential` reads the JSON blob for both, never
  * the flat field, so they stay off this list even though `routingLive` is
  * now `true` for them. Adding a provider here changes what Valkey field
- * `services/control-plane/src/routes/providerCredentials.ts` writes to —
+ * The control plane writes to —
  * only do it alongside the matching proxy-side flat-field read, never for
  * the "is this provider live" reason alone.
  */

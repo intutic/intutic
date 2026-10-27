@@ -432,7 +432,7 @@ export interface WorkspaceSettings {
    * `services/sync-daemon/src/harness/mcpAutoWrite.ts`'s `wrapWithProxy`.
    * Delivered to the proxy the same way `mcpAllowedTools` already is — via
    * `PolicyClient.absorbCuration` (`packages/mcp-proxy/src/policy.ts`),
-   * fed from `GET /api/v1/sop/rules` (`services/control-plane/src/routes/
+   * fed from `GET /api/v1/sop/rules` (the control plane
    * sops.ts`).
    *
    * Absent or empty means UNRESTRICTED — the exact same convention as
@@ -578,7 +578,7 @@ export interface WorkspaceSettings {
 
   /**
    * Server-side trajectory monitoring mode (parallel monitoring).
-   * Read by `services/control-plane/src/services/trajectoryAnalysisService.ts`'s
+   * Read by the control plane's
    * `getWorkspaceMonitorMode` on every `/trajectory/analyze` call:
    *
    * - `'ACTIVE'`:  a CRITICAL/INTERVENE verdict can escalate into the
@@ -614,7 +614,7 @@ export interface WorkspaceSettings {
    * rule would block and report it as `tool_would_block`.
    *
    * Every surface resolves it through
-   * `services/control-plane/src/lib/interventionMode.ts`: the stored value
+   * The control plane: the stored value
    * when it is one of the modes, `TRANSPARENT` otherwise. It is the only
    * source of the mode.
    */
@@ -623,7 +623,7 @@ export interface WorkspaceSettings {
   /**
    * Additive MCP tool allowlist, enforced by the MCP governance proxy
    * (`packages/mcp-proxy`) and served to it by
-   * `services/control-plane/src/lib/mcpCuration.ts` (both the `/sop/rules`
+   * The control plane (both the `/sop/rules`
    * and `/policy/resolve` projections). Empty/absent means UNRESTRICTED —
    * the same convention as {@link mcpAllowedServers} below, whose doc
    * comment has referenced this field as its sibling since it was written.
@@ -649,7 +649,7 @@ export interface WorkspaceSettings {
    * files the coding agent's harness reads — `.intutic/DECISIONS.md` (the
    * full bounded record) plus a marker-delimited section injected into the
    * `claude-code` harness's own regenerated config file. See
-   * `services/control-plane/src/routes/workspace.ts`'s
+   * The control plane's
    * `GET /api/v1/workspace/decisions-digest` and
    * `services/sync-daemon/src/lib/decisionsDigest.ts`.
    *

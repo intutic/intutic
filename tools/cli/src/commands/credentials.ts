@@ -8,7 +8,7 @@
  *   - `intutic credentials unset <provider>`
  *   - `intutic credentials models <provider> [--json]`
  *
- * Server side: services/control-plane/src/routes/providerCredentials.ts.
+ * Server side: the control plane.
  * `list` reports every provider in the shared registry
  * (@intutic/shared-types PROVIDER_REGISTRY), including ones the proxy does
  * not route to yet (`routingLive: false`) — this command surfaces that

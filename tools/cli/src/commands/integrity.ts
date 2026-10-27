@@ -16,7 +16,7 @@
  * key that is no longer published, and a root or snapshot that names no
  * predecessor. See `failsIntegrity`.
  *
- * Server side: services/control-plane/src/routes/integrity.ts.
+ * Server side: the control plane.
  *
  * @module
  */
@@ -74,7 +74,7 @@ function preimageVersionOf(root: SignedRootRow): number {
 
 /**
  * Domain tag per preimage version, mirroring `SIGN_DOMAIN` in
- * services/control-plane/src/lib/rootSigner.ts. This map is also the list of
+ * The control plane. This map is also the list of
  * versions this build can rebuild — kept as one thing rather than two, because
  * two lists of the same fact drift and the drift is silent.
  */
@@ -128,7 +128,7 @@ interface ChainResponse {
 /**
  * A config snapshot that names a predecessor which is not the snapshot before
  * it — mirrors `ConfigChainBreak` in
- * services/control-plane/src/services/harnessConfigService.ts.
+ * The control plane.
  */
 interface ConfigChainBreak {
   snapshotId: string
@@ -284,7 +284,7 @@ function sameValue(a: unknown, b: unknown): boolean {
  * A field absent from the copy is not compared, because copies written before
  * it existed would otherwise fail; the root and the leaf set are always
  * required. Mirrors `diffMirroredRoot` in
- * services/control-plane/src/services/traceRootSweep.ts, which runs the same
+ * The control plane, which runs the same
  * comparison from the server side over a sample.
  */
 export function diffAgainstMirror(
@@ -318,7 +318,7 @@ export function diffAgainstMirror(
  * The exact bytes the control plane signs, per preimage version.
  *
  * Must stay byte-identical to `signingPreimage` in
- * services/control-plane/src/lib/rootSigner.ts — this is an independent
+ * The control plane — this is an independent
  * verifier, so it rebuilds the preimage rather than being handed it. The scope
  * fields are in the preimage because a signature over the bare 32-byte root
  * would be portable to another workspace's row.

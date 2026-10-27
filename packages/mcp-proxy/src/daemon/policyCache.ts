@@ -293,7 +293,7 @@ function policyFromBody(parsed: WireFields<PolicyResolveResponse>): PolicyRespon
   return {
     sopRules:    Array.isArray(sopRules) ? sopRules.filter(isRecord) : [],
     // 'TRANSPARENT', matching every other default in this pipeline: the
-    // control plane's resolver (services/control-plane/src/lib/
+    // control plane's resolver (the control plane
     // interventionMode.ts), the interventionMode workspace setting's default,
     // and this module's snapshot-seed path below. The old default here was
     // 'BYPASS', which is not an intervention mode at all — a fabricated mode

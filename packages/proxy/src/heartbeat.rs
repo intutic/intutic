@@ -2,11 +2,11 @@
 //!
 //! A self-hosted deployment (Docker/Kubernetes/bare-metal) is
 //! registered from the dashboard, which mints a `gwk_...` token
-//! (`services/control-plane/src/routes/gateways.ts`'s `POST /api/v1/gateways`).
+//! (the control plane's `POST /api/v1/gateways`).
 //! This module is what makes that registration *live*: once the operator sets
 //! `INTUTIC_GATEWAY_TOKEN`/`INTUTIC_GATEWAY_ID` in the deployment's env, the
 //! proxy periodically calls `POST /api/v1/gateways/:id/heartbeat`
-//! (`services/control-plane/src/routes/gatewayHeartbeat.ts`) so the org's
+//! (the control plane) so the org's
 //! dashboard can see the gateway is alive.
 //!
 //! Opt-in, mirroring `gateway.rs`'s absent-flag-means-unchanged-behavior
@@ -26,7 +26,7 @@
 //! the operator's side must not take down request serving on this pod.
 //!
 //! Automatic rotation: each heartbeat response carries
-//! `keyRotatedAt` (`services/control-plane/src/routes/gatewayHeartbeat.ts`).
+//! `keyRotatedAt` (the control plane).
 //! When the current token's age reaches `INTUTIC_GATEWAY_ROTATION_INTERVAL_DAYS`
 //! (default 30, well under the 24h `previousKeyExpiresAt` grace window used
 //! by a single rotation, so a missed tick is never urgent), this loop calls
@@ -155,7 +155,7 @@ impl HeartbeatConfig {
             .and_then(|v| v.parse::<u64>().ok())
             .filter(|&s| s > 0)
             // Well under GATEWAY_HEARTBEAT_TTL=90s on the control-plane side
-            // (services/control-plane/src/routes/gatewayHeartbeat.ts) so a
+            // (the control plane) so a
             // single dropped tick doesn't flip the dashboard to unreachable.
             .unwrap_or(30);
 
@@ -649,7 +649,7 @@ mod tests {
     #[test]
     fn heartbeat_body_serializes_to_the_route_schema() {
         // Matches heartbeatSchema in
-        // services/control-plane/src/routes/gatewayHeartbeat.ts —
+        // The control plane —
         // status ∈ {"online","degraded"}, proxyVersion/uptimeSeconds present.
         let json = serde_json::to_value(build_heartbeat_body(7, None, None, None)).unwrap();
         assert_eq!(json["status"], "online");

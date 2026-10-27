@@ -6,7 +6,7 @@
  * useful at the moment a prompt or task is *about to* run, which is the
  * CLI/SDK context (a developer or an agent harness deciding what to send),
  * not dashboard browsing after the fact. It calls `POST /api/v1/predict-cost`
- * (`services/control-plane/src/routes/intelligence.ts`), which estimates
+ * (the control plane), which estimates
  * output tokens from the workspace's own Valkey-backed baseline (falling
  * back to a per-model default multiplier under 3 samples) and prices the
  * result with `ProviderPricingService` — the same DB-backed rate table (with

@@ -1,7 +1,7 @@
 /**
  * The CLI's TOON decoder against what the control plane's encoder actually emits.
  *
- * These rows are byte-for-byte what `services/control-plane/src/lib/toon.ts`
+ * These rows are byte-for-byte what the control plane
  * produces (`escapeCell` escapes `\` -> `\\`, then `|` -> `\|`, then newline ->
  * `\n`). The decoder this file exercises previously replaced `\|` with a NUL
  * placeholder before splitting on `|`, which pairs the SECOND backslash of a

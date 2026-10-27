@@ -1,7 +1,7 @@
 //! Agent security-posture scoring — deterministic rubric (open core).
 //!
 //! Mirror of the control-plane rubric in
-//! `services/control-plane/src/lib/agentPosture.ts`. Scores how much of the
+//! The control plane. Scores how much of the
 //! available guardrail surface is switched on against a published
 //! categorisation: each Intutic primitive maps to the OWASP LLM Top 10 (2025)
 //! risk it mitigates and, for the agent-to-agent surface, the OWASP Agentic-AI

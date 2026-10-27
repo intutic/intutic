@@ -36,7 +36,7 @@ already uses: "This command needs an Intutic control plane, which open
 core does not include."
 
 Auth: the same api_key type ClawdeClient accepts -- a vk_ token or a JWT
-both satisfy services/control-plane/src/middleware/auth.ts, which resolves
+both satisfy the control plane, which resolves
 either to an AuthContext with a role. A call the role may not make raises
 ClawdeConnectionError with the control plane's answer; for a 403 that names
 the roles allowed (``detail``), the message is that sentence, as the CLI

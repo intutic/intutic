@@ -46,7 +46,7 @@ const DEFAULT_TIMEOUT_MS = 2_000
 const EVENT_TIMEOUT_MS = 2_000
 const REASON_MAX = 512 // control plane truncates at 512; do it here so logs match
 
-// Mirrors HookEventSchema in services/control-plane/src/routes/hookEvents.ts.
+// Mirrors HookEventSchema in the control plane.
 const VALID_EVENTS = new Set([
   'tool_blocked',
   'tool_allowed',

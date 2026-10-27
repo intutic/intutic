@@ -89,6 +89,20 @@ const PATTERNS = [
 ]
 
 /**
+ * Shipped source names no path in, and no pull request of, the private repository. These are
+ * checked only under the roots that ship as packages, where a reader cannot open what a comment
+ * points at; build and lint scripts under tools/ use the control plane's path to tell the two
+ * checkouts apart and are not scanned for this.
+ */
+const PRIVATE_ROOTS = ['packages/', 'tools/cli/src/', 'services/sync-daemon/src/']
+const PRIVATE_PATTERNS = [
+  ['private', /services\/control-plane\//, 'a path in the private repository'],
+  ['private', /\bintutic-enterprise\b(?!-install)/, 'the private repository'],
+]
+/** Lines that carry such a string as data, not as a pointer. */
+const PRIVATE_DATA_LINES = ['"services/control-plane/src/app.ts"']
+
+/**
  * Pattern kinds a file may carry, and why. Keep this short: each entry is a
  * place the gate does not look.
  */
@@ -171,6 +185,12 @@ for (const rel of candidates) {
       const m = line.match(pattern)
       if (m) failures.push(`${rel}:${i + 1}  "${m[0]}" — ${why}`)
     }
+    if (PRIVATE_ROOTS.some((r) => rel.split(sep).join('/').startsWith(r)) && !PRIVATE_DATA_LINES.some((d) => line.includes(d))) {
+      for (const [, pattern, why] of PRIVATE_PATTERNS) {
+        const m = line.match(pattern)
+        if (m) failures.push(`${rel}:${i + 1}  "${m[0]}" — ${why}`)
+      }
+    }
     if (!markdown) return
     for (const target of internalDocsLinks(file, line)) {
       failures.push(`${rel}:${i + 1}  "${target}" — a link into the internal docs/ tree`)
@@ -188,4 +208,4 @@ if (scanned === 0) {
   console.error(`[FAIL] scanned 0 files in ${ROOT} — a pass here would check nothing.`)
   process.exit(1)
 }
-console.log(`[PASS] ${scanned} file(s) in ${scope}: no internal ids or internal docs/ links.`)
+console.log(`[PASS] ${scanned} file(s) in ${scope}: no internal ids, internal docs/ links or private-repository references.`)

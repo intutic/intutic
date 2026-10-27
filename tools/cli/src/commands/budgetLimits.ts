@@ -14,7 +14,7 @@
  *      [--monthly <usd|none>] [--daily-enforcement hard|soft]
  *      [--monthly-enforcement hard|soft]`
  *
- * Server side (services/control-plane/src/routes/budget.ts, routes/keys.ts):
+ * Server side (the control plane, routes/keys.ts):
  * `PUT /api/v1/budget`, `GET /api/v1/budget/keys`, `PATCH /api/v1/keys/:id`,
  * `GET /api/v1/budget/members`, `PUT /api/v1/budget/members/:memberId`. The
  * writes need OWNER or ADMIN, and member budgets a plan with them; the

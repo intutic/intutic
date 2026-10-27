@@ -186,7 +186,7 @@ const COVERAGE_FORMATS: Record<CoverageFormat, string> = { json: 'json', md: 'ma
  * not include."
  *
  * Auth: the same `apiKey` type `ClawdeClient` accepts — a `vk_` token or a
- * JWT both satisfy `services/control-plane/src/middleware/auth.ts`, which
+ * JWT both satisfy the control plane, which
  * resolves either to an `AuthContext` with a role. A call the role may not
  * make throws `ClawdeConnectionError` with the control plane's answer; for a
  * 403 that names the roles allowed (`detail`), the message is that sentence,

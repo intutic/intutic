@@ -5,7 +5,7 @@
  *   - `intutic routing adoption-report --candidate-model <model> [--json]`
  *
  * `adoption-report` reads `GET /api/v1/routing/mirror-adoption-report`
- * (`services/control-plane/src/routes/routing.ts`), Phase 7b's aggregation
+ * (the control plane), Phase 7b's aggregation
  * of Phase 7a's mirror-tested comparison pairs
  * (`packages/proxy/src/routing/mirror.rs`, `mirrorAdoptionService.ts`). This
  * is a REPORTED signal for a human to read before deciding whether to adopt

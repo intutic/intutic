@@ -1,7 +1,7 @@
 /**
  * `intutic findings` — List and adjudicate detector findings.
  *
- * `services/control-plane/src/routes/findings.ts` has carried a complete
+ * The control plane has carried a complete
  * TP/FP adjudication API since it landed, with zero consumers: no CLI
  * command, no dashboard page. Without a way to actually rule on a finding,
  * `false_positive_rate` in `/stats` and the response-echo report can only

@@ -7,7 +7,7 @@
  *   - `intutic mcp approve|block|reset <server_id> [--json]`
  *   - `intutic mcp enable-tool|disable-tool <server_id> <tool> [--json]`
  *
- * Server side: services/control-plane/src/routes/mcpServers.ts. Approving,
+ * Server side: the control plane. Approving,
  * blocking, resetting and switching tools need OWNER or ADMIN; listing needs
  * any member. The registry-wide settings (`mcpDefaultPolicy`,
  * `mcpHighRiskToolChange`, `mcpBudgets`) are workspace settings, changed with

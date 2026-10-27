@@ -5,7 +5,7 @@
  * `buildVerificationProbe`/`classifyProbeResponse` in `@intutic/shared-types`
  * describe WHAT request proves a credential works; this is the CLI's
  * executor. Unlike the control plane's equivalent
- * (`services/control-plane/src/lib/providerVerify.ts`), which probes a
+ * (the control plane), which probes a
  * credential already stored in Valkey, the CLI legitimately holds the raw
  * key the operator just typed, in memory, before it is ever sent anywhere —
  * so it probes with that value directly.

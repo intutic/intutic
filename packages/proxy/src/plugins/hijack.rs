@@ -8,7 +8,7 @@
 //! it. They are worth naming, because each was checked and rejected as a
 //! producer for this column rather than assumed unsuitable:
 //!
-//! - A **review hold** (`services/control-plane` `POST /api/v1/decisions`)
+//! - A **review hold** (the control plane `POST /api/v1/decisions`)
 //!   stops an action. Nothing was rewritten, so there is no pair — and
 //!   `holdRedaction.ts` computing a redacted *snapshot* for a reviewer does not
 //!   change that, because the snapshot never executes.

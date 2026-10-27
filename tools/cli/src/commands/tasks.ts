@@ -9,7 +9,7 @@
  *   - `intutic tasks test <connectionId> [--json]`
  *   - `intutic tasks remove <connectionId> [--json]`
  *
- * Server side: services/control-plane/src/routes/taskManagement.ts. Writes
+ * Server side: the control plane. Writes
  * need OWNER or ADMIN. The API token is read the way `intutic guardrails
  * sources add` reads its credential and is never echoed; the server tests it
  * with the provider before saving, encrypts it, and never returns it.

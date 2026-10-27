@@ -65,7 +65,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('fetchResolvedPolicy — absorbing allowedServers from GET /api/v1/policy/resolve', () => {
   it('reads mcpAllowedServers off the response field named `allowedServers`', async () => {
     // The M1-added field on this route — confirmed by reading
-    // services/control-plane/src/routes/evaluate.ts and lib/mcpCuration.ts
+    // The control plane and lib/mcpCuration.ts
     // directly: both name it `allowedServers`, not `mcpAllowedServers` or
     // anything else. This test pins that this module reads the SAME name
     // rather than a differently-spelled one nobody's route actually emits.

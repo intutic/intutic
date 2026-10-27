@@ -107,6 +107,21 @@ describe('internal ids in mirrored source (public checkout)', () => {
     expect(r.out).toContain(`${rel}:2`)
   })
 
+  it('fails a path in, or a mention of, the private repository in shipped source, and spares build scripts', async () => {
+    const path = ['services', 'control-plane', 'src', 'lib', 'x.ts'].join('/')
+    const repo = ['intutic', 'enterprise'].join('-')
+    await put('packages/proxy/src/a.rs', `//! Mirrors ${path}.\n`)
+    await put('tools/cli/src/b.ts', `// see ${repo}#12\n`)
+    await put('tools/scripts/c.js', `const P = '${path}'\n`)
+    await put('packages/proxy/src/d.rs', 'vec![change(ChangeOp::Read, "' + ['services', 'control-plane', 'src', 'app.ts'].join('/') + '")]\n')
+    const r = await runGate(root)
+    expect(r.status, r.out).toBe(1)
+    expect(r.out).toContain('packages/proxy/src/a.rs:1')
+    expect(r.out).toContain('tools/cli/src/b.ts:1')
+    expect(r.out).not.toContain('tools/scripts/c.js')
+    expect(r.out).not.toContain('d.rs')
+  })
+
   it('passes look-alikes: STD-1, HTTP-2, TDX-12, an LLD with no number', async () => {
     await page('Clean.\n')
     await put('packages/proxy/src/lib.rs', '// STD-1 and HTTP-2 and TDX-12; the LLD covers it\n')

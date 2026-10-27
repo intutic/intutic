@@ -70,7 +70,7 @@ export function redactConfigText(text: string): string {
  * was missing an `Array.isArray` guard the control-plane side had). Both
  * sides now derive from `packages/shared-types/src/governanceCoverage.ts`'s
  * single mapping — safe for this module to depend on since it is a leaf
- * package, not `services/control-plane` itself, so the publicly-mirrored
+ * package, not the control plane itself, so the publicly-mirrored
  * `services/sync-daemon` still never imports from the enterprise-only
  * service.
  */

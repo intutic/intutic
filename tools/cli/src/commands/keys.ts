@@ -7,7 +7,7 @@
  *   - `intutic keys update <keyId> --scopes <a,b> [--json]`
  *   - `intutic keys revoke <keyId> [--json]`
  *
- * Server side: services/control-plane/src/routes/keys.ts. A created key's
+ * Server side: the control plane. A created key's
  * plaintext is in the create response only, so it is printed once, with a
  * warning to copy it. Scopes are checked against the registry in
  * `@intutic/shared-types` before anything is sent, with the server's message

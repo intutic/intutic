@@ -7,7 +7,7 @@
  *   - `intutic optimizer set --mode <manual|auto> [--auto-threshold <n>] [--json]` — change them (OWNER, ADMIN)
  *
  * Server side: `GET` and `PUT /api/v1/dream-cycle/settings`
- * (services/control-plane/src/routes/dreamCycle.ts). The PUT takes the whole
+ * (the control plane). The PUT takes the whole
  * object and sets an omitted threshold to 0.85, so `set` without
  * `--auto-threshold` reads the current settings first and sends their
  * threshold back.
