@@ -217,6 +217,8 @@ Because Intutic evaluates prompts pre-flight, you can run interactive governance
   * [`@intutic/gate`](https://www.npmjs.com/package/@intutic/gate) — In-process tool-call gates for SDK-gated TypeScript frameworks
   * [`@intutic/mcp-governance-proxy`](https://www.npmjs.com/package/@intutic/mcp-governance-proxy) — Stdio JSON-RPC MCP proxy
   * [`@intutic/shared-types`](https://www.npmjs.com/package/@intutic/shared-types) — Zod-validated shared TypeScript types
+  * [`@intutic/logger`](https://www.npmjs.com/package/@intutic/logger) and [`@intutic/id`](https://www.npmjs.com/package/@intutic/id) — Structured logging and prefixed IDs used across the packages
+* 🐍 **Python:** [`intutic-clawde`](https://pypi.org/project/intutic-clawde/) — Client SDK and in-process gates for Python agent frameworks (LangGraph, CrewAI, Google ADK, Pydantic AI and the rest of the SDK-gated list above)
 
 ---
 
