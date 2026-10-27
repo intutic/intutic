@@ -61,10 +61,8 @@ overrides:
   # `workflow` devDependency, dev-only, added in A3) pulls a vulnerable v5.1.6.
   '@workflow/core>nanoid': '^5.1.16' # GHSA-28wg-ghj8-5hjv (non-secure generator can loop indefinitely on a negative size)
   protobufjs: '^7.6.5' # CVE-2026-59877
-  # Scoped to the 4.x copies (gate-js's dev-only @ai-sdk and workflow trees). A blanket zod
-  # override forces zod 4 onto @intutic/shared-types and mcp-proxy, which use zod 3 (z.record
-  # takes two arguments in 4): GHSA-mrhx-c7xc-m3w5 has no 3.x release, so those two stay
-  # flagged until they migrate.
+  # Raises the 4.x copies that dependencies of dependencies ask for (gate-js's dev-only @ai-sdk and
+  # workflow trees ask for 4.1 and 4.5). Everything we depend on directly is already on ^4.6.6.
   'zod@>=4.0.0 <4.6.6': '^4.6.6' # GHSA-mrhx-c7xc-m3w5 (memory exhaustion on oversized constrained collections), fixed in 4.6.6
   body-parser: '^2.4.0' # 2026-10-26 high-severity advisory (fixed in 2.4.0) — via express 5 (@modelcontextprotocol/sdk, @a2a-js/sdk)
   '@vitest/mocker': '^4.1.12' # 2026-10-26 advisories (fixed in 4.1.12) — via vitest, dev-only
