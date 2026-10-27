@@ -203,7 +203,7 @@ const WasmPredicateSchema = z
     kind: z.literal('wasm_predicate'),
     title: Title,
     rationale: Rationale,
-    predicate: z.unknown().optional(),
+    predicate: z.unknown(),
     verdict: z.literal(3),
     roles: Roles,
   })
