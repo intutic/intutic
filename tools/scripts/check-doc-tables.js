@@ -202,6 +202,8 @@ run('enforcement actions', () => {
     }
   }
   for (const r of REQUIRED) {
+    // A paid-plan page is not in the public checkout.
+    if (!existsSync(join(ROOT, 'apps/docs', r))) continue
     if (!checkedPages.has(`apps/docs/${r}`)) findings.push(`enforcement actions: found no enforcement-action table on apps/docs/${r}; the check no longer recognises it.`)
   }
   passes.push(`enforcement actions: ${tables} table(s), ${counts} count(s) and ${unions} union(s) checked against the ${ladder.length}-action ladder`)
@@ -360,6 +362,7 @@ run('SOP lifecycle', () => {
     }
   }
   for (const r of REQUIRED_DIAGRAMS) {
+    if (!existsSync(join(ROOT, 'apps/docs', r))) continue
     if (!diagramPages.has(`apps/docs/${r}`)) findings.push(`SOP lifecycle: found no lifecycle diagram on apps/docs/${r}; the check no longer recognises it.`)
   }
   passes.push(`SOP lifecycle: ${diagrams} diagram(s) checked against the ${transitions.length} transitions; ${tables} table(s), ${counts} count(s) and ${unions} union(s) against the ${states.length} states`)

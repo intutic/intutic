@@ -49,7 +49,9 @@ function fail(msg) {
   process.exit(1)
 }
 
-for (const f of [IR, RENDER, SOPS_RS, WIRE, DOCS, SETTINGS]) {
+// The docs page is a paid-plan page, so the public checkout does not carry it; the docs half is skipped there.
+const HAS_DOCS = existsSync(DOCS)
+for (const f of [IR, RENDER, SOPS_RS, WIRE, SETTINGS]) {
   if (!existsSync(f)) fail(`${f} is missing — this gate asserted nothing.`)
 }
 
@@ -133,28 +135,33 @@ if (!targetsBlock) fail('could not find `export const GUARDRAIL_TARGETS = [...] 
 const targets = [...targetsBlock[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
 if (targets.length < 4) fail(`found only ${targets.length} guardrail target(s); expected at least 4.`)
 
-const docsSrc = readFileSync(DOCS, 'utf8')
-const section = docsSrc.match(/## Four targets, four enforcers\n([\s\S]*?)\n## /)
-if (!section) fail('could not find the "## Four targets, four enforcers" section in apps/docs/guide/policy-guardrails.md')
-const tableRows = section[1].split('\n').filter((l) => l.trim().startsWith('|') && !/^\|\s*:?-/.test(l.trim()))
-if (tableRows.length < 5) fail(`the targets table has ${tableRows.length} row(s) including its header; expected at least 5 — the extraction is broken.`)
-const documented = new Set()
-// Snake-case names, and the IR kinds that are one word (`decide`).
-for (const row of tableRows) {
-  for (const m of row.matchAll(/`([a-z]+(?:_[a-z]+)*)`/g)) if (m[1].includes('_') || kinds.includes(m[1])) documented.add(m[1])
-}
 const carried = kinds.filter((k) => k !== 'none')
-const expectedOnPage = new Set([...carried, ...targets])
-const undocumented = [...expectedOnPage].filter((k) => !documented.has(k))
-if (undocumented.length > 0) {
-  fail(`apps/docs/guide/policy-guardrails.md's targets table never names: ${undocumented.join(', ')}. Every IR kind a guardrail carries and every target belongs in that table.`)
-}
-const unknownOnPage = [...documented].filter((k) => !expectedOnPage.has(k))
-if (unknownOnPage.length > 0) {
-  fail(`apps/docs/guide/policy-guardrails.md's targets table names ${unknownOnPage.join(', ')}, which is neither an IR kind nor a guardrail target.`)
+if (HAS_DOCS) {
+  const docsSrc = readFileSync(DOCS, 'utf8')
+  const section = docsSrc.match(/## Four targets, four enforcers\n([\s\S]*?)\n## /)
+  if (!section) fail('could not find the "## Four targets, four enforcers" section in apps/docs/guide/policy-guardrails.md')
+  const tableRows = section[1].split('\n').filter((l) => l.trim().startsWith('|') && !/^\|\s*:?-/.test(l.trim()))
+  if (tableRows.length < 5) fail(`the targets table has ${tableRows.length} row(s) including its header; expected at least 5 — the extraction is broken.`)
+  const documented = new Set()
+  // Snake-case names, and the IR kinds that are one word (`decide`).
+  for (const row of tableRows) {
+    for (const m of row.matchAll(/`([a-z]+(?:_[a-z]+)*)`/g)) if (m[1].includes('_') || kinds.includes(m[1])) documented.add(m[1])
+  }
+  const expectedOnPage = new Set([...carried, ...targets])
+  const undocumented = [...expectedOnPage].filter((k) => !documented.has(k))
+  if (undocumented.length > 0) {
+    fail(`apps/docs/guide/policy-guardrails.md's targets table never names: ${undocumented.join(', ')}. Every IR kind a guardrail carries and every target belongs in that table.`)
+  }
+  const unknownOnPage = [...documented].filter((k) => !expectedOnPage.has(k))
+  if (unknownOnPage.length > 0) {
+    fail(`apps/docs/guide/policy-guardrails.md's targets table names ${unknownOnPage.join(', ')}, which is neither an IR kind nor a guardrail target.`)
+  }
+
 }
 
 console.log(
   `[PASS] all ${frontMatterKinds.length} front-matter IR kinds are parsed by sops.rs and rendered; ${settingKinds.length} settings-class kind(s) name WorkspaceSettings fields; ${other.length} non-front-matter kind(s) accounted for; ` +
-    `the docs targets table names all ${carried.length} carried kind(s) and ${targets.length} target(s) and nothing else.`,
+    (HAS_DOCS
+      ? `the docs targets table names all ${carried.length} carried kind(s) and ${targets.length} target(s) and nothing else.`
+      : 'the docs page is not in this checkout, so its targets table was not checked.'),
 )
