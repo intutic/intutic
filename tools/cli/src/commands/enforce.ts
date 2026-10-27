@@ -97,7 +97,7 @@ export function invalidAllowEntries(allow: string): string[] {
     })
 }
 
-const VALID_ACTIONS = ['generate', 'apply', 'remove', 'status', 'report'] as const
+const VALID_ACTIONS = ['generate', 'apply', 'remove', 'status'] as const
 type EnforceAction = (typeof VALID_ACTIONS)[number]
 
 interface RustEnforceStatus {
@@ -167,16 +167,6 @@ async function recordAndReportFirewallState(binary: string, flags: string[]): Pr
 }
 
 export async function runEnforce(action: EnforceAction, opts: EnforceOptions): Promise<void> {
-  if (action === 'report') {
-    const result = await reportDeviceState()
-    if (result.reported) {
-      log.success('Device enforcement state reported.')
-    } else {
-      log.warn(`Device report not sent: ${result.reason}`)
-    }
-    return
-  }
-
   if (!VALID_ACTIONS.includes(action)) {
     log.error(`Unknown enforce action '${action}'. Use: ${VALID_ACTIONS.join(' | ')}`)
     process.exit(1)

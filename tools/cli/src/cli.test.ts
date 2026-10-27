@@ -8,7 +8,7 @@
 // event loop and starves vitest's RPC with it.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -156,24 +156,6 @@ describe('intutic skill scan-staged', () => {
   }, 30_000)
 })
 
-describe('intutic sync-context --git', () => {
-  it('reads the branch and commit from the repository', async () => {
-    const repo = join(home, 'context-repo')
-    await mkdir(repo, { recursive: true })
-    const git = (...args: string[]) =>
-      new Promise<string>((done, fail) =>
-        execFile('git', args, { cwd: repo, encoding: 'utf8' }, (err, out) => (err ? fail(err) : done(out.trim()))),
-      )
-    await git('init', '-q', '-b', 'feature-x')
-    await git('-c', 'user.email=t@t.local', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x')
-    const head = await git('rev-parse', 'HEAD')
-
-    expect((await run(['sync-context', '--git'], repo)).code).toBe(0)
-    const saved = JSON.parse(await readFile(join(repo, '.intutic', 'git-context.json'), 'utf8'))
-    expect(saved.git).toEqual({ branch: 'feature-x', commit: head })
-  }, 30_000)
-})
-
 describe('intutic exec without a login', () => {
   it('points the agent at the proxy and leaves its own provider key in place', async () => {
     const script = 'process.stdout.write("RESULT " + process.env.ANTHROPIC_BASE_URL + " " + process.env.ANTHROPIC_API_KEY)'
@@ -243,10 +225,22 @@ describe('intutic skill audit exit status', () => {
 })
 
 // The release flags (packages/shared-types/src/release.ts): until a control
-// plane product ships, the commands that need one are left out of help, but
-// they are only hidden, so a script or a staging user can still run them.
+// plane product ships, the commands that need one are left out of help. They
+// are not in this package: the optional @intutic/cli-control-plane plugin
+// provides them (hidden, but runnable), and without it a control-plane command
+// says so. The plugin's own tests cover those commands running.
 describe('commands of unreleased products', () => {
   const noControlPlane = { INTUTIC_CONTROL_PLANE_URL: '' }
+
+  /** Whether the optional plugin that provides the control-plane commands can be found from here. */
+  const pluginInstalled = (() => {
+    try {
+      createRequire(import.meta.url).resolve('@intutic/cli-control-plane')
+      return true
+    } catch {
+      return false
+    }
+  })()
 
   /** The command names a help screen lists, from its Commands: section. */
   function listed(help: string): string[] {
@@ -273,10 +267,13 @@ describe('commands of unreleased products', () => {
     expect(listed((await run(['--help'], here, noControlPlane)).stdout)).not.toContain('judge')
   }, 30_000)
 
-  it.runIf(!CONTROL_PLANE_PRODUCT_RELEASED)('still runs a hidden command', async () => {
-    const help = await run(['org', 'create', '--help'], here, noControlPlane)
-    expect(help.code).toBe(0)
-    expect(help.stdout).toContain('Usage: intutic org create')
+  it.runIf(!CONTROL_PLANE_PRODUCT_RELEASED && !pluginInstalled)('says where a control-plane command comes from when the plugin is not installed', async () => {
+    // Not commander's "unknown command": the command exists, in another package.
+    const org = await run(['org', 'create', '--help'], here, noControlPlane)
+    expect(org.code).toBe(1)
+    expect(org.stderr).toContain('`intutic org` is a control-plane command')
+    expect(org.stderr).toContain('@intutic/cli-control-plane')
+    expect(org.stderr).not.toContain('unknown command')
 
     // With no control plane named it says how to name one, without a stack trace.
     const login = await run(['login', '--api-key', 'vk_' + 'x'], here, noControlPlane)
@@ -284,8 +281,24 @@ describe('commands of unreleased products', () => {
     expect(login.stderr).toContain('No control plane configured')
     expect(login.stderr).not.toContain('    at ')
 
-    // Named, it is used: the login reaches for that control plane.
-    const named = await run(['login', '--api-key', 'vk_' + 'x', '--control-plane-url', 'http://127.0.0.1:1'], here, noControlPlane)
-    expect(`${named.stdout}${named.stderr}`).toContain('Control plane: http://127.0.0.1:1')
+    // The subcommands of an open command that the plugin provides, and a help request for one.
+    for (const [args, named] of [
+      [['budget', 'set', '--daily', '5'], 'budget set'],
+      [['policy', 'snapshot'], 'policy snapshot'],
+      [['enforce', 'report'], 'enforce report'],
+      [['help', 'whoami'], 'whoami'],
+    ] as const) {
+      const res = await run([...args], here, noControlPlane)
+      expect(res.code, args.join(' ')).toBe(1)
+      expect(res.stderr, args.join(' ')).toContain(`\`intutic ${named}\` is a control-plane command`)
+    }
+  }, 60_000)
+
+  it('leaves an open command and a command that does not exist alone', async () => {
+    expect((await run(['budget', '--help'], here, noControlPlane)).code).toBe(0)
+    expect((await run(['policy', 'list-local', '--help'], here, noControlPlane)).code).toBe(0)
+    const unknown = await run(['nonsense'], here, noControlPlane)
+    expect(unknown.code).toBe(1)
+    expect(unknown.stderr).toContain("unknown command 'nonsense'")
   }, 60_000)
 })

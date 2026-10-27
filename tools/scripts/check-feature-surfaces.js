@@ -123,8 +123,12 @@ export const INTERFACES = [
   'events',
   'enforcement',
 ]
-/** Trees only the enterprise checkout has. Everything else cited here is mirrored, the Terraform provider included. */
-const ENTERPRISE_ONLY = ['apps/dashboard/', 'services/control-plane/', 'packages/db/', 'docs/']
+/**
+ * Trees only the enterprise checkout has. Everything else cited here is mirrored, the Terraform provider included.
+ * `tools/cli-control-plane/` is the optional CLI plugin that provides the control-plane commands.
+ */
+const ENTERPRISE_ONLY = ['apps/dashboard/', 'services/control-plane/', 'packages/db/', 'docs/', 'tools/cli-control-plane/']
+const CLI_PLUGIN_SRC = 'tools/cli-control-plane/src'
 const EXTERNAL = { website: 'INTUTIC_WEBSITE_DIR' }
 const PLAN_BADGE = /<Badge[^>]*text="([^"]+)"/
 const SIEM_REGISTRY = 'services/control-plane/src/services/siem/eventSourceRegistry.ts'
@@ -386,11 +390,24 @@ function siemSources() {
   return [...new Set([...src.matchAll(/dispatchTable: '([a-z_]+)'/g)].map((m) => m[1]))]
 }
 
+/**
+ * The commands the plugin provides, from the names the CLI keeps of them
+ * (tools/cli/src/lib/controlPlanePlugin.ts). A flag of one cannot be looked up
+ * in source in a checkout without the plugin.
+ */
+let pluginCommands
+function providedByPlugin(path) {
+  pluginCommands ??= [
+    ...(/CONTROL_PLANE_COMMANDS[^=]*=\s*\[([\s\S]*?)\n\]/.exec(text('tools/cli/src/lib/controlPlanePlugin.ts') ?? '')?.[1] ?? '').matchAll(/'([^']+)'/g),
+  ].map((m) => m[1])
+  return pluginCommands.some((name) => path === name || path.startsWith(`${name} `))
+}
+
 let routes, cli, cliSrc, gateJs, gatePy, clawdeTs, clawdePy, mcpSrc, tfSrc, events, siem, codes
 const lazy = {
   routes: () => (routes ??= routeCatalog()),
   cli: () => (cli ??= cliSections()),
-  cliSrc: () => (cliSrc ??= sourceOf('tools/cli/src', /\.ts$/)),
+  cliSrc: () => (cliSrc ??= sourceOf('tools/cli/src', /\.ts$/) + '\n' + sourceOf(CLI_PLUGIN_SRC, /\.ts$/)),
   gateJs: () => (gateJs ??= sourceOf('packages/gate-js/src', /\.ts$/)),
   gatePy: () => (gatePy ??= sourceOf('packages/intutic-clawde/intutic_clawde/gate', /\.py$/)),
   clawdeTs: () => (clawdeTs ??= text('packages/clawde-sdk/src/refusals.ts') ?? ''),
@@ -436,13 +453,20 @@ export function resolveEvidence(iface, ev) {
       // holds cli.md's sections to the command tree cli.ts builds, both ways.
       const sec = lazy.cli().get(path)
       if (!sec) return { ok: false, why: `reference/cli.md has no section for \`intutic ${path}\`` }
+      let unverified = 0
       for (const f of flags) {
         if (!sec.body.includes(f))
           return { ok: false, why: `cli.md's \`intutic ${path}\` section does not document ${f}` }
-        if (!lazy.cliSrc().includes(`'${f}`) && !lazy.cliSrc().includes(`"${f}`))
+        if (!lazy.cliSrc().includes(`'${f}`) && !lazy.cliSrc().includes(`"${f}`)) {
+          // The option is in the plugin's source, which this checkout does not have.
+          if (providedByPlugin(path) && text(`${CLI_PLUGIN_SRC}/register.ts`) === null) {
+            unverified += 1
+            continue
+          }
           return { ok: false, why: `tools/cli/src defines no ${f} option` }
+        }
       }
-      return { ok: true, badge: sec.badge }
+      return { ok: true, badge: sec.badge, unverified }
     }
     case 'docs': {
       const [page, anchor] = ev.split('#')
@@ -657,6 +681,7 @@ export function check(manifest) {
           continue
         }
         checked += 1
+        skipped += r.unverified ?? 0
         const label = labelOf(ev)
         if (!r.ok) {
           problems.push(`${where}: ${iface} ${label} — ${r.why}`)

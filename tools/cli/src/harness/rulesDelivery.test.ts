@@ -36,7 +36,7 @@ import { HARNESS_RULES_FILES, HarnessType, decisionsTargetOf, rulesFileOf, type 
 import { HARNESS_FILES, RULES_SECTION_START, writeDecisionsTargets } from '@intutic/sync-daemon'
 import { ALL_ADAPTERS, getAdapter } from './detector.js'
 import { buildSopSections } from './rulesFiles.js'
-import { writeHarnessConfigs } from '../commands/connect.js'
+import { writeHarnessConfigs } from './writeHarnessConfigs.js'
 
 const { base, home, ws } = fake
 const PROXY = 'http://127.0.0.1:4000'

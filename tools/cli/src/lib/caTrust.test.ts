@@ -271,16 +271,6 @@ describe('ensureLinuxCaTrust', () => {
   })
 })
 
-describe('intutic connect trusts the CA on Linux', () => {
-  it('connect calls ensureLinuxCaTrust on Linux and reports real Linux trust state', async () => {
-    const { readFileSync } = await import('node:fs')
-    const { fileURLToPath } = await import('node:url')
-    const src = readFileSync(fileURLToPath(new URL('../commands/connect.ts', import.meta.url)), 'utf8')
-    expect(src).toMatch(/process\.platform === 'linux'\) \{[\s\S]{0,400}ensureLinuxCaTrust\(caCertPath\)/)
-    expect(src).toMatch(/process\.platform === 'linux'\) \{\s*sslTrustStatus = \(await verifyCaTrust\(caCertPath\)\)/)
-  })
-})
-
 // `intutic disconnect` takes out the copy connect installed, and only that one.
 describe('linuxConnectCaRemoval / removeLinuxConnectCaTrust', () => {
   const execFileMock = vi.fn()

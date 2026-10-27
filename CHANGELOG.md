@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The commands that only work against a control plane are no longer in `@intutic/cli`.**
+  `login`, `logout`, `whoami`, `connect`, `sync-context`, `sops`, `guardrails`, `keys`, `org`, `team`,
+  `gateway`, `credentials`, `loop`, `budget set` and the rest (42 in all, hidden from help until now)
+  load from an optional plugin package, `@intutic/cli-control-plane`, when it is installed next to the
+  CLI. Without it, running one prints what it is, that the plugin provides it, and how a control
+  plane is named, and exits 1. Everything open (`init`, `start`, `gates`, `decide`, `policy`
+  `compile`/`test`/`install`, `traces`, `budget`, `exec`, ...) is unchanged.
 - **`@intutic/shared-types`, `@intutic/mcp-governance-proxy` and `@intutic/sync-daemon` use zod 4.**
   The response schemas keep their shape on the wire. Code that imports a schema from
   `@intutic/shared-types` needs zod 4 (`^4.6.6`) for `.parse`, `.safeParse` and `z.infer`: a
