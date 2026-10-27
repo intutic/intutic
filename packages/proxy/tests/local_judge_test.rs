@@ -24,6 +24,7 @@
 //! process-global env vars — two tests in one binary would race. Both
 //! scenarios run sequentially within the one test instead, since
 //! `LITELLM_LOCAL_URL` IS read fresh per call and can change between them.
+#![cfg(feature = "control-plane")]
 
 use std::sync::Arc;
 

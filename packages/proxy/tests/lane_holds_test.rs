@@ -11,6 +11,7 @@
 //! The control plane's revert cache is a stub whose rates the test changes.
 //! ONE `#[tokio::test]` per process-global env, as `judge_stream_test.rs`
 //! explains.
+#![cfg(feature = "control-plane")]
 
 use std::sync::{Arc, Mutex};
 

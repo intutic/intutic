@@ -24,6 +24,7 @@
 //! A missing fixture is a failure, not a skip: a skip would read as "every
 //! vector agrees". One `#[tokio::test]`, because gateway mode is a set-once
 //! process-global.
+#![cfg(feature = "control-plane")]
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

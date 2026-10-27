@@ -6,6 +6,7 @@
 //! unreadable line refuses every response, so it cannot share a process with
 //! the cases in `decide_gateway_test.rs`. ONE `#[tokio::test]`, for the same
 //! reason.
+#![cfg(feature = "control-plane")]
 
 use std::sync::Arc;
 

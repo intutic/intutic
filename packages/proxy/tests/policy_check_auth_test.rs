@@ -17,6 +17,7 @@
 //!
 //! ONE `#[tokio::test]` in this file, matching this crate's convention for
 //! process-global env vars (`OPENAI_UPSTREAM_URL`, `CONTROL_PLANE_URL`).
+#![cfg(feature = "control-plane")]
 
 use std::sync::Arc;
 

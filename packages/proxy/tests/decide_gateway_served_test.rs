@@ -10,6 +10,7 @@
 //!
 //! ONE `#[tokio::test]`: `HOME`, the gateway config, the control-plane URL
 //! and the installed engine are process-global.
+#![cfg(feature = "control-plane")]
 
 use std::path::Path;
 use std::sync::Arc;

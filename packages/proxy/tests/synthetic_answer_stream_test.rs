@@ -8,6 +8,7 @@
 //! `claude-3-5-sonnet` whatever the request asked for.
 //!
 //! ONE `#[tokio::test]`: `CONTROL_PLANE_URL` and `HOME` are process-global.
+#![cfg(feature = "control-plane")]
 
 use std::sync::Arc;
 
