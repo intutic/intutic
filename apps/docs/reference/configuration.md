@@ -176,6 +176,7 @@ The engine the proxy asks its SOPs' [decide rules](/guide/decide#at-the-gateway)
 
 <!-- ENTERPRISE_ONLY_START -->
 `intutic connect` also passes `ANTHROPIC_API_KEY` from its own environment to the proxy it starts.
+It downloads the proxy that talks to a control plane from a private release, with the token in `INTUTIC_RELEASE_TOKEN`, else `GH_TOKEN`, else `GITHUB_TOKEN`; without one it builds the proxy with `cargo run --features control-plane`.
 <!-- ENTERPRISE_ONLY_END -->
 
 ### Gate SDK
