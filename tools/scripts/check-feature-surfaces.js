@@ -152,6 +152,8 @@ const text = (rel, base = ROOT) => {
   if (!cache.has(full)) cache.set(full, existsSync(full) ? readFileSync(full, 'utf8') : null)
   return cache.get(full)
 }
+// A paid-plan docs page is not in the public checkout, so evidence that lives on one is skipped there.
+const paidPageAbsent = (rel) => !existsSync(join(ROOT, 'services/control-plane')) && text(rel) === null
 const enterpriseOnly = (rel) => ENTERPRISE_ONLY.some((p) => rel.startsWith(p))
 
 function files(dir, keep) {
@@ -417,7 +419,7 @@ export function resolveEvidence(iface, ev) {
     const base = EXTERNAL[iface] ? process.env[EXTERNAL[iface]] : ROOT
     const t = text(ev.file, base)
     if (t === null) {
-      if (base === ROOT && enterpriseOnly(ev.file)) return { skipped: true }
+      if (base === ROOT && (enterpriseOnly(ev.file) || paidPageAbsent(ev.file))) return { skipped: true }
       return { ok: false, why: `${ev.file} does not exist` }
     }
     if (ev.contains && !t.includes(ev.contains))
@@ -426,6 +428,7 @@ export function resolveEvidence(iface, ev) {
   }
   switch (iface) {
     case 'api': {
+      if (paidPageAbsent('apps/docs/reference/api.md')) return { skipped: true }
       if (!text('apps/docs/reference/api.md')) return { ok: false, why: 'apps/docs/reference/api.md is missing' }
       const row = lazy.routes().get(ev)
       return row ? { ok: true, ...row } : { ok: false, why: `route catalog has no ${ev}` }
@@ -447,6 +450,7 @@ export function resolveEvidence(iface, ev) {
     case 'docs': {
       const [page, anchor] = ev.split('#')
       const md = text(`apps/docs/${page}`)
+      if (md === null && paidPageAbsent(`apps/docs/${page}`)) return { skipped: true }
       if (md === null) return { ok: false, why: `apps/docs/${page} does not exist` }
       if (anchor && !headingAnchors(md).has(anchor))
         return { ok: false, why: `apps/docs/${page} has no heading #${anchor}` }
@@ -491,12 +495,14 @@ export function resolveEvidence(iface, ev) {
       if (!name) return { ok: false, why: `terraform evidence "${ev}" is neither intutic_<type> nor workspace_settings.<key>` }
       if (!lazy.tfSrc().includes(`req.ProviderTypeName + "_${name}"`))
         return { ok: false, why: `the Terraform provider registers no ${ev}` }
+      if (paidPageAbsent('apps/docs/reference/terraform/index.md') && !existsSync(join(ROOT, 'apps/docs/reference/terraform'))) return { skipped: true }
       const page = ['resources', 'data-sources'].some((d) => text(`apps/docs/reference/terraform/${d}/${name}.md`) !== null)
       return page ? { ok: true } : { ok: false, why: `apps/docs/reference/terraform has no page for ${ev}` }
     }
     case 'events': {
       const source = /^siem:(.+)$/.exec(ev)?.[1]
       if (source) {
+        if (paidPageAbsent('apps/docs/guide/siem-export.md')) return { skipped: true }
         if (!(text('apps/docs/guide/siem-export.md') ?? '').includes(`\`${source}\``))
           return { ok: false, why: `guide/siem-export.md does not list the SIEM source ${source}` }
         const registry = lazy.siem()
@@ -506,6 +512,7 @@ export function resolveEvidence(iface, ev) {
           : { ok: false, why: `the SIEM source registry has no ${source}` }
       }
       if (!lazy.events().has(ev)) return { ok: false, why: `NOTIFICATION_EVENT_TYPES has no ${ev}` }
+      if (paidPageAbsent('apps/docs/guide/settings.md')) return { skipped: true }
       return (text('apps/docs/guide/settings.md') ?? '').includes(`\`${ev}\``)
         ? { ok: true }
         : { ok: false, why: `guide/settings.md does not list the event ${ev}` }
@@ -526,7 +533,7 @@ const labelOf = (ev) =>
 /**
  * The surfaces a new feature cannot ship without, as they exist now, and
  * `unseen(kind, item)`: whether this checkout cannot see an item of that kind
- * at all (the SIEM sources, without the control plane), so a baseline or
+ * at all (the SIEM sources, the route catalog and the paid-plan pages, without the control plane), so a baseline or
  * `unclaimed` entry for it is skipped rather than reported as gone.
  */
 export function inventory() {
@@ -539,7 +546,11 @@ export function inventory() {
       refusalCodes: [...lazy.codes()],
       eventTypes: [...lazy.events(), ...(siemSrc ?? []).map((s) => `siem:${s}`)],
     },
-    unseen: (kind, item) => siemSrc === null && kind === 'eventTypes' && item.startsWith('siem:'),
+    unseen: (kind, item) =>
+      (siemSrc === null && kind === 'eventTypes' && item.startsWith('siem:')) ||
+      // The route catalog and the paid-plan pages are not in the public checkout.
+      (kind === 'routes' && paidPageAbsent('apps/docs/reference/api.md')) ||
+      (kind === 'docsPages' && paidPageAbsent(`apps/docs/${item}`)),
   }
 }
 
