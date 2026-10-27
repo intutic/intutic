@@ -513,7 +513,7 @@ export const SyncConfigResponse = z.object({
         suggestionId: z.string(),
         harnessType: z.string().nullable(),
         filePath: z.string().nullable(),
-        edits: z.unknown().describe('The suggestion edits, forwarded as stored.'),
+        edits: z.unknown().optional().describe('The suggestion edits, forwarded as stored.'),
         appliedAt: z.string().nullable(),
       }),
     )

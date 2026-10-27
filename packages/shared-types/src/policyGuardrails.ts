@@ -111,7 +111,7 @@ export const AuthoredGuardrailCreateSchema = z
   .object({
     name: AuthoredName,
     description: AuthoredDescription.nullable().optional(),
-    ir: z.unknown().refine((v) => v !== undefined, { message: 'ir is required' }),
+    ir: z.unknown().optional().refine((v) => v !== undefined, { message: 'ir is required' }),
   })
   .strict()
 
