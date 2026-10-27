@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The open-source docs build refuses plan names in running text** (Self-serve, Biz Org),
+- **The open-source docs build refuses plan names in running text** (the paid plans),
   as it already refused hosted-service terms, and the pages that named them now keep those
   sentences in the paid-only blocks.
 - **`SECURITY.md` lists 3.0.x as the supported line.** Package descriptions and footers no
@@ -382,7 +382,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   control plane). The open-core edition leaves out every section whose heading
   carries a plan badge, as it already left out such pages, and a link to a
   page it leaves out renders as plain text.
-- Release flags live in `packages/shared-types/src/release.ts`, with twins in
+- Release flags live in `packages/shared-types/src/release.ts`, with copies in
   the Python SDK and the Terraform provider;
   `node tools/scripts/release-content.js --check` (in `pnpm lint:claims`)
   fails when they disagree.
@@ -594,8 +594,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A workspace moved to the free plan gets the free plan's spend caps.** A
   personal workspace downgraded by a cancelled subscription, or by the third
-  failed payment, kept the paid plan's daily cap and monthly budget (Biz Org's
-  $2,250 a day). Cancellation now sets the free plan's caps and clears the
+  failed payment, kept the paid plan's daily cap and monthly budget.
+  Cancellation now sets the free plan's caps and clears the
   billing interval and term; the failed-payment downgrade lowers the caps to
   the free plan's (never raises them) and restores the exact earlier caps,
   including any an administrator set, when the payment is made. Organisations
@@ -1487,7 +1487,7 @@ non-empty `model_list` must name them.
   `x-intutic-upstream-*` headers and the SDKs' `upstream` field; set per
   workspace with `upstreamRetry`.
 - **Spend budgets per key and per member.** Daily and monthly budgets, hard or
-  soft, per virtual key and (Biz Org and up) per member, an enforceable monthly
+  soft, per virtual key and (on paid plans) per member, an enforceable monthly
   workspace cap, and key rate limits: requests per minute exact across proxy
   replicas, tokens per minute from usage (`RATE_LIMITED`). CLI
   `intutic budget keys|key|members|member`, the `budget_alerts` SIEM source,
@@ -2556,7 +2556,7 @@ Unreleased.
   sandbox runtime; central egress-policy distribution with a Firecracker
   in-guest e2e; require-sandbox policy and egress-denial observability; sandbox
   attestation as a proxy signal a rule can gate on; sandbox-usage telemetry;
-  enterprise CA/MDM rollout and the device-enforcement CLI.
+  managed CA/MDM rollout and the device-enforcement CLI.
 - **Streaming and DLP**: the stream is held back so a split secret cannot escape;
   `/v1/responses` as a first-class shape; a model-emitted tool call refused before
   the client runs it; the DLP pattern set operator-configurable; secrets redacted
@@ -3020,7 +3020,7 @@ Unreleased.
   (SCIM provisioning, `POST /api/v1/auth/register`, Prompt Library,
   Docker/V8 sandboxing, CFO Ledger).
 - The intelligent-routing guide is now reachable in the open-source docs build,
-  with its dashboard-only steps marked enterprise-only.
+  with its dashboard-only steps marked paid-plan-only.
 - `reference/configuration.md` documents the full `intutic_settings` surface;
   `reference/cli.md` documents the shipped `policy`, `doctor`, and `budget`
   commands.
