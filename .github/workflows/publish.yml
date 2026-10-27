@@ -338,7 +338,12 @@ jobs:
           # pkg cannot build macOS/Windows bases on a Linux runner). Node 22 is
           # the runtime the images ship (node:22-alpine) and inside the CLI's
           # engines range (>=20.19).
-          pnpm --filter @intutic/cli exec pkg package.json --targets node22-macos-arm64,node22-macos-x64,node22-linux-x64,node22-win-x64 --out-path ../../dist-cli
+          #
+          # The binary is the CLI bundled into one module (scripts/build-binary.mjs),
+          # then packaged. `pkg` on the tsc output alone cannot run a lazily imported
+          # command (ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING), so every release binary
+          # answered --version and nothing that did work.
+          pnpm --filter @intutic/cli run build:binary -- --targets node22-macos-arm64,node22-macos-x64,node22-linux-x64,node22-win-x64 --out-dir ../../dist-cli
           mv dist-cli/cli-macos-arm64 dist-cli/cli-macos-arm64 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -377,6 +382,10 @@ jobs:
           got="$(HOME="$(mktemp -d)" dist-cli/cli-macos-arm64 --version)"
           echo "cli-macos-arm64 --version: $got"
           [ "$got" = "$want" ] || { echo "::error::cli-macos-arm64 reports '$got', expected $want"; exit 1; }
+          # --version never leaves the entry module. `status` runs a lazily imported command,
+          # which is what a bundle exists to make work.
+          out="$(HOME="$(mktemp -d)" dist-cli/cli-macos-arm64 status 2>&1)" || { echo "$out"; echo "::error::cli-macos-arm64 status failed"; exit 1; }
+          echo "$out" | grep -q "Workspace Status" || { echo "$out"; echo "::error::cli-macos-arm64 status printed no status"; exit 1; }
       # Same name, so the release downloads the signed copies.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
