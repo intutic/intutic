@@ -92,7 +92,7 @@ const siemDestinationStoredFields = {
 }
 
 /** The destination's config with each credential masked (`********` and, past eight characters, its last four). */
-const SiemMaskedConfig = z.record(z.unknown()).describe('The adapter config, each credential masked.')
+const SiemMaskedConfig = z.record(z.string(), z.unknown()).describe('The adapter config, each credential masked.')
 
 /** A destination as `GET /api/v1/siem/destinations` lists it: no config. */
 export const SiemDestinationSummaryResponse = z.object({ ...siemDestinationFields, ...siemDestinationStoredFields })
@@ -329,7 +329,7 @@ export const ProbeResultResponse = z.object({
   probeType: ProbeType,
   status: ProbeStatus,
   score: z.number().describe('0–100.'),
-  details: z.record(z.unknown()),
+  details: z.record(z.string(), z.unknown()),
   remediation: z.string().nullable(),
   probedAt: IsoTimestamp.describe('The newest run that produced this result.'),
   observedSince: IsoTimestamp.describe('The first run of the span of identical results this one belongs to.'),
@@ -399,8 +399,8 @@ export const Soc2EvidenceArchiveResponse = z.object({
       category: z.enum(['security', 'availability', 'processing_integrity', 'confidentiality', 'privacy']),
       score: z.number().nullable(),
       probes: z.array(ProbeResultResponse),
-      counts: z.record(z.number()),
-      sampleIds: z.record(z.array(z.string())),
+      counts: z.record(z.string(), z.number()),
+      sampleIds: z.record(z.string(), z.array(z.string())),
       gaps: z.array(z.string()),
     }),
   ),
@@ -410,7 +410,7 @@ export const Soc2EvidenceArchiveResponse = z.object({
       rows: z.number().int(),
       firstAt: IsoTimestamp.nullable(),
       lastAt: IsoTimestamp.nullable(),
-      statusCounts: z.record(z.number().int()),
+      statusCounts: z.record(z.string(), z.number().int()),
     }),
   ),
   frameworks: z
@@ -425,7 +425,7 @@ export const Soc2EvidenceArchiveResponse = z.object({
     .optional(),
   manifest: z.object({
     algorithm: z.literal('sha256'),
-    sections: z.record(z.string()),
+    sections: z.record(z.string(), z.string()),
     archiveSha256: z.string(),
     signed: z.boolean().optional(),
     unsignedReason: z.string().optional(),

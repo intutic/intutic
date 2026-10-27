@@ -21,7 +21,7 @@ import { GUARDRAIL_EVENT_TYPES, GUARDRAIL_PROVENANCES, GUARDRAIL_STATUSES, GUARD
  * Unlike `z.unknown()` it is a required key: the column is NOT NULL, so the
  * key is always on the wire.
  */
-const Json = z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.any()), z.record(z.any())])
+const Json = z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.any()), z.record(z.string(), z.any())])
 
 const GuardrailStatus = z.enum(GUARDRAIL_STATUSES)
 const GuardrailTarget = z.enum(GUARDRAIL_TARGETS)
@@ -421,7 +421,7 @@ export const ConnectorCreateResponse = z.object({
   connector_id: z.string(),
   provider: z.string(),
   name: z.string(),
-  config: z.record(z.unknown()),
+  config: z.record(z.string(), z.unknown()),
   last_synced_at: z.null().describe('Always null: a new connector has not synced'),
 })
 export type ConnectorCreateResponse = z.infer<typeof ConnectorCreateResponse>
@@ -433,7 +433,7 @@ export const ConnectorListResponse = z.object({
       connector_id: z.string(),
       provider: z.string(),
       name: z.string(),
-      config: z.record(z.unknown()).describe('The connector settings (provider config, `auto_sync`, the cron\'s last attempt)'),
+      config: z.record(z.string(), z.unknown()).describe('The connector settings (provider config, `auto_sync`, the cron\'s last attempt)'),
       last_synced_at: IsoTimestamp.nullable(),
       last_sync_error: z.string().nullable().describe("The scheduled sync's last failed attempt, read from `config`"),
       last_attempt_at: z.string().nullable().describe("When the scheduled sync last tried, as the cron wrote it into `config`"),

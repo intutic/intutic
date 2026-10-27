@@ -174,12 +174,12 @@ const UpstreamRetry = z.object({
   budgetMs: z.number().int().optional(),
   onStatus: z.array(z.number().int()).optional(),
   fallbacks: z
-    .record(z.array(z.object({ model: z.string().optional(), provider: z.enum(UPSTREAM_PROVIDERS).optional() })))
+    .record(z.string(), z.array(z.object({ model: z.string().optional(), provider: z.enum(UPSTREAM_PROVIDERS).optional() })))
     .optional(),
 })
 
 /** Detector id → action (`piiDetectors`). */
-const PiiDetectorActions = z.record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
+const PiiDetectorActions = z.partialRecord(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
 
 /** The workspace's own trace bucket (`byocStorage`); its secrets are `__redacted__` where a route returns them. */
 const ByocStorage = z.object({
@@ -242,7 +242,7 @@ export const ResolvedWorkspaceSettings = z
         enabled: z.boolean().optional(),
         requireDigest: z.boolean().optional(),
         allowedRegistries: StringList.optional(),
-        approvedDigests: z.record(StringList).optional(),
+        approvedDigests: z.record(z.string(), StringList).optional(),
         unverifiableAction: z.enum(['allow', 'warn', 'block']).optional(),
       })
       .optional(),
@@ -267,7 +267,7 @@ export const ResolvedWorkspaceSettings = z
     mcpDefaultPolicy: z.enum(['allow', 'deny']).optional(),
     mcpInjectionAction: z.enum(['warn', 'block']).optional(),
     mcpAnomalyMode: z.enum(['enforce', 'warn', 'off']).optional(),
-    mcpAnomalyOverrides: z.record(z.enum(MCP_ANOMALY_DETECTOR_IDS), z.enum(['steer', 'reask', 'kill', 'off'])).optional(),
+    mcpAnomalyOverrides: z.partialRecord(z.enum(MCP_ANOMALY_DETECTOR_IDS), z.enum(['steer', 'reask', 'kill', 'off'])).optional(),
     mcpInjectionPatterns: StringList.optional(),
     mcpBudgets: z
       .object({
@@ -288,7 +288,7 @@ export const ResolvedWorkspaceSettings = z
     enforcement_mode: z.enum(['soft', 'hard']).optional(),
     workspace_hard_cap_enabled: z.boolean().optional(),
     mcpHighRiskToolChange: z.enum(['notify', 'hold']).optional(),
-    contractedRates: z.record(z.object({ inputCostPer1k: z.number(), outputCostPer1k: z.number() })).optional(),
+    contractedRates: z.record(z.string(), z.object({ inputCostPer1k: z.number(), outputCostPer1k: z.number() })).optional(),
     sandboxRequirement: z.enum(['off', 'warn', 'require']).optional(),
     anomaly_enforcement: z
       .object({
@@ -302,7 +302,7 @@ export const ResolvedWorkspaceSettings = z
     trajectory_monitor_mode: z.enum(['ACTIVE', 'PASSIVE', 'OFF']).optional(),
     interventionMode: z.enum(['TRANSPARENT', 'OPAQUE', 'SILENT_LOG']).optional(),
     mcpAllowedTools: StringList.optional(),
-    mcpToolDescriptionOverrides: z.record(z.string()).optional(),
+    mcpToolDescriptionOverrides: z.record(z.string(), z.string()).optional(),
     decisionsLogEnabled: z.boolean().optional(),
     semanticSkillAnalysisEnabled: z.boolean().optional(),
     virusTotalSkillLookupEnabled: z.boolean().optional(),
@@ -548,7 +548,7 @@ export const SyncReportResponse = z.object({
   activeProcesses: z.array(z.string()),
   connectedSince: z.string().nullable(),
   lastSyncAt: z.string().nullable(),
-  components: z.record(z.unknown()).nullable().describe('The heartbeat\'s component report, as the daemon sent it.'),
+  components: z.record(z.string(), z.unknown()).nullable().describe('The heartbeat\'s component report, as the daemon sent it.'),
 })
 export type SyncReportResponse = z.infer<typeof SyncReportResponse>
 

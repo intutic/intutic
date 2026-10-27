@@ -31,7 +31,7 @@ export const IncidentResponse = z.object({
   resolved_by: z.string().nullable(),
   resolved_at: IsoTimestamp.nullable(),
   escalation_chain: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .nullable()
     .describe('Where the incident came from and how it was escalated (jsonb; its keys depend on the source); a resolve adds `resolution_notes`.'),
   created_at: IsoTimestamp,

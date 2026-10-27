@@ -13,9 +13,9 @@ const Band = z.object({ yes_at: z.number(), no_below: z.number() })
 /** A calibration a rule may enforce under, as `decideRecord.ts`'s `DecidePin` reads it. */
 export const DecidePinResponse = z.object({
   modelDigest: z.string(),
-  temperature: z.record(z.number()).optional(),
+  temperature: z.record(z.string(), z.number()).optional(),
   band: Band.optional(),
-  combiner: z.object({ bias: z.number(), weights: z.record(z.number()) }).optional(),
+  combiner: z.object({ bias: z.number(), weights: z.record(z.string(), z.number()) }).optional(),
   evalRunId: z.string(),
   source: z.enum(['local', 'server']),
 })
@@ -63,7 +63,7 @@ export const DecideEventResponse = z.object({
   rollout: z.string(),
   effective: z.string(),
   outcome: z.string(),
-  answers: z.record(z.unknown()).nullable(),
+  answers: z.record(z.string(), z.unknown()).nullable(),
   whenValue: z.string().nullable(),
   stateHash: z.string().nullable(),
   argsExcerpt: z.string().nullable(),
@@ -85,8 +85,8 @@ export const DecideCalibrationResponse = z.object({
   modelDigest: z.string(),
   modelId: z.string().nullable(),
   status: z.enum(['candidate', 'active', 'retired']),
-  temperature: z.record(z.number()),
-  combiner: z.object({ bias: z.number(), weights: z.record(z.number()) }).nullable(),
+  temperature: z.record(z.string(), z.number()),
+  combiner: z.object({ bias: z.number(), weights: z.record(z.string(), z.number()) }).nullable(),
   band: Band,
   evalRunId: z.string().nullable(),
   labelsN: z.number().int().nullable(),
@@ -109,10 +109,10 @@ export const DecideEvalRunResponse = z.object({
   ruleHash: z.string(),
   modelDigest: z.string(),
   preregHash: z.string(),
-  prereg: z.record(z.unknown()),
+  prereg: z.record(z.string(), z.unknown()),
   registeredAt: IsoTimestamp,
   setHash: z.string().nullable(),
-  results: z.record(z.unknown()).nullable(),
+  results: z.record(z.string(), z.unknown()).nullable(),
   passed: z.boolean().nullable(),
   completedAt: IsoTimestamp.nullable(),
   source: z.enum(['cli', 'job']),
@@ -123,7 +123,7 @@ export const DecideEvalRunResponse = z.object({
 export const DecideEvalRunChangedResponse = z.object({
   evalRun: DecideEvalRunResponse,
   marks: z
-    .record(z.boolean())
+    .record(z.string(), z.boolean())
     .optional()
     .describe('On results: each pass mark of the exit rule the run met (marks 1–3 and 5).'),
 })
@@ -174,7 +174,7 @@ export const DecideRuleSummary = z.object({
   guardrailId: z.string().nullable(),
   ruleRef: z.string().nullable().describe('`<sopId>#<id>`; null on a line that does not read.'),
   ruleHash: z.string().nullable(),
-  rule: z.record(z.unknown()).nullable().describe('The rule as its line carries it (the IR without `kind`); null on a line that does not read.'),
+  rule: z.record(z.string(), z.unknown()).nullable().describe('The rule as its line carries it (the IR without `kind`); null on a line that does not read.'),
   error: z.string().nullable().describe('Why the line does not read; null when it does.'),
   stamp: z.literal('shadow').nullable().describe('The server stamp: shadow under the kill switch, for a shadow guardrail or a `mode: shadow` SOP.'),
   pins: z.array(DecidePinResponse),

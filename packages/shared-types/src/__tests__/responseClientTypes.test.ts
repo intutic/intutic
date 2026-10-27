@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
-import type { ZodTypeAny } from 'zod'
+import type { ZodType } from 'zod'
 import * as R from '../responses/index.js'
 
 const PACKAGES = fileURLToPath(new URL('../../../', import.meta.url))
@@ -49,16 +49,16 @@ export function goStructFields(src: string, name: string): string[] {
  * nullable and union wrappers are seen through (a union offers every
  * branch's fields).
  */
-export function fieldsAt(schema: ZodTypeAny, path: string): Set<string> {
-  const def = schema._def as Record<string, any> & { typeName: string }
-  switch (def.typeName) {
-    case 'ZodOptional':
-    case 'ZodNullable':
+export function fieldsAt(schema: ZodType, path: string): Set<string> {
+  const def = (schema as unknown as { _zod: { def: Record<string, any> & { type: string } } })._zod.def
+  switch (def.type) {
+    case 'optional':
+    case 'nullable':
+    case 'default':
       return fieldsAt(def.innerType, path)
-    case 'ZodUnion':
-    case 'ZodDiscriminatedUnion': {
+    case 'union': {
       // The branches that have something at `path` (a TOON list's `data` is a string, not rows).
-      const found = [...(def.options as ZodTypeAny[] | Map<unknown, ZodTypeAny>).values()].flatMap((o) => {
+      const found = [...(def.options as ZodType[])].flatMap((o) => {
         try {
           return [fieldsAt(o, path)]
         } catch {
@@ -68,13 +68,13 @@ export function fieldsAt(schema: ZodTypeAny, path: string): Set<string> {
       if (!found.length) break
       return new Set(found.flatMap((f) => [...f]))
     }
-    case 'ZodIntersection':
+    case 'intersection':
       return new Set([...fieldsAt(def.left, path), ...fieldsAt(def.right, path)])
-    case 'ZodArray':
-      if (path.startsWith('[]')) return fieldsAt(def.type, path.slice(2).replace(/^\./, ''))
+    case 'array':
+      if (path.startsWith('[]')) return fieldsAt(def.element, path.slice(2).replace(/^\./, ''))
       break
-    case 'ZodObject': {
-      const shape = def.shape() as Record<string, ZodTypeAny>
+    case 'object': {
+      const shape = def.shape as Record<string, ZodType>
       if (!path) return new Set(Object.keys(shape))
       const m = path.match(/^([^.[]+)(.*)$/)!
       const next = shape[m[1]!]
@@ -82,11 +82,11 @@ export function fieldsAt(schema: ZodTypeAny, path: string): Set<string> {
       return fieldsAt(next, m[2]!.replace(/^\./, ''))
     }
   }
-  throw new Error(`cannot read fields at "${path}" of a ${def.typeName}`)
+  throw new Error(`cannot read fields at "${path}" of a ${def.type}`)
 }
 
 /** A client type and every response it decodes: [schema, path] pairs; it may name a field any of them sends. */
-type Pin = [type: string, sends: Array<[schema: ZodTypeAny, path: string]>]
+type Pin = [type: string, sends: Array<[schema: ZodType, path: string]>]
 
 /** Python SDK TypedDicts (`intutic_clawde/types.py`) and the response each decodes. */
 const PYTHON: Pin[] = [

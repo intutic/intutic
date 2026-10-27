@@ -28,7 +28,7 @@ export type PiiDetectorId = (typeof PII_DETECTOR_IDS)[number]
  * ({@link effectivePiiActions}). A detector left out keeps each machine's
  * action. Unknown ids and actions are refused.
  */
-export const PiiDetectorSettingsSchema = z.record(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
+export const PiiDetectorSettingsSchema = z.partialRecord(z.enum(PII_DETECTOR_IDS), z.enum(PII_ACTIONS))
 export type PiiDetectorSettings = Partial<Record<PiiDetectorId, PiiAction>>
 
 /**
