@@ -425,6 +425,30 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // How a request's upstream wire is picked. Read again per request, like the
+    // upstream URLs; a value that is not a mode refuses the start rather than
+    // routing by model name behind a gateway the operator said serves every wire.
+    let upstream_wire =
+        proxy::UpstreamWire::parse(std::env::var("INTUTIC_UPSTREAM_WIRE").ok().as_deref())
+            .map_err(anyhow::Error::msg)?;
+    if upstream_wire == proxy::UpstreamWire::Passthrough {
+        tracing::info!(
+            "Upstream wire: passthrough — /v1/messages, /v1/chat/completions and /v1/responses \
+             requests are forwarded in the wire they arrived in, model name unchanged, to that \
+             wire's upstream (UPSTREAM_URL unless ANTHROPIC_UPSTREAM_URL or \
+             OPENAI_UPSTREAM_URL is set)."
+        );
+        let set = |name: &str| std::env::var(name).is_ok_and(|v| !v.trim().is_empty());
+        let both_wires_set = set("ANTHROPIC_UPSTREAM_URL") && set("OPENAI_UPSTREAM_URL");
+        if !set("UPSTREAM_URL") && !both_wires_set {
+            tracing::warn!(
+                "INTUTIC_UPSTREAM_WIRE=passthrough without UPSTREAM_URL: a wire with no upstream \
+                 variable goes to its provider's public API (api.anthropic.com, api.openai.com) \
+                 whatever model the request names."
+            );
+        }
+    }
+
     // Install operator DLP patterns before anything can serve a request.
     //
     // Fail the boot on a bad pattern rather than starting a proxy whose

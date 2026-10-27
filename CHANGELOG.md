@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`INTUTIC_UPSTREAM_WIRE=passthrough` sends every request to a shared gateway as it
+  arrived.** The proxy picks a request's provider from its model name, which behind a
+  gateway such as LiteLLM (`UPSTREAM_URL`), whose model names are its own, refused or
+  rerouted requests the gateway serves: `qwen3-coder` on `/v1/messages` was refused
+  with 400 `unsupported_route`, `claude-*` on `/v1/chat/completions` and
+  `/v1/responses` was translated to Messages and back, `gemini-*` on
+  `/v1/chat/completions` was sent to the Gemini API (402 without a Gemini key), and a
+  gateway route name such as `vertex/claude-opus-4-1` went to Vertex AI directly. With
+  the setting, each request on `/v1/messages`, `/v1/chat/completions` and
+  `/v1/responses` goes unchanged, in its own format and with its model, to that
+  format's upstream. Credentials, DLP, SOPs, the response gate and budgets apply as
+  before. Unset (or `model`) nothing changes; another value stops the proxy at startup.
+
 ### Changed
 
 - **The commands that only work against a control plane are no longer in `@intutic/cli`.**
