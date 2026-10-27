@@ -71,6 +71,7 @@ export function check(root) {
   const cache = new Map()
   const problems = []
   let links = 0
+  let skipped = 0
   for (const file of pages(docs)) {
     const here = '/' + relative(docs, file).split('\\').join('/')
     const text = prose(readFileSync(file, 'utf8'))
@@ -91,6 +92,12 @@ export function check(root) {
         continue
       }
       const page = pageFile(root, path.replace(/\.md$/, ''))
+      if (!page && !existsSync(join(root, 'services/control-plane'))) {
+        // Open-core checkout: the pages of the paid plans are not in this tree, so a link to one cannot be checked here.
+        // The private repository's run checks it against the full tree.
+        skipped++
+        continue
+      }
       if (!page) {
         problems.push(`${here}: ${raw} — no page ${DOCS}${path}(.md|/index.md)`)
         continue
@@ -100,16 +107,16 @@ export function check(root) {
       }
     }
   }
-  return { links, problems }
+  return { links, problems, skipped }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '../..'))
-  const { links, problems } = check(root)
+  const { links, problems, skipped } = check(root)
   if (problems.length) {
     console.error(`✗ ${problems.length} of ${links} docs link(s) do not resolve:`)
     for (const p of problems) console.error(`  ${p}`)
     process.exit(1)
   }
-  console.log(`✓ all ${links} links between docs pages open a page (and heading) that exists`)
+  console.log(`✓ all ${links - skipped} links between docs pages open a page (and heading) that exists${skipped ? ` (${skipped} to pages that are not in this checkout)` : ''}`)
 }
