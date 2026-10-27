@@ -28,6 +28,7 @@
 //!   this runs. Every other control-plane endpoint the proxy touches on this
 //!   path fails open on wiremock's default 404, which is itself part of what
 //!   the test exercises.
+#![cfg(feature = "control-plane")]
 
 use std::sync::Arc;
 

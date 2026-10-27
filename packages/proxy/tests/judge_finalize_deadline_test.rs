@@ -35,6 +35,7 @@
 //!   var. That race was real: it passed locally and failed in CI. See
 //!   `judge_finalize_deadline_parse_test.rs`, its own file now, for that
 //!   test and the full incident writeup in its module doc.
+#![cfg(feature = "control-plane")]
 
 use std::sync::Arc;
 use std::time::Duration;
