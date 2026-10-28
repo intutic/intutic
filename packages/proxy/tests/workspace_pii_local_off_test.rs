@@ -6,6 +6,7 @@
 //!
 //! ONE `#[tokio::test]`, for the reason `judge_stream_test.rs` gives: the
 //! upstream URL and control-plane URL are process-global env.
+#![cfg(feature = "control-plane")]
 
 use std::sync::Arc;
 

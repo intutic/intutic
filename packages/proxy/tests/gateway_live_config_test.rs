@@ -6,6 +6,7 @@
 //! equal version is not pulled at all.
 //!
 //! One test in its own file: the live gateway config is process-wide.
+#![cfg(feature = "control-plane")]
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

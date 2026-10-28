@@ -5,6 +5,7 @@
 //! server plays `GET /api/v1/workspace/sops-policy`, returning a real HTTP
 //! response (not a mock trait) so the wire-format contract (the `scope`
 //! field, `#[serde(default)]`) is exercised too.
+#![cfg(feature = "control-plane")]
 
 use intutic_proxy::credential::RequestCredential;
 use intutic_proxy::gateway::{init_gateway_config, GatewayConfig};

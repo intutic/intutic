@@ -1,6 +1,6 @@
 {
   "name": "@intutic/cli",
-  "version": "3.0.5",
+  "version": "3.0.7",
   "description": "Policy-as-code gates and a local proxy for AI agents: enforce your rules at the tool call, across 43 harnesses",
   "type": "module",
   "bin": {
@@ -34,6 +34,7 @@
   "scripts": {
     "lint": "eslint src",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build:binary": "node scripts/build-binary.mjs",
     "dev": "tsc -w -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -82,6 +83,7 @@
     "tsx": "^4",
     "@types/node": "^22",
     "vitest": "^4",
-    "@yao-pkg/pkg": "6.22.0"
+    "@yao-pkg/pkg": "6.22.0",
+    "esbuild": "0.25.12"
   }
 }

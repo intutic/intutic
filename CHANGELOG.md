@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `/v1/responses` request for a Claude model keeps its input.** Translated to
+  Anthropic Messages, the request was read as Chat Completions: the system prompt in
+  `instructions`, a string `input`, `input_text` / `output_text` parts and the
+  `function_call` items were dropped, `function_call_output` became a user message with
+  no result, and the Responses API's flat function tools were not sent, so Codex reached
+  the model with empty messages and no tools. All of them are now translated, a
+  `function_call` paired with its output as `tool_use` and `tool_result`. A
+  non-streamed answer comes back as a Responses body (`output` with `output_text`
+  messages and `function_call` items) rather than Chat Completions `choices`; a streamed
+  one still comes back as Chat Completions chunks.
+
+## [3.0.7] - 2026-10-28
+
+### Fixed
+
+- **The standalone CLI binaries start on every platform.** They are built on Linux for macOS and
+  Windows too, and `pkg` could not produce V8 bytecode for another OS, so the binary shipped without
+  its source and exited at start. They now ship as plain source. 3.0.6 was tagged but its release
+  stopped at the macOS smoke test, so only its PyPI package went out; 3.0.7 carries everything it
+  described.
+
+## [3.0.6] - 2026-10-28
+
 ### Changed
 
 - **The commands that only work against a control plane are no longer in `@intutic/cli`.**
@@ -34,16 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A `/v1/responses` request for a Claude model keeps its input.** Translated to
-  Anthropic Messages, the request was read as Chat Completions: the system prompt in
-  `instructions`, a string `input`, `input_text` / `output_text` parts and the
-  `function_call` items were dropped, `function_call_output` became a user message with
-  no result, and the Responses API's flat function tools were not sent, so Codex reached
-  the model with empty messages and no tools. All of them are now translated, a
-  `function_call` paired with its output as `tool_use` and `tool_result`. A
-  non-streamed answer comes back as a Responses body (`output` with `output_text`
-  messages and `function_call` items) rather than Chat Completions `choices`; a streamed
-  one still comes back as Chat Completions chunks.
+- **The standalone `cli-*` release binaries run every command.** They were `pkg` packages of the
+  compiled CLI, and `pkg` cannot run a lazily imported module: `intutic status`, `intutic init` and
+  every other command crashed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`, while `--version` and
+  `--help` worked, which is all the release smoke test checked. The binary is now the CLI bundled
+  into one module (`pnpm --filter @intutic/cli run build:binary`) and the macOS smoke test runs
+  `intutic status`.
 
 - **`POST /api/v1/plans/capture` answers 409 for a session the platform has not seen,**
   with `UNKNOWN_SESSION` and what to do, in place of a 500 that echoed the query. The
