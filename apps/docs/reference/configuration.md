@@ -33,6 +33,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `UPSTREAM_URL` | unset | One upstream for every provider, such as a LiteLLM gateway. A provider's own variable below takes precedence. See [Standalone](/integrations/standalone) |
+| `INTUTIC_UPSTREAM_WIRE` | `model` | How a request's upstream is chosen. `model`: from the model name, as described below this table; a request whose route the chosen provider does not serve is translated (an OpenAI-format request for a Claude, Bedrock, Vertex AI or Gemini model) or refused with 400 `unsupported_route`. `passthrough`: every request on `/v1/messages`, `/v1/chat/completions` and `/v1/responses` goes unchanged, in the format it arrived in, to the upstream for that format: `UPSTREAM_URL`, or `ANTHROPIC_UPSTREAM_URL` for `/v1/messages` and `OPENAI_UPSTREAM_URL` for the other two when set. Use it behind a gateway that serves every route for every model it routes, such as LiteLLM, so its own model names (`qwen3-coder` on `/v1/messages`, `vertex/claude-opus-4-1` on `/v1/chat/completions`) reach it as sent. A request with an Intutic key (`vk_…`) uses the key for that format's provider (`ANTHROPIC_API_KEY` on `/v1/messages`, `OPENAI_API_KEY` otherwise, or the workspace's own); a caller's own key is passed through. The Gemini API's `/v1beta` route is not passed through. Any other value stops the proxy at startup |
 | `ANTHROPIC_UPSTREAM_URL` | `https://api.anthropic.com` | Where requests for Anthropic models go |
 | `OPENAI_UPSTREAM_URL` | `https://api.openai.com` | Where requests for OpenAI models go |
 | `GEMINI_UPSTREAM_URL` | `https://generativelanguage.googleapis.com` | Where requests for Gemini models go. A `gemini-*` model asked for on `/v1/messages`, `/v1/chat/completions` or `/v1/responses` is translated to the Gemini API's `generateContent`, with the requested model and the Gemini key in `x-goog-api-key`. Requests on the Gemini API's own `/v1beta` route are not supported |
@@ -44,7 +45,7 @@ The proxy (`intutic-proxy`) reads these at startup unless a row says otherwise.
 | `ENCRYPTION_KEY` | unset | Opens the workspace provider keys a control plane stores encrypted in Valkey: the same value the control plane has. Without it, the proxy never sends an encrypted value upstream: it treats the key as not provisioned and logs why. A key the proxy captures from a request is stored encrypted when this is set. With Valkey, the proxy announces the ids of the keys it holds (none, without this), and the control plane encrypts stored keys only once every running proxy holds its key |
 | `ENCRYPTION_KEY_PREVIOUS` | unset | While `ENCRYPTION_KEY` is being rotated: the key it replaces, or several separated by commas. Values sealed under them still open |
 
-The proxy picks the provider from the model name, so these are the only way to point a first-party provider somewhere else. For a single upstream used by every provider, see [Standalone](/integrations/standalone).
+The proxy picks the provider from the model name, so these are the only way to point a first-party provider somewhere else; `INTUTIC_UPSTREAM_WIRE=passthrough` picks it from the route instead. For a single upstream used by every provider, see [Standalone](/integrations/standalone).
 
 #### Cloud providers
 

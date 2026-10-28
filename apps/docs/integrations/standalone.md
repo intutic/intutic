@@ -55,6 +55,9 @@ Intutic Proxy supports three deployment topologies, depending on whether you req
         # One upstream for every provider: LiteLLM serves both
         # /v1/messages and /v1/chat/completions.
         - UPSTREAM_URL=http://litellm:4000
+        # Send each request to LiteLLM as it arrived, with LiteLLM's own
+        # model names, rather than picking a provider from the model name.
+        - INTUTIC_UPSTREAM_WIRE=passthrough
         # No CONTROL_PLANE_URL: open core ships no control plane, and pointing
         # this at a host that does not exist makes the policy pre-check fail —
         # which, with the default `fail_closed: true`, blocks every request.
@@ -90,6 +93,8 @@ Where the proxy forwards a request is decided per provider, first match wins:
 1. The provider's own variable: `ANTHROPIC_UPSTREAM_URL`, `OPENAI_UPSTREAM_URL`, `GEMINI_UPSTREAM_URL`, `MISTRAL_UPSTREAM_URL`, `OPENROUTER_UPSTREAM_URL`, `DEEPSEEK_UPSTREAM_URL`.
 2. `UPSTREAM_URL` — one gateway for every provider. This is what `intutic start --upstream-url` and `intutic daemon install --proxy --upstream-url` set. Use it for a gateway that serves both `/v1/messages` and `/v1/chat/completions`, such as LiteLLM; behind it, DeepSeek's Anthropic-format requests go to `/v1/messages` rather than DeepSeek's own `/anthropic` path.
 3. The provider's public API.
+
+The provider is picked from the model name (`claude-*` is Anthropic, `gemini-*` Gemini, `bedrock/`, `vertex/` and `azure/` a cloud provider, and so on), and a request in another provider's format is translated or refused. A gateway such as LiteLLM serves every route for every model it routes and names the models itself, so set `INTUTIC_UPSTREAM_WIRE=passthrough` with `UPSTREAM_URL`: each request on `/v1/messages`, `/v1/chat/completions` and `/v1/responses` then goes to the gateway unchanged, in the format it arrived in, with the model it names. DLP, SOPs, the response gate and budgets apply as before. See [`INTUTIC_UPSTREAM_WIRE`](/reference/configuration#provider-upstreams-and-keys).
 
 A request the proxy receives as a TLS-intercepted `CONNECT` to a known provider host (the Windsurf path) keeps going to that host.
 

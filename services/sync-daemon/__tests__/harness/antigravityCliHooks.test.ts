@@ -53,7 +53,7 @@ const DOCUMENTED_DECISIONS = ['allow', 'deny', 'ask', 'force_ask', 'deny_unless_
  * output: stdout holds that object and nothing else, every field in it is a
  * documented one, and a decision is a documented value. `decision` is left
  * optional, the one departure from the documentation: an allowed call
- * prints none (see antigravityCliHooks.ts).
+ * prints none outside Antigravity CLI (see antigravityCliHooks.ts).
  */
 function documentedResult(r: RunResult): Record<string, unknown> {
   const lines = r.stdout.split('\n').filter((line) => line.trim() !== '')
@@ -142,6 +142,25 @@ describe('writeAntigravityCliHooks', () => {
     const allowed = await run(script(), toolCall('run_command', { CommandLine: 'npm test', Cwd: '/w' }), gateEnv(rules))
     expect(allowed.status).toBe(0)
     expect(documentedResult(allowed)).toEqual({})
+  })
+
+  // Antigravity CLI 1.4.7 reads a result with no decision as a denial. Its
+  // payload names the CLI's own data directory, ~/.gemini/antigravity-cli.
+  it('allows an ordinary call under Antigravity CLI with an explicit decision', async () => {
+    await writeAntigravityCliHooks(root, PROXY_URL, 'ws_test')
+    const rules = writeRules(path.join(root, 'snapshot.rules'), DESTRUCTIVE_COMMAND_PATTERNS)
+    const brain = path.join(home, '.gemini', 'antigravity-cli', 'brain', 'conv_test')
+    const cli = (args: Record<string, unknown>) => ({
+      ...toolCall('run_command', args),
+      artifactDirectoryPath: brain,
+      transcriptPath: path.join(brain, '.system_generated', 'logs', 'transcript_full.jsonl'),
+    })
+
+    const allowed = await run(script(), cli({ CommandLine: 'npm test', Cwd: '/w' }), gateEnv(rules))
+    expect(documentedResult(allowed)).toEqual({ decision: 'allow' })
+
+    const denied = await run(script(), cli({ CommandLine: 'rm -rf .intutic/hooks', Cwd: '/w' }), gateEnv(rules))
+    expect(documentedResult(denied)).toEqual({ decision: 'deny', reason: expect.stringContaining('.intutic/hooks') })
   })
 
   it('denies a write_to_file to a protected path named by TargetFile', async () => {

@@ -296,14 +296,21 @@ describe('OpenClaw ~/.openclaw/openclaw.json', () => {
     await fs.rm(root, { recursive: true, force: true })
   })
 
-  it('lists the plugin in plugins.load.paths, keeping every other key, and does not stack', () => {
+  it('lists the plugin in plugins.load.paths and enables it by name, keeping every other key, and does not stack', () => {
     const user = { agents: { defaults: { workspace: '~/a' } }, plugins: { load: { paths: ['~/mine.ts'] }, entries: { mine: { enabled: true } } } }
     const merged = mergeOpenclawConfig(user, PLUGIN)
     expect(merged).toEqual({
       agents: { defaults: { workspace: '~/a' } },
-      plugins: { load: { paths: ['~/mine.ts', PLUGIN] }, entries: { mine: { enabled: true } } },
+      plugins: { load: { paths: ['~/mine.ts', PLUGIN] }, entries: { mine: { enabled: true }, 'intutic-governance': { enabled: true } } },
     })
     expect(mergeOpenclawConfig(merged, PLUGIN)).toEqual(merged)
+  })
+
+  // OpenClaw lists a plugin from plugins.load.paths as enabled but registers
+  // it only when plugins.entries enables it by name.
+  it('enables a plugin entry the user disabled, keeping its other keys', () => {
+    const merged = mergeOpenclawConfig({ plugins: { entries: { 'intutic-governance': { enabled: false, config: { a: 1 } } } } }, PLUGIN)
+    expect((merged.plugins as { entries: unknown }).entries).toEqual({ 'intutic-governance': { enabled: true, config: { a: 1 } } })
   })
 
   it('adds the plugin id to a restrictive allowlist, and leaves an empty or absent one alone', () => {
@@ -319,7 +326,10 @@ describe('OpenClaw ~/.openclaw/openclaw.json', () => {
     await writeOpenclawHooks(root, 'http://127.0.0.1:4000', 'ws_test')
     const plugin = path.join(root, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')
     expect(await fs.readFile(plugin, 'utf-8')).toContain("api.on('before_tool_call', beforeToolCall, { timeoutMs: 10000 })")
-    expect(JSON.parse(await fs.readFile(config, 'utf-8'))).toEqual({ gateway: { port: 18789 }, plugins: { load: { paths: [plugin] } } })
+    expect(JSON.parse(await fs.readFile(config, 'utf-8'))).toEqual({
+      gateway: { port: 18789 },
+      plugins: { load: { paths: [plugin] }, entries: { 'intutic-governance': { enabled: true } } },
+    })
   })
 
   it('leaves a config that does not parse untouched', async () => {

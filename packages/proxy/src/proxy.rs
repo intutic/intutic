@@ -449,6 +449,47 @@ fn resolve_upstream_base(
     }
 }
 
+/// How the proxy picks the upstream wire for a request
+/// (`INTUTIC_UPSTREAM_WIRE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamWire {
+    /// The provider is picked from the model name (`get_model_provider`), and
+    /// a request whose wire that provider does not speak is translated or
+    /// refused (`wire_route`). The default.
+    Model,
+    /// Every request on `/v1/messages`, `/v1/chat/completions` and
+    /// `/v1/responses` is sent natively, in the wire it arrived in, to that
+    /// wire's upstream (`UPSTREAM_URL`, or `ANTHROPIC_UPSTREAM_URL` /
+    /// `OPENAI_UPSTREAM_URL`), its model name untouched: for a gateway such
+    /// as LiteLLM that serves every wire for every model it routes, and whose
+    /// model names are its own.
+    Passthrough,
+}
+
+impl UpstreamWire {
+    /// Parse an `INTUTIC_UPSTREAM_WIRE` value: unset or blank is `Model`;
+    /// case and surrounding space are ignored; any other word is an error,
+    /// which refuses the proxy at startup (`main.rs`).
+    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            None | Some("") | Some("model") => Ok(UpstreamWire::Model),
+            Some("passthrough") => Ok(UpstreamWire::Passthrough),
+            Some(other) => Err(format!(
+                "INTUTIC_UPSTREAM_WIRE={other:?} is not an upstream wire mode; use model or \
+                 passthrough"
+            )),
+        }
+    }
+
+    /// The mode in the environment. Read at call time, like the upstream
+    /// URLs; a value that does not parse never gets this far (`main.rs`
+    /// refuses it), and reads as `Model`.
+    pub fn from_env() -> Self {
+        Self::parse(std::env::var("INTUTIC_UPSTREAM_WIRE").ok().as_deref())
+            .unwrap_or(UpstreamWire::Model)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Provider {
     Anthropic,
@@ -556,6 +597,27 @@ fn route_for_inbound(target: Provider, inbound: &Provider, model: &str) -> Provi
         },
         other => other,
     }
+}
+
+/// The provider a request for `model` that arrived as `inbound` is sent to.
+///
+/// By default, the one its model name selects (`get_model_provider`, refined
+/// by `route_for_inbound`). Under `UpstreamWire::Passthrough`, the inbound
+/// wire's own provider, whatever the model: the request is then served
+/// natively by `wire_route`, at the upstream configured for that wire. The
+/// Gemini route is not passed through: its model is in the URL, which the
+/// proxy does not read (`route_for_inbound`).
+fn target_for(model: &str, inbound: &Provider, wire: UpstreamWire) -> Provider {
+    if passes_through(inbound, wire) {
+        return inbound.clone();
+    }
+    route_for_inbound(get_model_provider(model), inbound, model)
+}
+
+/// Whether a request that arrived as `inbound` goes to its own wire's
+/// upstream, whatever its model (`target_for`).
+fn passes_through(inbound: &Provider, wire: UpstreamWire) -> bool {
+    wire == UpstreamWire::Passthrough && *inbound != Provider::Gemini
 }
 
 /// How a request reaches its target's wire format.
@@ -2746,11 +2808,7 @@ async fn routing_pool(
     };
     let requested_arm =
         crate::routing::bandit::CandidatePool::requested_arm_for(requested_model, &configured)?;
-    let requested_provider = route_for_inbound(
-        get_model_provider(requested_model),
-        policy.inbound,
-        requested_model,
-    );
+    let requested_provider = target_for(requested_model, policy.inbound, UpstreamWire::from_env());
     let mut arms: Vec<String> = Vec::with_capacity(arms_capacity(configured.len()));
     for candidate in configured {
         if arms.contains(&candidate) {
@@ -2802,7 +2860,7 @@ async fn candidate_refusal(
     candidate: &str,
     requested_provider: &Provider,
 ) -> Option<&'static str> {
-    let provider = route_for_inbound(get_model_provider(candidate), policy.inbound, candidate);
+    let provider = target_for(candidate, policy.inbound, UpstreamWire::from_env());
     if wire_route(policy.inbound, policy.protocol, &provider).is_none() {
         return Some("wire_mismatch");
     }
@@ -2968,7 +3026,18 @@ async fn resolve_target(
         provider_id: provider_wire_id(provider),
         reason,
     };
-    let provider = named_provider.unwrap_or_else(|| get_model_provider(&model));
+    let passed_through =
+        named_provider.is_none() && passes_through(policy.inbound, UpstreamWire::from_env());
+    // The provider the target names, else the one its model name selects:
+    // what the Anthropic override below is keyed on, as it is for the request
+    // itself, also when the target is passed through to the inbound wire's
+    // upstream.
+    let named = named_provider.unwrap_or_else(|| get_model_provider(&model));
+    let provider = if passed_through {
+        policy.inbound.clone()
+    } else {
+        named.clone()
+    };
     // First-party Gemini, off its own route, is the Gemini translation.
     let mut provider = match provider {
         Provider::Gemini if *policy.inbound != Provider::Gemini => {
@@ -3015,7 +3084,7 @@ async fn resolve_target(
     }
     // The operator's Anthropic override rewrites every Anthropic-bound
     // model after routing; another target is no exception.
-    if provider == Provider::Anthropic {
+    if named == Provider::Anthropic {
         if let Some(override_model) = &routing.anthropic_model_override {
             model = override_model.clone();
         }
@@ -6872,8 +6941,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
 
     // `mut`, like `actual_model`: an upstream fallback that serves the request
     // moves the response onto the target that answered.
-    let mut target_provider =
-        route_for_inbound(get_model_provider(&actual_model), &provider, &actual_model);
+    let upstream_wire = UpstreamWire::from_env();
+    let mut target_provider = target_for(&actual_model, &provider, upstream_wire);
 
     let host_header = headers
         .get("host")
@@ -7283,7 +7352,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .is_some()
         && cloud_target.is_none()
         && is_same_provider
-        && get_model_provider(&model) == target_provider
+        && target_for(&model, &provider, upstream_wire) == target_provider
     {
         Some((
             upstream_url.clone(),
@@ -7985,6 +8054,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             axum::http::HeaderValue::from_static("text/event-stream"),
         );
 
+        // A Chat Completions client gets the stream's id, created and model on
+        // the chunks the proxy wrote itself too (see `chat_chunks`).
+        let chunk_stamp = (protocol == crate::protocol::Protocol::OpenAIChatCompletions)
+            .then(|| crate::chat_chunks::ChunkStamp::new(&actual_model));
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(100);
         let upstream_stream = upstream_resp.bytes_stream();
         let cache_store_clone = Arc::clone(&state.store);
@@ -8613,17 +8686,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 } else {
                                     false
                                 };
+                                let is_choice_finish = stream_shape
+                                    == DeltaShape::OpenAIChatContent
+                                    && is_choice_finish(&line);
 
                                 // ── Holdback flush: in-stream terminal path ──
                                 // Anthropic closes the text block at
                                 // content_block_stop, so the tail has to go out
-                                // while that block is still open; `[DONE]` is
-                                // the OpenAI end. A holdback that never flushes
-                                // truncates the response, which is worse than
-                                // the leak it closes, so every terminal path
-                                // flushes. `flush` is idempotent, so the
-                                // several paths need not coordinate.
-                                if is_done || is_content_block_stop {
+                                // while that block is still open; on OpenAI
+                                // chat, the chunk that finishes the choice
+                                // (a client may assemble its tool calls there,
+                                // and Goose runs them on what it has), with
+                                // `[DONE]` as the end. A holdback that never
+                                // flushes truncates the response, which is
+                                // worse than the leak it closes, so every
+                                // terminal path flushes. `flush` is idempotent,
+                                // so the several paths need not coordinate.
+                                if is_done || is_content_block_stop || is_choice_finish {
                                     // The buffered argument block, if any,
                                     // must complete BEFORE its stop event (or
                                     // the stream terminal) is forwarded — a
@@ -9747,9 +9826,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
             disclose_upstream_calls(headers_mut, &upstream_attempts, upstream_fallback.as_ref());
         }
-        let stream_body = match chaos_stream_cut {
-            Some(cut) => Body::from_stream(cut.apply(ReceiverStream::new(rx))),
-            None => Body::from_stream(ReceiverStream::new(rx)),
+        let stream_body = match (chaos_stream_cut, chunk_stamp) {
+            (Some(cut), Some(stamp)) => {
+                Body::from_stream(cut.apply(stamp.apply(ReceiverStream::new(rx))))
+            }
+            (Some(cut), None) => Body::from_stream(cut.apply(ReceiverStream::new(rx))),
+            (None, Some(stamp)) => Body::from_stream(stamp.apply(ReceiverStream::new(rx))),
+            (None, None) => Body::from_stream(ReceiverStream::new(rx)),
         };
         return response.body(stream_body).unwrap_or_else(|_| {
             json_error(
@@ -9920,20 +10003,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // there is no `choices[]` to read. Without this the judge and
             // the semantic cache saw an empty response on every
             // non-streaming Codex CLI request.
-            if let Some(output) = resp_json.get("output").and_then(|o| o.as_array()) {
-                for item in output {
-                    let Some(content) = item.get("content").and_then(|c| c.as_array()) else {
-                        continue;
-                    };
-                    for part in content {
-                        if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
-                            if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
-                                text.push_str(txt);
-                            }
-                        }
-                    }
-                }
-            }
+            text.push_str(&responses_output_text(&resp_json));
         } else {
             if let Some(choices) = resp_json.get("choices").and_then(|c| c.as_array()) {
                 if let Some(first) = choices.first() {
@@ -9987,7 +10057,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let completion_tokens = usage.output.unwrap_or(0);
         let mut text = String::new();
 
-        if let Some(choices) = translated.get("choices").and_then(|c| c.as_array()) {
+        if protocol == Protocol::OpenAIResponses {
+            // Translated to the Responses shape: no `choices[]`.
+            text.push_str(&responses_output_text(&translated));
+        } else if let Some(choices) = translated.get("choices").and_then(|c| c.as_array()) {
             if let Some(first) = choices.first() {
                 if let Some(txt) = first
                     .get("message")
@@ -10373,13 +10446,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "{}",
                 denial.log_message()
             );
-            // Cross-provider bodies were translated to OpenAI above, so the
-            // client is expecting that shape whatever the upstream was.
-            let wire = if is_same_provider {
-                wire_for(&protocol, &provider)
-            } else {
-                crate::commands::WireProvider::OpenAI
-            };
+            // Cross-provider bodies were translated to the caller's OpenAI
+            // shape above (Chat Completions or Responses), so the client is
+            // expecting that shape whatever the upstream was.
+            let wire = wire_for(&protocol, &provider);
             serde_json::to_vec(&crate::plugins::response_gate::refusal_body(
                 wire,
                 &actual_model,
@@ -11138,6 +11208,24 @@ enum DeltaShape {
     Unparsed,
 }
 
+/// The text of a Responses body: every `output_text` part of its `output`
+/// items, in order.
+fn responses_output_text(body: &serde_json::Value) -> String {
+    let mut text = String::new();
+    let items = body.get("output").and_then(|o| o.as_array());
+    for item in items.into_iter().flatten() {
+        let parts = item.get("content").and_then(|c| c.as_array());
+        for part in parts.into_iter().flatten() {
+            if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
+                if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
+                    text.push_str(txt);
+                }
+            }
+        }
+    }
+    text
+}
+
 /// `body` with `note` added after the model's text: as a text block of its own
 /// (Anthropic `content[]`), appended to the first choice's message (chat
 /// completions; a message with no text gets the note as its text), or as an
@@ -11416,6 +11504,29 @@ fn postprocessor_protocol(
 fn is_done_sentinel(line: &str) -> bool {
     line.strip_prefix("data:")
         .map(|d| d.trim() == "[DONE]")
+        .unwrap_or(false)
+}
+
+/// Whether this SSE line is a chat-completions chunk that finishes a choice
+/// (a `finish_reason` that is not null). A client may assemble the choice's
+/// tool calls there, so what the holdbacks hold has to go out before it.
+fn is_choice_finish(line: &str) -> bool {
+    let Some(data) = line.strip_prefix("data:") else {
+        return false;
+    };
+    if !data.contains("finish_reason") {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(data.trim())
+        .ok()
+        .and_then(|v| {
+            v.get("choices")?.as_array().map(|choices| {
+                choices.iter().any(|c| {
+                    c.get("finish_reason")
+                        .is_some_and(|f| f.as_str().is_some_and(|f| !f.is_empty()))
+                })
+            })
+        })
         .unwrap_or(false)
 }
 
@@ -14857,6 +14968,104 @@ mod tests {
                     "{target:?}"
                 );
             }
+        }
+
+        #[test]
+        fn upstream_wire_parses_its_two_modes_and_refuses_anything_else() {
+            for v in [None, Some(""), Some("  "), Some("model"), Some(" Model ")] {
+                assert_eq!(UpstreamWire::parse(v), Ok(UpstreamWire::Model), "{v:?}");
+            }
+            for v in ["passthrough", "PASSTHROUGH", " passthrough\n"] {
+                assert_eq!(
+                    UpstreamWire::parse(Some(v)),
+                    Ok(UpstreamWire::Passthrough),
+                    "{v:?}"
+                );
+            }
+            for v in ["native", "pass-through", "true", "1"] {
+                assert!(UpstreamWire::parse(Some(v)).is_err(), "{v:?}");
+            }
+        }
+
+        /// Each pairing the model name used to decide, in both modes. Under
+        /// passthrough every request is served natively in its own wire.
+        #[test]
+        fn passthrough_sends_every_request_to_its_own_wire() {
+            use UpstreamWire::{Model, Passthrough};
+            let cases = [
+                // (inbound, protocol, model, target by model name, route by model name)
+                (
+                    Provider::Anthropic,
+                    Protocol::Anthropic,
+                    "qwen3-coder",
+                    Provider::OpenAI,
+                    None,
+                ),
+                (
+                    Provider::OpenAI,
+                    Protocol::OpenAIChatCompletions,
+                    "claude-sonnet-4-5",
+                    Provider::Anthropic,
+                    Some(WireRoute::OpenAIToAnthropic),
+                ),
+                (
+                    Provider::OpenAI,
+                    Protocol::OpenAIResponses,
+                    "claude-sonnet-4-5",
+                    Provider::Anthropic,
+                    Some(WireRoute::OpenAIToAnthropic),
+                ),
+                (
+                    Provider::OpenAI,
+                    Protocol::OpenAIChatCompletions,
+                    "gemini-2.5-flash",
+                    Provider::Cloud(C::GoogleAi),
+                    Some(WireRoute::OpenAIToAnthropic),
+                ),
+                (
+                    Provider::OpenAI,
+                    Protocol::OpenAIChatCompletions,
+                    "vertex/claude-opus-4-1",
+                    Provider::Cloud(C::Vertex),
+                    Some(WireRoute::OpenAIToAnthropic),
+                ),
+                (
+                    Provider::OpenAI,
+                    Protocol::OpenAIResponses,
+                    "deepseek-chat",
+                    Provider::DeepSeek,
+                    None,
+                ),
+                (
+                    Provider::Anthropic,
+                    Protocol::Anthropic,
+                    "deepseek-flash",
+                    Provider::DeepSeek,
+                    Some(WireRoute::Native),
+                ),
+            ];
+            for (inbound, protocol, model, by_name, route) in cases {
+                let target = target_for(model, &inbound, Model);
+                assert_eq!(target, by_name, "{model} on {protocol:?}");
+                assert_eq!(
+                    wire_route(&inbound, &protocol, &target),
+                    route,
+                    "{model} on {protocol:?}"
+                );
+
+                let target = target_for(model, &inbound, Passthrough);
+                assert_eq!(target, inbound, "{model} on {protocol:?}");
+                assert_eq!(
+                    wire_route(&inbound, &protocol, &target),
+                    Some(WireRoute::Native),
+                    "{model} on {protocol:?}"
+                );
+            }
+            // The Gemini route names its model in the URL: never passed through.
+            assert_eq!(
+                target_for("unknown", &Provider::Gemini, Passthrough),
+                Provider::OpenAI
+            );
         }
 
         #[test]

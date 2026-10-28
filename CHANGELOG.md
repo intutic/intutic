@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`INTUTIC_UPSTREAM_WIRE=passthrough` sends every request to a shared gateway as it
+  arrived.** The proxy picks a request's provider from its model name, which behind a
+  gateway such as LiteLLM (`UPSTREAM_URL`), whose model names are its own, refused or
+  rerouted requests the gateway serves: `qwen3-coder` on `/v1/messages` was refused
+  with 400 `unsupported_route`, `claude-*` on `/v1/chat/completions` and
+  `/v1/responses` was translated to Messages and back, `gemini-*` on
+  `/v1/chat/completions` was sent to the Gemini API (402 without a Gemini key), and a
+  gateway route name such as `vertex/claude-opus-4-1` went to Vertex AI directly. With
+  the setting, each request on `/v1/messages`, `/v1/chat/completions` and
+  `/v1/responses` goes unchanged, in its own format and with its model, to that
+  format's upstream. Credentials, DLP, SOPs, the response gate and budgets apply as
+  before. Unset (or `model`) nothing changes; another value stops the proxy at startup.
+
+### Fixed
+
+- **A `/v1/responses` request for a Claude model keeps its input.** Translated to
+  Anthropic Messages, the request was read as Chat Completions: the system prompt in
+  `instructions`, a string `input`, `input_text` / `output_text` parts and the
+  `function_call` items were dropped, `function_call_output` became a user message with
+  no result, and the Responses API's flat function tools were not sent, so Codex reached
+  the model with empty messages and no tools. All of them are now translated, a
+  `function_call` paired with its output as `tool_use` and `tool_result`. A
+  non-streamed answer comes back as a Responses body (`output` with `output_text`
+  messages and `function_call` items) rather than Chat Completions `choices`; a streamed
+  one still comes back as Chat Completions chunks.
+
+- **Goose can run its gate.** The plugin's `hooks/hooks.json` runs `intutic-check.sh` by its
+  path, and hardening set every plugin file to 444, so Goose's `sh -c '<script>'` failed with
+  exit 126 and, with `on_failure: block`, Goose refused every tool call. The script is now 555:
+  read-only still, and executable. (#393)
+
+- **OpenClaw runs the plugin gate.** OpenClaw (2026.10.7) lists a plugin from `plugins.load.paths`
+  as enabled but registers it only when the config enables it by name, so the gate never ran and
+  every tool call went through. The writer now sets `plugins.entries.intutic-governance.enabled` to
+  `true`; disconnect puts the entry back as it was, or removes it. (#395)
+
+- **Antigravity CLI runs the calls the gate allows.** The gate answers an allowed call with `{}`,
+  no decision, which Antigravity's desktop app leaves to the user's permission settings, but
+  Antigravity CLI (1.4.7) reads as a denial: every tool call failed with "tool call denied by
+  pre-tool hook". Under the CLI, recognised by its hook payload's paths under
+  `~/.gemini/antigravity-cli/`, the gate now answers `{"decision":"allow"}`. (#394)
+
+- **Streamed Chat Completions chunks the proxy writes are well formed, and in time.** With output
+  DLP on (the default), the chunks the proxy writes into a stream (the held text and tool-call
+  arguments, the judge's, decide's and governance notes, a refusal's tail) had no `created` or
+  `model` and an id of their own or none; strict clients (Grok Build) failed the turn on them. They
+  now carry the stream's `id`, `created` and `model`, from the upstream's chunks or, before the
+  first, the request's model. A tool call's held arguments, and held text, now go out before the
+  chunk that finishes the choice, not at `[DONE]`: a client that assembles its calls there (Goose)
+  ran them with no arguments. The proxy's whole answers to a command (`chatcmpl-intutic-cmd`) carry
+  `created` and `model` too. (#392)
+
+### Documentation
+
+- **Two limits of the harnesses' own hooks.** Gemini CLI driven over ACP (`gemini --acp`) runs no
+  hooks, so its own tools are not gated there (#396). A Cline gate's refusal ends the whole task,
+  and the Cline CLI reports only that the run was aborted; the reason is in
+  `~/.intutic/events/cline-hook-events.jsonl` (#397). Both are on the integration pages and in the
+  harness matrix's gaps.
+
 ## [3.0.7] - 2026-10-28
 
 ### Fixed

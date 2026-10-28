@@ -20,10 +20,12 @@
  * (`docs/plugins/hooks/tool-policy.md` "Sender-aware policy in one file";
  * `src/plugins/discovery.ts` `discoverFromPath`; the loader test "loads
  * multiple manifestless standalone files"). `.cjs`, so the module format does
- * not depend on any `package.json` above it. A plugin from a configured path
- * is enabled by default unless a non-empty `plugins.allow` leaves it out
- * (`src/plugins/config-activation-shared.ts`), so the id is added to an
- * existing allowlist and nothing is written when there is none.
+ * not depend on any `package.json` above it. OpenClaw (2026.10.7) lists a
+ * plugin from a configured path as enabled, but registers it only when the
+ * config enables it by name, so the writer sets
+ * `plugins.entries.intutic-governance.enabled` to true. The id is also added
+ * to a non-empty `plugins.allow`, which would leave it out; an empty or absent
+ * one allows every plugin (`src/plugins/config-activation-shared.ts`).
  *
  * `before_tool_call` receives `{ toolName, params, toolCallId?, runId?,
  * derivedPaths? }` and `ctx.sessionId`, and refuses with `{ block: true,
@@ -248,21 +250,24 @@ const asObject = (v: unknown): Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 
 /**
- * Adds the plugin to `plugins.load.paths`, and its id to `plugins.allow` when
- * that list is non-empty (an empty or absent one allows every plugin).
- * Everything else is kept, and a second run adds nothing.
+ * Adds the plugin to `plugins.load.paths`, enables it in `plugins.entries`,
+ * and adds its id to `plugins.allow` when that list is non-empty (an empty or
+ * absent one allows every plugin). Everything else is kept, and a second run
+ * adds nothing.
  */
 export function mergeOpenclawConfig(existing: Record<string, unknown>, pluginPath: string): Record<string, unknown> {
   const plugins = asObject(existing.plugins)
   const load = asObject(plugins.load)
   const paths = Array.isArray(load.paths) ? load.paths : []
   const allow = Array.isArray(plugins.allow) ? plugins.allow : undefined
+  const entries = asObject(plugins.entries)
   return {
     ...existing,
     plugins: {
       ...plugins,
       ...(allow && allow.length > 0 && !allow.includes(OPENCLAW_PLUGIN_ID) ? { allow: [...allow, OPENCLAW_PLUGIN_ID] } : {}),
       load: { ...load, paths: paths.includes(pluginPath) ? paths : [...paths, pluginPath] },
+      entries: { ...entries, [OPENCLAW_PLUGIN_ID]: { ...asObject(entries[OPENCLAW_PLUGIN_ID]), enabled: true } },
     },
   }
 }
@@ -272,7 +277,6 @@ function configBlocksPlugin(config: Record<string, unknown>): string | null {
   const plugins = asObject(config.plugins)
   if (plugins.enabled === false) return 'plugins.enabled is false'
   if (Array.isArray(plugins.deny) && plugins.deny.includes(OPENCLAW_PLUGIN_ID)) return `plugins.deny lists ${OPENCLAW_PLUGIN_ID}`
-  if (asObject(asObject(plugins.entries)[OPENCLAW_PLUGIN_ID]).enabled === false) return `plugins.entries.${OPENCLAW_PLUGIN_ID}.enabled is false`
   return null
 }
 

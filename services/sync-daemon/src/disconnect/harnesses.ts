@@ -851,14 +851,33 @@ const pi: HarnessReverser = async (plan, ctx) => {
 /** OpenClaw's config is JSON5-like; the writer re-serialises it as JSON, and so does this. */
 const json5LikeFormat: StructuredFormat<JsonObject> = { ...jsonFormat, parse: (raw) => (raw.trim() === '' ? {} : parseJson5Like(raw)) }
 
-/** The plugin's `plugins.load.paths` entry, and its id in `plugins.allow` unless the user had listed it before connect. */
+/**
+ * The plugin's `plugins.load.paths` entry; its id in `plugins.allow` unless the
+ * user had listed it before connect; and, with the path, its `plugins.entries`
+ * entry, put back as it was before connect, or removed if there was none.
+ */
 function removeOpenclawPlugin(doc: JsonObject, ctx: ReverseContext): boolean {
   const originalAllow = ctx.original ? getPath(ctx.original, ['plugins', 'allow']) : undefined
   const allowedBefore = Array.isArray(originalAllow) && originalAllow.includes(OPENCLAW_PLUGIN_ID)
+  const listed = removeFromArray(doc, ['plugins', 'load', 'paths'], (v) => typeof v === 'string' && v.endsWith(OPENCLAW_PLUGIN_FILE), ctx.original)
   return allEdits(
-    removeFromArray(doc, ['plugins', 'load', 'paths'], (v) => typeof v === 'string' && v.endsWith(OPENCLAW_PLUGIN_FILE), ctx.original),
+    listed,
     !allowedBefore && removeFromArray(doc, ['plugins', 'allow'], (v) => v === OPENCLAW_PLUGIN_ID, ctx.original),
+    listed && restoreOpenclawEntry(doc, ctx),
   )
+}
+
+function restoreOpenclawEntry(doc: JsonObject, ctx: ReverseContext): boolean {
+  const path = ['plugins', 'entries', OPENCLAW_PLUGIN_ID]
+  const before = ctx.original ? getPath(ctx.original, path) : undefined
+  if (before !== undefined) {
+    if (isDeepStrictEqual(getPath(doc, path), before)) return false
+    setPath(doc, path, before)
+    return true
+  }
+  if (!deletePath(doc, path)) return false
+  pruneEmpty(doc, path.slice(0, -1), ctx.original)
+  return true
 }
 
 /** Where earlier versions registered the gate: an internal hook entry, which never sees a tool call. */

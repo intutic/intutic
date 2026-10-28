@@ -1,5 +1,7 @@
 /// Agent fault injection for `intutic chaos run` — inert unless a plan is set
 pub mod chaos;
+/// The stream's id, created and model on the Chat Completions chunks the proxy writes
+pub mod chat_chunks;
 /// Cloud-hosted upstreams: AWS Bedrock, Google Vertex AI, Azure OpenAI
 pub mod cloud;
 pub mod commands;

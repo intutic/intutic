@@ -62,7 +62,7 @@ Antigravity runs hooks from `~/.gemini/config/hooks.json` (all your projects) an
 }
 ```
 
-The gate reads Antigravity's tool calls by their own names and arguments: `run_command` with `CommandLine`, `write_to_file` and `replace_file_content` with `TargetFile`. For a call it allows, the gate prints `{}`, a result with no decision in it, so the permission prompts you set in Antigravity still apply. Antigravity ranks a result with no decision below every decision, so it never overrides another hook's answer either. Each documented decision would change what you see: `allow` approves the call past your prompts, and `ask` or `force_ask` prompts for calls you let run.
+The gate reads Antigravity's tool calls by their own names and arguments: `run_command` with `CommandLine`, `write_to_file` and `replace_file_content` with `TargetFile`. For a call it allows, the gate prints `{}`, a result with no decision in it, so the permission prompts you set in Antigravity still apply. Antigravity ranks a result with no decision below every decision, so it never overrides another hook's answer either. Each documented decision would change what you see: `allow` approves the call past your prompts, and `ask` or `force_ask` prompts for calls you let run. Antigravity CLI is the exception: it refuses a call whose hook printed no decision (1.4.7), so under the CLI the gate answers an allowed call with `{"decision":"allow"}`, and the CLI's own permission prompts do not ask about it. The gate recognises the CLI by its hook payload, whose paths are under `~/.gemini/antigravity-cli/`.
 
 You can see and toggle the hook in the app under **Settings > Customizations > Hooks**, and in the CLI with `/hooks`. Turning it off counts as a change to the file: see [Tamper protection](#tamper-protection).
 
@@ -84,6 +84,8 @@ Gemini CLI runs command hooks registered under `hooks.BeforeTool` in `~/.gemini/
 ```
 
 Gemini CLI's shell tool is `run_shell_command`; a hold such as `review_before: action:deploy` applies to the commands it runs.
+
+**Not over ACP.** Gemini CLI runs no hooks when an editor or agent platform drives it over the Agent Client Protocol (`gemini --acp`): its ACP session runs each tool directly, so `BeforeTool` never fires, and Gemini CLI's own tools (shell, file edits) run ungated though the gate is installed (Gemini CLI 0.65.0; reported as [google-gemini/gemini-cli#30005](https://github.com/google-gemini/gemini-cli/issues/30005)). `gemini` and `gemini -p` run the hooks. Under ACP, MCP servers wrapped by the [MCP proxy](#mcp-servers) are still gated.
 
 The same script is registered under `hooks.AfterTool` (matcher `run_shell_command`) with `--event post`. It records whether a test run passed, from the result's `llmContent` (which carries `Exit Code: N` when the command failed), for a [`requires_before: action:run_tests[ok] -> …`](/reference/harness-security-matrix#post-tool-outcome) rule, and always allows. Google Antigravity's own hook (`~/.gemini/config/hooks.json`) has no post-tool registration yet, so on it such a rule refuses: no result can be observed there.
 
