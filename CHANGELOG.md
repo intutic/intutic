@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Antigravity CLI runs the calls the gate allows.** The gate answers an allowed call with `{}`,
+  no decision, which Antigravity's desktop app leaves to the user's permission settings, but
+  Antigravity CLI (1.4.7) reads as a denial: every tool call failed with "tool call denied by
+  pre-tool hook". Under the CLI, recognised by its hook payload's paths under
+  `~/.gemini/antigravity-cli/`, the gate now answers `{"decision":"allow"}`. (#394)
+
 ## [3.0.7] - 2026-10-28
 
 ### Fixed
