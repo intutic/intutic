@@ -87,6 +87,9 @@ writeFileSync(
 
 mkdirSync(outDir, { recursive: true })
 const pkgBin = requireFromCli.resolve('@yao-pkg/pkg/lib-es5/bin.js')
-execFileSync(process.execPath, [pkgBin, join(stage, 'package.json'), '--targets', targets, '--out-path', outDir], { stdio: 'inherit' })
+// pkg compiles each file to V8 bytecode with a Node binary for the target, which cannot run when
+// the target is another OS or CPU (the macOS binaries are built on Linux). It then ships a snapshot
+// with no source and the binary dies at start with UNEXPECTED-20. Plain source works for every target.
+execFileSync(process.execPath, [pkgBin, join(stage, 'package.json'), '--targets', targets, '--out-path', outDir, '--no-bytecode', '--public'], { stdio: 'inherit' })
 rmSync(stage, { recursive: true, force: true })
 console.log(`\nBinaries are in ${outDir}.`)

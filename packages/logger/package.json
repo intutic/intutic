@@ -1,6 +1,6 @@
 {
   "name": "@intutic/logger",
-  "version": "3.0.6",
+  "version": "3.0.7",
   "description": "Structured logging with trace context for Intutic packages",
   "license": "MIT",
   "repository": {
