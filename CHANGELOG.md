@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.8] - 2026-10-28
+
 ### Added
 
 - **`INTUTIC_UPSTREAM_WIRE=passthrough` sends every request to a shared gateway as it

@@ -1,6 +1,6 @@
 {
   "name": "@intutic/cli",
-  "version": "3.0.7",
+  "version": "3.0.8",
   "description": "Policy-as-code gates and a local proxy for AI agents: enforce your rules at the tool call, across 43 harnesses",
   "type": "module",
   "bin": {
