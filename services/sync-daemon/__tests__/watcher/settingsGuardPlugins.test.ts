@@ -85,7 +85,10 @@ describe('settings guard: Pi extension and OpenClaw plugin', () => {
     doc.plugins.load.paths = []
     await fs.writeFile(config(), JSON.stringify(doc))
     expect(await guard.guardSettingsFile(config(), root, [], PROXY_URL)).toBe(true)
-    expect(await readJson(config())).toEqual({ gateway: { port: 18789 }, plugins: { load: { paths: [plugin()] } } })
+    expect(await readJson(config())).toEqual({
+      gateway: { port: 18789 },
+      plugins: { load: { paths: [plugin()] }, entries: { 'intutic-governance': { enabled: true } } },
+    })
 
     await fs.rm(plugin())
     expect(await guard.guardSettingsFile(plugin(), root, [], PROXY_URL)).toBe(true)

@@ -477,6 +477,7 @@ const CASES: Case[] = [
     connected: async () => {
       const config = JSON.parse(await fs.readFile(join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
       expect(config.plugins.load.paths).toEqual([join(home, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')])
+      expect(config.plugins.entries).toEqual({ 'intutic-governance': { enabled: true } })
     },
   },
   {
@@ -491,6 +492,17 @@ const CASES: Case[] = [
       const config = JSON.parse(await fs.readFile(join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
       expect(config.plugins.allow).toEqual(['mine', 'intutic-governance'])
       expect(config.plugins.load.paths).toEqual(['~/plugins/mine.ts', join(home, '.intutic', 'hooks', 'openclaw', 'intutic-governance.cjs')])
+      expect(config.plugins.entries).toEqual({ mine: { enabled: true }, 'intutic-governance': { enabled: true } })
+    },
+  },
+  {
+    harness: 'openclaw',
+    name: 'openclaw, with the user\'s own entry for the plugin',
+    seed: () => put(join(home, '.openclaw', 'openclaw.json'), { plugins: { entries: { 'intutic-governance': { enabled: false, config: { a: 1 } } } } }),
+    edit: () => editJson(join(home, '.openclaw', 'openclaw.json'), (d) => { d.theme = 'dark' }),
+    connected: async () => {
+      const config = JSON.parse(await fs.readFile(join(home, '.openclaw', 'openclaw.json'), 'utf-8'))
+      expect(config.plugins.entries).toEqual({ 'intutic-governance': { enabled: true, config: { a: 1 } } })
     },
   },
   {

@@ -68,7 +68,7 @@ Every LLM request from your agents flows through the Intutic proxy. The proxy is
 | Claude Desktop | `claude_desktop_config.json` | MCP server wrapping; no proxy override (the file is drift-watched) |
 | Goose | `~/.agents/plugins/intutic-governance/hooks/hooks.json`, `~/.config/goose/config.yaml` | JSON plugin hook structure, plus the proxy URL |
 | Open WebUI | `~/.open-webui/intutic-governance-filter.py` | Python inlet() filter hook |
-| OpenClaw | `~/.openclaw/openclaw.json`, `~/.intutic/hooks/openclaw/intutic-governance.cjs` | `before_tool_call` plugin, listed in `plugins.load.paths` |
+| OpenClaw | `~/.openclaw/openclaw.json`, `~/.intutic/hooks/openclaw/intutic-governance.cjs` | `before_tool_call` plugin, listed in `plugins.load.paths` and enabled in `plugins.entries` |
 | Hermes | `~/.hermes/config.yaml`, `~/.intutic/hooks/hermes-check.sh` | Shell hook registered under `hooks.pre_tool_call` |
 | Pi | `~/.pi/agent/extensions/intutic-governance.js`, `~/.pi/agent/models.json` | `tool_call` extension; `baseUrl` for the Anthropic and OpenAI providers |
 
