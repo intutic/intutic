@@ -2,7 +2,8 @@
  * gooseHardener.ts — Cross-platform immutable flag management for Goose plugin files.
  *
  * After the Goose governance plugin is written, this module applies:
- *   1. chmod 444 — no write for owner, group, or others
+ *   1. chmod 444 — no write for owner, group, or others (555 for the gate script, which
+ *      Goose runs by its path: `sh -c '<script>'` fails with exit 126 on a 444 file)
  *   2. OS-level immutable flag:
  *        macOS: chflags uchg (user immutable, does not require root)
  *        Linux: chattr +i (requires root; graceful fallback on permission error)
@@ -26,20 +27,21 @@ const log = createLogger('sync-goose-hardener')
 const execFileAsync = promisify(execFile)
 
 /**
- * Apply chmod 444 and OS immutable flags to all files in the
- * Goose governance plugin directory.
+ * Apply read-only modes (444; 555 for the gate script) and OS immutable flags to all
+ * files in the Goose governance plugin directory.
  *
  * @param pluginDir - Absolute path to the plugin directory
  *                    (e.g. ~/.agents/plugins/intutic-governance)
  */
 export async function hardenGoosePlugin(pluginDir: string): Promise<void> {
-  const targets = [
-    path.join(pluginDir, 'plugin.json'),
-    path.join(pluginDir, 'hooks', 'hooks.json'),
-    path.join(pluginDir, 'scripts', 'intutic-check.sh'),
+  // The gate script keeps its execute bits: hooks.json names it as the command Goose runs.
+  const targets: Array<[string, number]> = [
+    [path.join(pluginDir, 'plugin.json'), 0o444],
+    [path.join(pluginDir, 'hooks', 'hooks.json'), 0o444],
+    [path.join(pluginDir, 'scripts', 'intutic-check.sh'), 0o555],
   ]
 
-  for (const target of targets) {
+  for (const [target, mode] of targets) {
     try {
       await fs.access(target)
     } catch {
@@ -47,12 +49,12 @@ export async function hardenGoosePlugin(pluginDir: string): Promise<void> {
       continue
     }
 
-    // Step 1: chmod 444
+    // Step 1: read-only (444, or 555 for the script)
     try {
-      await fs.chmod(target, 0o444)
-      log.debug({ action: 'chmod_444', target }, 'chmod 444 applied')
+      await fs.chmod(target, mode)
+      log.debug({ action: 'chmod_read_only', target, mode: mode.toString(8) }, 'read-only mode applied')
     } catch (err) {
-      log.error({ action: 'chmod_failed', target, err }, 'chmod 444 failed')
+      log.error({ action: 'chmod_failed', target, err }, 'read-only chmod failed')
     }
 
     // Step 2: OS immutable flag
@@ -131,7 +133,7 @@ async function applyImmutableFlag(target: string): Promise<void> {
       if (msg.includes('Operation not permitted') || msg.includes('EPERM')) {
         log.warn(
           { action: 'chattr_needs_root', target },
-          'chattr +i requires root — immutable flag not applied (chmod 444 still in effect)',
+          'chattr +i requires root — immutable flag not applied (the read-only mode still in effect)',
         )
       } else {
         log.error({ action: 'chattr_failed', target, err }, 'chattr +i failed unexpectedly')
