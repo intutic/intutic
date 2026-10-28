@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages and `function_call` items) rather than Chat Completions `choices`; a streamed
   one still comes back as Chat Completions chunks.
 
+### Fixed
+
+- **Goose can run its gate.** The plugin's `hooks/hooks.json` runs `intutic-check.sh` by its
+  path, and hardening set every plugin file to 444, so Goose's `sh -c '<script>'` failed with
+  exit 126 and, with `on_failure: block`, Goose refused every tool call. The script is now 555:
+  read-only still, and executable. (#393)
+
 ## [3.0.7] - 2026-10-28
 
 ### Fixed
