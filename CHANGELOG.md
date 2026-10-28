@@ -35,37 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages and `function_call` items) rather than Chat Completions `choices`; a streamed
   one still comes back as Chat Completions chunks.
 
-### Fixed
-
 - **Goose can run its gate.** The plugin's `hooks/hooks.json` runs `intutic-check.sh` by its
   path, and hardening set every plugin file to 444, so Goose's `sh -c '<script>'` failed with
   exit 126 and, with `on_failure: block`, Goose refused every tool call. The script is now 555:
   read-only still, and executable. (#393)
-
-### Fixed
 
 - **OpenClaw runs the plugin gate.** OpenClaw (2026.10.7) lists a plugin from `plugins.load.paths`
   as enabled but registers it only when the config enables it by name, so the gate never ran and
   every tool call went through. The writer now sets `plugins.entries.intutic-governance.enabled` to
   `true`; disconnect puts the entry back as it was, or removes it. (#395)
 
-### Documentation
-
-- **Two limits of the harnesses' own hooks.** Gemini CLI driven over ACP (`gemini --acp`) runs no
-  hooks, so its own tools are not gated there (#396). A Cline gate's refusal ends the whole task,
-  and the Cline CLI reports only that the run was aborted; the reason is in
-  `~/.intutic/events/cline-hook-events.jsonl` (#397). Both are on the integration pages and in the
-  harness matrix's gaps.
-
-### Fixed
-
 - **Antigravity CLI runs the calls the gate allows.** The gate answers an allowed call with `{}`,
   no decision, which Antigravity's desktop app leaves to the user's permission settings, but
   Antigravity CLI (1.4.7) reads as a denial: every tool call failed with "tool call denied by
   pre-tool hook". Under the CLI, recognised by its hook payload's paths under
   `~/.gemini/antigravity-cli/`, the gate now answers `{"decision":"allow"}`. (#394)
-
-### Fixed
 
 - **Streamed Chat Completions chunks the proxy writes are well formed, and in time.** With output
   DLP on (the default), the chunks the proxy writes into a stream (the held text and tool-call
@@ -76,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chunk that finishes the choice, not at `[DONE]`: a client that assembles its calls there (Goose)
   ran them with no arguments. The proxy's whole answers to a command (`chatcmpl-intutic-cmd`) carry
   `created` and `model` too. (#392)
+
+### Documentation
+
+- **Two limits of the harnesses' own hooks.** Gemini CLI driven over ACP (`gemini --acp`) runs no
+  hooks, so its own tools are not gated there (#396). A Cline gate's refusal ends the whole task,
+  and the Cline CLI reports only that the run was aborted; the reason is in
+  `~/.intutic/events/cline-hook-events.jsonl` (#397). Both are on the integration pages and in the
+  harness matrix's gaps.
 
 ## [3.0.7] - 2026-10-28
 
