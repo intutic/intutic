@@ -8054,6 +8054,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             axum::http::HeaderValue::from_static("text/event-stream"),
         );
 
+        // A Chat Completions client gets the stream's id, created and model on
+        // the chunks the proxy wrote itself too (see `chat_chunks`).
+        let chunk_stamp = (protocol == crate::protocol::Protocol::OpenAIChatCompletions)
+            .then(|| crate::chat_chunks::ChunkStamp::new(&actual_model));
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(100);
         let upstream_stream = upstream_resp.bytes_stream();
         let cache_store_clone = Arc::clone(&state.store);
@@ -8682,17 +8686,23 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                                 } else {
                                     false
                                 };
+                                let is_choice_finish = stream_shape
+                                    == DeltaShape::OpenAIChatContent
+                                    && is_choice_finish(&line);
 
                                 // ── Holdback flush: in-stream terminal path ──
                                 // Anthropic closes the text block at
                                 // content_block_stop, so the tail has to go out
-                                // while that block is still open; `[DONE]` is
-                                // the OpenAI end. A holdback that never flushes
-                                // truncates the response, which is worse than
-                                // the leak it closes, so every terminal path
-                                // flushes. `flush` is idempotent, so the
-                                // several paths need not coordinate.
-                                if is_done || is_content_block_stop {
+                                // while that block is still open; on OpenAI
+                                // chat, the chunk that finishes the choice
+                                // (a client may assemble its tool calls there,
+                                // and Goose runs them on what it has), with
+                                // `[DONE]` as the end. A holdback that never
+                                // flushes truncates the response, which is
+                                // worse than the leak it closes, so every
+                                // terminal path flushes. `flush` is idempotent,
+                                // so the several paths need not coordinate.
+                                if is_done || is_content_block_stop || is_choice_finish {
                                     // The buffered argument block, if any,
                                     // must complete BEFORE its stop event (or
                                     // the stream terminal) is forwarded — a
@@ -9816,9 +9826,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             }
             disclose_upstream_calls(headers_mut, &upstream_attempts, upstream_fallback.as_ref());
         }
-        let stream_body = match chaos_stream_cut {
-            Some(cut) => Body::from_stream(cut.apply(ReceiverStream::new(rx))),
-            None => Body::from_stream(ReceiverStream::new(rx)),
+        let stream_body = match (chaos_stream_cut, chunk_stamp) {
+            (Some(cut), Some(stamp)) => {
+                Body::from_stream(cut.apply(stamp.apply(ReceiverStream::new(rx))))
+            }
+            (Some(cut), None) => Body::from_stream(cut.apply(ReceiverStream::new(rx))),
+            (None, Some(stamp)) => Body::from_stream(stamp.apply(ReceiverStream::new(rx))),
+            (None, None) => Body::from_stream(ReceiverStream::new(rx)),
         };
         return response.body(stream_body).unwrap_or_else(|_| {
             json_error(
@@ -11490,6 +11504,29 @@ fn postprocessor_protocol(
 fn is_done_sentinel(line: &str) -> bool {
     line.strip_prefix("data:")
         .map(|d| d.trim() == "[DONE]")
+        .unwrap_or(false)
+}
+
+/// Whether this SSE line is a chat-completions chunk that finishes a choice
+/// (a `finish_reason` that is not null). A client may assemble the choice's
+/// tool calls there, so what the holdbacks hold has to go out before it.
+fn is_choice_finish(line: &str) -> bool {
+    let Some(data) = line.strip_prefix("data:") else {
+        return false;
+    };
+    if !data.contains("finish_reason") {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(data.trim())
+        .ok()
+        .and_then(|v| {
+            v.get("choices")?.as_array().map(|choices| {
+                choices.iter().any(|c| {
+                    c.get("finish_reason")
+                        .is_some_and(|f| f.as_str().is_some_and(|f| !f.is_empty()))
+                })
+            })
+        })
         .unwrap_or(false)
 }
 

@@ -643,9 +643,14 @@ pub fn non_streaming_body(provider: WireProvider, model: &str, text: &str) -> se
             }],
             "usage": { "input_tokens": 0, "output_tokens": 0, "total_tokens": 0 }
         }),
+        // `created` and `model` are required by the OpenAI schema, and strict
+        // clients (pydantic-ai's, Microsoft Agent Framework's) reject an
+        // answer without them.
         WireProvider::OpenAI => serde_json::json!({
             "id": "chatcmpl-intutic-cmd",
             "object": "chat.completion",
+            "created": chrono::Utc::now().timestamp(),
+            "model": model,
             "choices": [{
                 "index": 0,
                 "message": { "role": "assistant", "content": text },
@@ -775,6 +780,8 @@ pub fn streaming_body(provider: WireProvider, model: &str, text: &str) -> String
             let chunk = serde_json::json!({
                 "id": "chatcmpl-intutic-cmd",
                 "object": "chat.completion.chunk",
+                "created": chrono::Utc::now().timestamp(),
+                "model": model,
                 "choices": [{ "index": 0, "delta": { "content": text }, "finish_reason": serde_json::Value::Null }]
             });
             format!("data: {chunk}\n\ndata: [DONE]\n\n")
