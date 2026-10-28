@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "intutic-proxy"
-version = "3.0.7"
+version = "3.0.8"
 dependencies = [
  "anyhow",
  "async-trait",
