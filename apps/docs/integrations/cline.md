@@ -8,6 +8,8 @@ Cline runs *file hooks*: an executable named `PreToolUse` in a hooks directory r
 
 The same file serves the VS Code extension and the Cline CLI, which read different payload shapes; the gate accepts both. In the VS Code extension, turn on **Enable Hooks** in Cline's feature settings — hooks do not run until you do.
 
+**A refusal stops the whole task, not just the call.** Cline's hooks cannot skip one tool call: `cancel` ends the run (Cline 3.0.73), so a refused or held call ends the task, and the model never reads why. The Cline CLI does not show the gate's `errorMessage` either: `cline --json` reports the run as aborted (`finishReason: "aborted"`, `run_aborted` with `reason: "external_abort"`). The reason is in the gate's log, `~/.intutic/events/cline-hook-events.jsonl`, one JSON line per decision. Once Cline can refuse a single call from a hook, the gate will use it.
+
 ## Setup
 
 ### 1. Initialize Intutic

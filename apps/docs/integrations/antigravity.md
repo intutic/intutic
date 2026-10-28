@@ -85,6 +85,8 @@ Gemini CLI runs command hooks registered under `hooks.BeforeTool` in `~/.gemini/
 
 Gemini CLI's shell tool is `run_shell_command`; a hold such as `review_before: action:deploy` applies to the commands it runs.
 
+**Not over ACP.** Gemini CLI runs no hooks when an editor or agent platform drives it over the Agent Client Protocol (`gemini --acp`): its ACP session runs each tool directly, so `BeforeTool` never fires, and Gemini CLI's own tools (shell, file edits) run ungated though the gate is installed (Gemini CLI 0.65.0; reported as [google-gemini/gemini-cli#30005](https://github.com/google-gemini/gemini-cli/issues/30005)). `gemini` and `gemini -p` run the hooks. Under ACP, MCP servers wrapped by the [MCP proxy](#mcp-servers) are still gated.
+
 The same script is registered under `hooks.AfterTool` (matcher `run_shell_command`) with `--event post`. It records whether a test run passed, from the result's `llmContent` (which carries `Exit Code: N` when the command failed), for a [`requires_before: action:run_tests[ok] -> …`](/reference/harness-security-matrix#post-tool-outcome) rule, and always allows. Google Antigravity's own hook (`~/.gemini/config/hooks.json`) has no post-tool registration yet, so on it such a rule refuses: no result can be observed there.
 
 ## MCP servers
