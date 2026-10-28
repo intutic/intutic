@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Streamed Chat Completions chunks the proxy writes are well formed, and in time.** With output
+  DLP on (the default), the chunks the proxy writes into a stream (the held text and tool-call
+  arguments, the judge's, decide's and governance notes, a refusal's tail) had no `created` or
+  `model` and an id of their own or none; strict clients (Grok Build) failed the turn on them. They
+  now carry the stream's `id`, `created` and `model`, from the upstream's chunks or, before the
+  first, the request's model. A tool call's held arguments, and held text, now go out before the
+  chunk that finishes the choice, not at `[DONE]`: a client that assembles its calls there (Goose)
+  ran them with no arguments. The proxy's whole answers to a command (`chatcmpl-intutic-cmd`) carry
+  `created` and `model` too. (#392)
+
 ## [3.0.7] - 2026-10-28
 
 ### Fixed
