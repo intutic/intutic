@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Two limits of the harnesses' own hooks.** Gemini CLI driven over ACP (`gemini --acp`) runs no
+  hooks, so its own tools are not gated there (#396). A Cline gate's refusal ends the whole task,
+  and the Cline CLI reports only that the run was aborted; the reason is in
+  `~/.intutic/events/cline-hook-events.jsonl` (#397). Both are on the integration pages and in the
+  harness matrix's gaps.
+
 ## [3.0.7] - 2026-10-28
 
 ### Fixed
