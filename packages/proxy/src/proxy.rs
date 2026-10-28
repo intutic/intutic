@@ -9989,20 +9989,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             // there is no `choices[]` to read. Without this the judge and
             // the semantic cache saw an empty response on every
             // non-streaming Codex CLI request.
-            if let Some(output) = resp_json.get("output").and_then(|o| o.as_array()) {
-                for item in output {
-                    let Some(content) = item.get("content").and_then(|c| c.as_array()) else {
-                        continue;
-                    };
-                    for part in content {
-                        if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
-                            if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
-                                text.push_str(txt);
-                            }
-                        }
-                    }
-                }
-            }
+            text.push_str(&responses_output_text(&resp_json));
         } else {
             if let Some(choices) = resp_json.get("choices").and_then(|c| c.as_array()) {
                 if let Some(first) = choices.first() {
@@ -10056,7 +10043,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         let completion_tokens = usage.output.unwrap_or(0);
         let mut text = String::new();
 
-        if let Some(choices) = translated.get("choices").and_then(|c| c.as_array()) {
+        if protocol == Protocol::OpenAIResponses {
+            // Translated to the Responses shape: no `choices[]`.
+            text.push_str(&responses_output_text(&translated));
+        } else if let Some(choices) = translated.get("choices").and_then(|c| c.as_array()) {
             if let Some(first) = choices.first() {
                 if let Some(txt) = first
                     .get("message")
@@ -10442,13 +10432,10 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 "{}",
                 denial.log_message()
             );
-            // Cross-provider bodies were translated to OpenAI above, so the
-            // client is expecting that shape whatever the upstream was.
-            let wire = if is_same_provider {
-                wire_for(&protocol, &provider)
-            } else {
-                crate::commands::WireProvider::OpenAI
-            };
+            // Cross-provider bodies were translated to the caller's OpenAI
+            // shape above (Chat Completions or Responses), so the client is
+            // expecting that shape whatever the upstream was.
+            let wire = wire_for(&protocol, &provider);
             serde_json::to_vec(&crate::plugins::response_gate::refusal_body(
                 wire,
                 &actual_model,
@@ -11205,6 +11192,24 @@ enum DeltaShape {
     /// extraction, URL-verb streaming detection, query-string forwarding and a
     /// Gemini stream translator — a feature, not a DLP fix.
     Unparsed,
+}
+
+/// The text of a Responses body: every `output_text` part of its `output`
+/// items, in order.
+fn responses_output_text(body: &serde_json::Value) -> String {
+    let mut text = String::new();
+    let items = body.get("output").and_then(|o| o.as_array());
+    for item in items.into_iter().flatten() {
+        let parts = item.get("content").and_then(|c| c.as_array());
+        for part in parts.into_iter().flatten() {
+            if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
+                if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
+                    text.push_str(txt);
+                }
+            }
+        }
+    }
+    text
 }
 
 /// `body` with `note` added after the model's text: as a text block of its own
