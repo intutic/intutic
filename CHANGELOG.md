@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.7] - 2026-10-28
+
+### Fixed
+
+- **The standalone CLI binaries start on every platform.** They are built on Linux for macOS and
+  Windows too, and `pkg` could not produce V8 bytecode for another OS, so the binary shipped without
+  its source and exited at start. They now ship as plain source. 3.0.6 was tagged but its release
+  stopped at the macOS smoke test, so only its PyPI package went out; 3.0.7 carries everything it
+  described.
+
 ## [3.0.6] - 2026-10-28
 
 ### Changed
