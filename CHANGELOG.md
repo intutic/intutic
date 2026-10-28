@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenClaw runs the plugin gate.** OpenClaw (2026.10.7) lists a plugin from `plugins.load.paths`
+  as enabled but registers it only when the config enables it by name, so the gate never ran and
+  every tool call went through. The writer now sets `plugins.entries.intutic-governance.enabled` to
+  `true`; disconnect puts the entry back as it was, or removes it. (#395)
+
 ## [3.0.7] - 2026-10-28
 
 ### Fixed
