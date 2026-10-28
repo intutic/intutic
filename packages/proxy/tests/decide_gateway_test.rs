@@ -23,6 +23,7 @@
 //! ONE `#[tokio::test]` for the end-to-end cases: `HOME`, the upstream URL,
 //! the SOP directory and the engine are process-global. The log rotation case
 //! is a plain test on its own directory.
+#![cfg(feature = "control-plane")]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

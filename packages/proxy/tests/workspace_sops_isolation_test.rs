@@ -2,6 +2,7 @@
 //! tenants: two workspaces on the same
 //! gateway process get two different, non-leaking SOP sets, fetched from a
 //! real HTTP server (not a mock trait) standing in for the control plane.
+#![cfg(feature = "control-plane")]
 
 use intutic_proxy::credential::RequestCredential;
 use intutic_proxy::gateway::{init_gateway_config, GatewayConfig};

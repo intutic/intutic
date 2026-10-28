@@ -20,6 +20,7 @@
 //!
 //! ONE `#[tokio::test]`: upstream and control-plane URLs, `HOME` and the log
 //! subscriber are process-global.
+#![cfg(feature = "control-plane")]
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
