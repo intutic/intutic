@@ -38,6 +38,14 @@
  * permission check skips it, leaving the call to the user's own permission
  * settings. A decision Antigravity does not know is reported as an error.
  *
+ * Antigravity CLI reads it differently: 1.4.7 refuses a call whose hook
+ * printed `{}` ("tool call denied by pre-tool hook"), so under the CLI an
+ * allowed call prints `{"decision":"allow"}`. The gate tells the CLI by its
+ * payload, whose `artifactDirectoryPath` and `transcriptPath` are under the
+ * CLI's own data directory, `~/.gemini/antigravity-cli/` (both read from
+ * the CLI 1.4.7 against a mock model; it sets no variable of its own in the
+ * hook's environment but `ANTIGRAVITY_CONVERSATION_ID`).
+ *
  * HLD §3.14 — Three-Tier Defense Cascade (Tier 1 Native Gating)
  * @module
  */
@@ -164,9 +172,11 @@ process.stdin.on('end', async () => {
     await intuticGateWithDecide(toolName, targetPath, command, logEvent, _intuticWsId, input);
 
     // Allow: a result with no decision in it, so the user's own permission
-    // settings decide (see the module doc).
+    // settings decide; under Antigravity CLI, which reads that as a denial,
+    // an explicit allow (see the module doc).
     logEvent('tool_allowed', toolName, '');
-    process.stdout.write('{}\\n');
+    const underCli = [ctx.artifactDirectoryPath, ctx.transcriptPath].some((p) => typeof p === 'string' && /[\\\\/]antigravity-cli[\\\\/]/.test(p));
+    process.stdout.write(underCli ? '{"decision":"allow"}\\n' : '{}\\n');
     process.exit(0);
   } catch (err) {
     // Fail CLOSED — the stdout-decision-deny contract, even on a crash inside
