@@ -1,6 +1,6 @@
 // GENERATED — do not edit by hand.
 //
-// Regenerate with tools/scripts/build-offline-pricing-bundle.ts (enterprise repo) —
+// Regenerate with tools/scripts/build-offline-pricing-bundle.ts —
 // the same fetch that produces packages/proxy/src/pricing/offline_bundle.json.
 // Source: https://raw.githubusercontent.com/BerriAI/litellm/ab07b7207e37e52f1ac8126817d101c90f5d01a0/model_prices_and_context_window.json
 // Generated: 2026-10-29

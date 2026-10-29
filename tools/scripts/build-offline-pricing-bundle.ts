@@ -333,7 +333,7 @@ function writeModelCatalog(entries: ModelCatalogEntryData[], carried: string[], 
   const lines = [
     '// GENERATED — do not edit by hand.',
     '//',
-    '// Regenerate with tools/scripts/build-offline-pricing-bundle.ts (enterprise repo) —',
+    '// Regenerate with tools/scripts/build-offline-pricing-bundle.ts —',
     '// the same fetch that produces packages/proxy/src/pricing/offline_bundle.json.',
     `// Source: ${LITELLM_PRICES_URL}`,
     `// Generated: ${generatedAt}`,

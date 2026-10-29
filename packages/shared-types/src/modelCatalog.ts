@@ -11,8 +11,8 @@
  * hand-reviewed credential surface.
  *
  * The actual data lives in `modelCatalog.generated.ts` — regenerate it with
- * `tools/scripts/build-offline-pricing-bundle.ts` (enterprise repo only; the
- * same fetch that produces `packages/proxy/src/pricing/offline_bundle.json`,
+ * `tools/scripts/build-offline-pricing-bundle.ts` (the same
+ * fetch that produces `packages/proxy/src/pricing/offline_bundle.json`,
  * so the two can never drift from being regenerated at different times).
  * This file is the hand-written, stable surface: types and query helpers.
  *

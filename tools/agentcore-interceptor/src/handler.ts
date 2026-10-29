@@ -108,7 +108,7 @@ const INSUFFICIENT_SCOPE = 'INSUFFICIENT_SCOPE'
 
 /**
  * Call `POST /api/v1/integrations/agentcore/gateway-check`
- * (services/control-plane/src/routes/agentcoreGateway.ts) for a verdict.
+ * for a verdict.
  *
  * Never throws for an ordinary "the call was denied" outcome, nor for a 400
  * (`INVALID_REQUEST`) or a 403 `INSUFFICIENT_SCOPE`, both returned as a
