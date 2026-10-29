@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-29
+
+### Changed
+
+- **Release pipeline actions updated.** The CodeQL actions (4.39.1), `actions/setup-python`
+  (7.1.0) and `pypa/gh-action-pypi-publish` (1.14.3) that the CI and publish workflows use
+  are on their current releases. No shipped package changes behaviour in this release; it
+  is a version marker for the first release cut with these workflow versions.
+
 ## [3.0.9] - 2026-10-29
 
 ### Security
