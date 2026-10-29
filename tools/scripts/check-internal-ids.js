@@ -99,8 +99,6 @@ const PRIVATE_PATTERNS = [
   ['private', /services\/control-plane\//, 'a path in the private repository'],
   ['private', /\bintutic-enterprise\b/, 'the private repository'],
 ]
-/** Lines that carry such a string as data, not as a pointer. */
-const PRIVATE_DATA_LINES = ['"services/control-plane/src/app.ts"']
 
 /**
  * Pattern kinds a file may carry, and why. Keep this short: each entry is a
@@ -185,7 +183,7 @@ for (const rel of candidates) {
       const m = line.match(pattern)
       if (m) failures.push(`${rel}:${i + 1}  "${m[0]}" — ${why}`)
     }
-    if (PRIVATE_ROOTS.some((r) => rel.split(sep).join('/').startsWith(r)) && !PRIVATE_DATA_LINES.some((d) => line.includes(d))) {
+    if (PRIVATE_ROOTS.some((r) => rel.split(sep).join('/').startsWith(r))) {
       for (const [, pattern, why] of PRIVATE_PATTERNS) {
         const m = line.match(pattern)
         if (m) failures.push(`${rel}:${i + 1}  "${m[0]}" — ${why}`)
