@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
+import { PRIVATE_TREE_CONFIG, PRIVATE_TREE_FILE, priv } from './privateTree'
 
 const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-doc-tables.js')
 
@@ -208,7 +209,7 @@ describe('docs tables and diagrams', () => {
     expect(r.status, r.out).toBe(0)
     expect(r.out).toContain('4 diagram(s) checked against the 6 transitions')
     expect(r.out).toContain('2 row(s) for 2 registered detector(s)')
-    expect(r.out).toContain('[SKIP] services/control-plane/src/lib/planSkuMap.ts is not in this checkout')
+    expect(r.out).toContain('[SKIP] the plan catalog source is not in this checkout')
   })
 
   it('skips the tier matrix, and passes, when the checkout has no plan catalog at all', async () => {
@@ -271,7 +272,8 @@ describe('docs tables and diagrams', () => {
   })
 
   it('checks the tier-matrix ticks against planSkuMap.ts where it exists', async () => {
-    await put('services/control-plane/src/lib/planSkuMap.ts', PLAN_SKU_MAP)
+    await put(PRIVATE_TREE_FILE, PRIVATE_TREE_CONFIG)
+    await put(priv('src/lib/planSkuMap.ts'), PLAN_SKU_MAP)
     const ok = await runGate(root)
     expect(ok.status, ok.out).toBe(0)
     expect(ok.out).toContain('4 tick(s) against their flags')

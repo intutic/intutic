@@ -91,9 +91,11 @@
  * emitters' own tests hold it).
  *
  * Files under enterprise-only trees (the dashboard, the control plane) are
- * absent in the open-core checkout. Evidence there is counted as skipped and
- * reported, as is the SIEM source inventory, so a run that checked nothing
- * says so. Surfaces in other repositories (the website) are checked only when
+ * absent in the open-core checkout. Evidence that cites them lives in
+ * `tools/scripts/feature-surfaces.private.json` ({ featureId: { interface:
+ * [evidence…] } }), a file only the full checkout has; it is added to each
+ * feature's list before checking. The SIEM source inventory is skipped without
+ * the tree and reported, so a run that checked nothing says so. Surfaces in other repositories (the website) are checked only when
  * INTUTIC_WEBSITE_DIR points at a checkout.
  *
  * Usage: node tools/scripts/check-feature-surfaces.js [repo-root] [--matrix]
@@ -104,10 +106,13 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { headingAnchors } from './check-dashboard-docs-links.js'
+import { privateTree } from './lib/private-tree.js'
 
 const args = process.argv.slice(2)
 const MATRIX = args.includes('--matrix')
 const ROOT = resolve(args.find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), '../..'))
+/** Where the paid service's source is, when this checkout has it (tools/scripts/private-tree.json). */
+const priv = privateTree(ROOT)
 
 export const INTERFACES = [
   'api',
@@ -127,37 +132,30 @@ export const INTERFACES = [
  * Trees only the enterprise checkout has. Everything else cited here is mirrored, the Terraform provider included.
  * `tools/cli-control-plane/` is the optional CLI plugin that provides the control-plane commands.
  */
-const ENTERPRISE_ONLY = ['apps/dashboard/', 'services/control-plane/', 'packages/db/', 'docs/', 'tools/cli-control-plane/']
+const ENTERPRISE_ONLY = ['apps/dashboard/', priv.prefix, 'packages/db/', 'docs/', 'tools/cli-control-plane/'].filter(Boolean)
 const CLI_PLUGIN_SRC = 'tools/cli-control-plane/src'
 const EXTERNAL = { website: 'INTUTIC_WEBSITE_DIR' }
 const PLAN_BADGE = /<Badge[^>]*text="([^"]+)"/
-const SIEM_REGISTRY = 'services/control-plane/src/services/siem/eventSourceRegistry.ts'
+const SIEM_REGISTRY = priv.file('siemRegistry')
 const TF_PROVIDER = 'packages/terraform-provider-intutic/internal/provider'
 const NOTIFICATION_PICKER = 'apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx'
-const NOTIFICATION_ROUTER = 'services/control-plane/src/services/notificationRouterService.ts'
-const CONTROL_PLANE_SRC = 'services/control-plane/src'
+const NOTIFICATION_ROUTER = priv.file('notificationRouter')
+const CONTROL_PLANE_SRC = priv.src
 /**
  * Control-plane files that consume, format or export notification events
  * rather than emit them: an event type named only in these has no emitter.
  */
-const EVENT_CONSUMERS = [
-  'services/notificationRouterService.ts',
-  'services/notificationHubService.ts',
-  'services/governanceNotificationService.ts',
-  'services/emailService.ts',
-  'services/adapters/',
-  'services/siem/',
-  'routes/notifications.ts',
-]
+const EVENT_CONSUMERS = priv.values('eventConsumers')
 
 const cache = new Map()
 const text = (rel, base = ROOT) => {
+  if (rel === null) return null
   const full = join(base, rel)
   if (!cache.has(full)) cache.set(full, existsSync(full) ? readFileSync(full, 'utf8') : null)
   return cache.get(full)
 }
 // A paid-plan docs page is not in the public checkout, so evidence that lives on one is skipped there.
-const paidPageAbsent = (rel) => !existsSync(join(ROOT, 'services/control-plane')) && text(rel) === null
+const paidPageAbsent = (rel) => !priv.present && text(rel) === null
 const enterpriseOnly = (rel) => ENTERPRISE_ONLY.some((p) => rel.startsWith(p))
 
 function files(dir, keep) {
@@ -652,6 +650,23 @@ export function checkClaims(manifest, baseline, { items: found, unseen }) {
   return { problems, checked, skipped }
 }
 
+/**
+ * Add the evidence the full checkout keeps in feature-surfaces.private.json to
+ * the manifest's lists. Naming a feature or interface the manifest lacks fails.
+ */
+export function withPrivateEvidence(manifest, extra) {
+  for (const [id, surfaces] of Object.entries(extra)) {
+    const feature = manifest.features.find((f) => f.id === id)
+    if (!feature) throw new Error(`feature-surfaces.private.json names "${id}", which feature-surfaces.json does not list`)
+    for (const [iface, items] of Object.entries(surfaces)) {
+      if (!Array.isArray(feature.surfaces?.[iface]))
+        throw new Error(`feature-surfaces.private.json adds ${iface} evidence to "${id}", whose ${iface} is not a list`)
+      feature.surfaces[iface].push(...items)
+    }
+  }
+  return manifest
+}
+
 export function check(manifest) {
   const problems = []
   let checked = 0
@@ -738,6 +753,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     return JSON.parse(readFileSync(path, 'utf8'))
   }
   const manifest = read('feature-surfaces.json')
+  const extra = join(ROOT, 'tools/scripts/feature-surfaces.private.json')
+  if (existsSync(extra)) withPrivateEvidence(manifest, JSON.parse(readFileSync(extra, 'utf8')))
   if (MATRIX) {
     console.log(matrix(manifest))
     process.exit(0)

@@ -22,6 +22,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, dirname, relative, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { headingAnchors, pageFile } from './check-dashboard-docs-links.js'
+import { privateTree } from './lib/private-tree.js'
 
 const DOCS = 'apps/docs'
 const SKIP = new Set(['node_modules', '.vitepress', 'public'])
@@ -92,7 +93,7 @@ export function check(root) {
         continue
       }
       const page = pageFile(root, path.replace(/\.md$/, ''))
-      if (!page && !existsSync(join(root, 'services/control-plane'))) {
+      if (!page && !privateTree(root).present) {
         // Open-core checkout: the pages of the paid plans are not in this tree, so a link to one cannot be checked here.
         // The private repository's run checks it against the full tree.
         skipped++

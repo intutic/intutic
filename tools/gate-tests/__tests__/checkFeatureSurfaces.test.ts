@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, writeFile, appendFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
+import { PRIVATE_DIR, PRIVATE_TREE_CONFIG, PRIVATE_TREE_FILE, priv } from './privateTree'
 
 const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-feature-surfaces.js')
 const INTERFACES = [
@@ -254,7 +255,7 @@ describe('feature surfaces', () => {
   })
 
   describe('notification events against their emitters, the dashboard picker and the settings guide', () => {
-    const ROUTER = 'services/control-plane/src/services/notificationRouterService.ts'
+    const ROUTER = priv('src/services/notificationRouterService.ts')
     const PICKER = 'apps/dashboard/src/components/settings/NotificationSettingsPanel.tsx'
     const types = (list: string[]) =>
       put(
@@ -275,6 +276,7 @@ describe('feature surfaces', () => {
       )
 
     beforeEach(async () => {
+      await put(PRIVATE_TREE_FILE, PRIVATE_TREE_CONFIG)
       await baseline({
         docsPages: ['reference/api.md', 'reference/cli.md', 'guide/settings.md'],
         eventTypes: ['widget.created', 'widget.deleted'],
@@ -282,7 +284,7 @@ describe('feature surfaces', () => {
       await manifest([feature(present)])
       await types(['widget.created', 'widget.deleted'])
       await router(['widget.created', 'widget.deleted'])
-      await put('services/control-plane/src/services/widgetService.ts', "emitter.emit('widget.created', {})\nemitter.emit('widget.deleted', {})\n")
+      await put(priv('src/services/widgetService.ts'), "emitter.emit('widget.created', {})\nemitter.emit('widget.deleted', {})\n")
       await picker(['widget.created', 'widget.deleted'])
       await guide(['widget.created', 'widget.deleted'])
     })
@@ -294,8 +296,8 @@ describe('feature surfaces', () => {
     })
 
     it('fails a listed type nothing emits, or only a consumer names', async () => {
-      await put('services/control-plane/src/services/widgetService.ts', "emitter.emit('widget.created', {})\n")
-      await put('services/control-plane/src/services/adapters/slackBlockBuilder.ts', "case 'widget.deleted':\n")
+      await put(priv('src/services/widgetService.ts'), "emitter.emit('widget.created', {})\n")
+      await put(priv('src/services/adapters/slackBlockBuilder.ts'), "case 'widget.deleted':\n")
       const r = await runGate(root)
       expect(r.status, r.out).toBe(1)
       expect(r.out).toContain('NOTIFICATION_EVENT_TYPES lists widget.deleted, which nothing in the control plane emits')
@@ -311,7 +313,7 @@ describe('feature surfaces', () => {
     it('counts a type a service dispatches to the hub itself', async () => {
       await router(['widget.created'])
       await put(
-        'services/control-plane/src/services/widgetService.ts',
+        priv('src/services/widgetService.ts'),
         "import { dispatch } from './notificationHubService.js'\nemitter.emit('widget.created', {})\nawait dispatch(db, valkey, ws, { type: 'widget.deleted' })\n",
       )
       const r = await runGate(root)
@@ -321,7 +323,7 @@ describe('feature surfaces', () => {
     it('fails a type the router sends that no rule can name', async () => {
       await router(['widget.created', 'widget.deleted', 'widget.renamed'])
       await put(
-        'services/control-plane/src/services/widgetService.ts',
+        priv('src/services/widgetService.ts'),
         "emitter.emit('widget.created', {})\nemitter.emit('widget.deleted', {})\nemitter.emit('widget.renamed', {})\n",
       )
       const r = await runGate(root)
@@ -342,7 +344,8 @@ describe('feature surfaces', () => {
     })
 
     it('skips the emitter and picker checks in a checkout without the control plane and the dashboard', async () => {
-      await rm(join(root, 'services'), { recursive: true, force: true })
+      await rm(join(root, PRIVATE_DIR), { recursive: true, force: true })
+      await rm(join(root, PRIVATE_TREE_FILE), { force: true })
       await rm(join(root, 'apps/dashboard'), { recursive: true, force: true })
       const r = await runGate(root)
       expect(r.status, r.out).toBe(0)

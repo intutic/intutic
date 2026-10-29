@@ -12,6 +12,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import ts from 'typescript'
+import { PRIVATE_TREE_CONFIG, PRIVATE_TREE_FILE, priv } from './privateTree'
 
 const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-dashboard-links.js')
 const gate = (await import(SCRIPT)) as {
@@ -120,12 +121,13 @@ describe('check-dashboard-links.js', () => {
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'check-dashboard-links-'))
+    await put(PRIVATE_TREE_FILE, PRIVATE_TREE_CONFIG)
     await put('apps/dashboard/src/main.tsx', [
       "createRoute({ path: '/incidents' })",
       "createRoute({ path: '/incidents/$incidentId' })",
       "createRoute({ path: '/settings' })",
     ].join('\n'))
-    await put('services/control-plane/src/services/router.ts', [
+    await put(priv('src/services/router.ts'), [
       "const APP_URL = process.env.APP_URL ?? ''",
       'export const a = { action_url: `/incidents/${data.incidentId}` }',
       'export const b = `${APP_URL}/settings?tab=billing`',
@@ -142,20 +144,20 @@ describe('check-dashboard-links.js', () => {
   })
 
   it('fails on a missing route and names it', async () => {
-    await put('services/control-plane/src/routes/orgs.ts', 'export const s = { success_url: `${appUrl}/settings/org?checkout=success` }')
+    await put(priv('src/routes/orgs.ts'), 'export const s = { success_url: `${appUrl}/settings/org?checkout=success` }')
     const r = await run()
     expect(r.status).toBe(1)
-    expect(r.out).toContain('services/control-plane/src/routes/orgs.ts:1  (app-url)')
+    expect(r.out).toContain(priv('src/routes/orgs.ts:1  (app-url)'))
     expect(r.out).toMatch(/Missing routes:\n {2}\/settings\/org {2}\(1 link\)/)
   })
 
   it('ignores test files', async () => {
-    await put('services/control-plane/src/services/router.test.ts', "export const t = { url: '/nowhere' }")
+    await put(priv('src/services/router.test.ts'), "export const t = { url: '/nowhere' }")
     expect((await run()).status).toBe(0)
   })
 
   it('fails rather than passing vacuously when no relative links are found', async () => {
-    await put('services/control-plane/src/services/router.ts', 'export const b = `${APP_URL}/settings`')
+    await put(priv('src/services/router.ts'), 'export const b = `${APP_URL}/settings`')
     const r = await run()
     expect(r.status).toBe(1)
     expect(r.out).toContain('no relative dashboard links found')
@@ -181,7 +183,7 @@ describe('check-dashboard-links.js', () => {
     })
 
     it('fails on a link to a legacy path, naming the redirect target', async () => {
-      await put('services/control-plane/src/services/router.ts', [
+      await put(priv('src/services/router.ts'), [
         "const APP_URL = process.env.APP_URL ?? ''",
         "export const a = { action_url: '/findings/incidents' }",
         'export const b = `${APP_URL}/incidents?tab=alerts`',
@@ -189,14 +191,14 @@ describe('check-dashboard-links.js', () => {
       const r = await run()
       expect(r.status).toBe(1)
       expect(r.out).toContain('1 dashboard link(s) use a legacy path')
-      expect(r.out).toContain('services/control-plane/src/services/router.ts:3  (app-url)')
+      expect(r.out).toContain(priv('src/services/router.ts:3  (app-url)'))
       expect(r.out).toContain('/incidents matches the legacy path /incidents, which redirects to /findings/incidents')
       // A legacy path is reported as legacy, not as a missing route as well.
       expect(r.out).not.toContain('point at routes that do not exist')
     })
 
     it('passes when every link uses the canonical path', async () => {
-      await put('services/control-plane/src/services/router.ts', [
+      await put(priv('src/services/router.ts'), [
         "const APP_URL = process.env.APP_URL ?? ''",
         'export const a = { action_url: `/findings/incidents/${data.incidentId}` }',
         'export const b = `${APP_URL}/findings/incidents?tab=alerts`',
@@ -209,7 +211,7 @@ describe('check-dashboard-links.js', () => {
     })
 
     it('matches an interpolated detail id against a $param legacy segment', async () => {
-      await put('services/control-plane/src/services/router.ts', [
+      await put(priv('src/services/router.ts'), [
         "const APP_URL = process.env.APP_URL ?? ''",
         'export const a = { action_url: card.sopId ? `/sops/${card.sopId}` : null }',
         'export const b = `${APP_URL}/findings/incidents`',

@@ -159,7 +159,7 @@ describe('internal ids in mirrored source (public checkout)', () => {
 describe('internal ids in the enterprise checkout', () => {
   beforeEach(async () => {
     await page('Clean.\n')
-    await put('services/control-plane/src/app.ts', `// ${id('TD', '-')}\n`)
+    await put(['services', 'control-plane', 'src', 'app.ts'].join('/'), `// ${id('TD', '-')}\n`)
   })
 
   it('leaves files that never reach the public repo alone', async () => {

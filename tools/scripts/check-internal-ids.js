@@ -24,7 +24,7 @@
  * root-level file (the build and lint config).
  *
  * In the public checkout every file under those roots is public, so all of
- * them are scanned. The enterprise checkout (it has services/control-plane/)
+ * them are scanned. The full checkout (it has the paid service's source)
  * keeps files under the same roots that never leave it — enterprise-only
  * packages, deploy scripts — and its own root config and workflows. There a
  * file is scanned only if the public checkout has the same path: pass it with
