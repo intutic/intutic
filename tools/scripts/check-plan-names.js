@@ -26,6 +26,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { privateTree } from './lib/private-tree.js'
 
 const ROOT = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'))
 
@@ -34,9 +35,7 @@ const SOURCES = [
   { dir: 'apps/docs', ext: ['.md'], skip: ['node_modules', 'public', 'dist', 'cache'] },
   { file: 'apps/docs/.vitepress/config.ts' },
   { dir: 'apps/dashboard/src', ext: ['.ts', '.tsx'], skip: [] },
-  { file: 'services/control-plane/src/services/emailService.ts' },
-  { file: 'services/control-plane/src/lib/planCatalog.ts' },
-  { file: 'services/control-plane/src/routes/trial.ts' },
+  ...privateTree(ROOT).list('planNameSources').map((file) => ({ file })),
 ]
 
 /** One plan name in a list: a capitalised word, optionally two ("Biz Org"). */

@@ -17,7 +17,7 @@
  * onboarding-email links built on `getAppUrl()` (`/pricing`,
  * `/guide/getting-started`).
  *
- * So it now parses every non-test `.ts` file under `services/control-plane/src`
+ * So it now parses every non-test `.ts` file in the control plane's source
  * (routes, services, adapters, crons) with the TypeScript parser and collects:
  *
  *   - app-url links: a string or template literal where a `/path` follows an
@@ -53,10 +53,10 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { privateTree } from './lib/private-tree.js'
 
 const ROUTER = 'apps/dashboard/src/main.tsx'
 const LEGACY_REDIRECTS = 'apps/dashboard/src/routes/legacyRedirects.ts'
-const CONTROL_PLANE_SRC = 'services/control-plane/src'
 
 const URL_KEY = /^(url|href|link)$|(Url|_url|URL)$/
 const APP_URL_NAMES = ['APP_URL', 'appUrl']
@@ -229,8 +229,9 @@ function walk(dir, out = []) {
 
 export async function main(argv) {
   const root = resolve(argv[2] || join(dirname(fileURLToPath(import.meta.url)), '..', '..'))
-  if (!existsSync(join(root, ROUTER)) || !existsSync(join(root, CONTROL_PLANE_SRC))) {
-    console.log(`${ROUTER} or ${CONTROL_PLANE_SRC} does not exist. Skipping dashboard link check (dashboard and control plane are private).`)
+  const CONTROL_PLANE_SRC = privateTree(root).src
+  if (!existsSync(join(root, ROUTER)) || CONTROL_PLANE_SRC === null || !existsSync(join(root, CONTROL_PLANE_SRC))) {
+    console.log(`${ROUTER} or the control plane source does not exist. Skipping dashboard link check (dashboard and control plane are private).`)
     return 0
   }
   const { default: ts } = await import('typescript')

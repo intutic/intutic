@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { PRIVATE_TREE_CONFIG, PRIVATE_TREE_FILE, priv } from './privateTree'
 
 const SCRIPT = resolve(import.meta.dirname, '../../scripts/check-docs-links.js')
 const gate = (await import(SCRIPT)) as { check(root: string): { links: number; problems: string[]; skipped: number } }
@@ -53,7 +54,8 @@ describe('docs links', () => {
   })
 
   it('fails a missing page, a missing anchor, a repo-relative source link, and a stray character', async () => {
-    await put('services/control-plane/package.json', '{}') // the full tree, so a missing page is a mistake
+    await put(PRIVATE_TREE_FILE, PRIVATE_TREE_CONFIG)
+    await put(priv('package.json'), '{}') // the full tree, so a missing page is a mistake
     await put(
       'apps/docs/guide/budgets.md',
       [

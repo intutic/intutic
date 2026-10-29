@@ -46,6 +46,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, relative, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { privateTree } from './lib/private-tree.js'
 
 const ROOT = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'))
 const DOCS = join(ROOT, 'apps/docs')
@@ -55,7 +56,9 @@ const ANOMALY_MOD = 'packages/proxy/src/plugins/anomaly/mod.rs'
 const ANOMALY_DETECTORS = 'packages/proxy/src/plugins/anomaly/detectors.rs'
 const GRAPH_DETECTORS = 'packages/proxy/src/plugins/anomaly/graph_detectors.rs'
 const OPERATIONS = 'packages/shared-types/fixtures/control-plane-operations.json'
-const PLAN_SKU_MAP = 'services/control-plane/src/lib/planSkuMap.ts'
+const PLAN_SKU_MAP = privateTree(ROOT).file('planSkuMap')
+/** What the messages call the plan catalog source: its path where this checkout has one. */
+const PLAN_SKU_LABEL = PLAN_SKU_MAP ?? 'the plan catalog source'
 const PLANS_JSON = 'apps/docs/data/plans.json'
 
 const findings = []
@@ -528,10 +531,10 @@ run('tier matrix', () => {
   const p = page('guide/tier-matrix.md')
   let plans
   let flagsChecked = true
-  if (existsSync(join(ROOT, PLAN_SKU_MAP))) {
+  if (PLAN_SKU_MAP !== null && existsSync(join(ROOT, PLAN_SKU_MAP))) {
     const src = read(PLAN_SKU_MAP)
     const body = src.match(/export const planSkuMap: Record<string, PlanSku> = \{([\s\S]*?)\n\} as const/)?.[1]
-    if (!body) throw new Error(`could not find planSkuMap in ${PLAN_SKU_MAP}`)
+    if (!body) throw new Error(`could not find planSkuMap in ${PLAN_SKU_LABEL}`)
     plans = [...body.matchAll(/^ {2}(\w+): \{([\s\S]*?)^ {2}\},/gm)].map((m) => ({
       id: m[1],
       name: m[2].match(/displayName:\s*'([^']+)'/)?.[1],
@@ -539,23 +542,23 @@ run('tier matrix', () => {
       flags: Object.fromEntries([...m[2].matchAll(/(\w+):\s*(true|false),/g)].map((f) => [f[1], f[2] === 'true'])),
     }))
     plans = plans.filter((x) => x.billing && x.billing !== 'none')
-    if (plans.length < 2) throw new Error(`read ${plans.length} paid plans from ${PLAN_SKU_MAP}; the parsing broke`)
+    if (plans.length < 2) throw new Error(`read ${plans.length} paid plans from ${PLAN_SKU_LABEL}; the parsing broke`)
   } else if (!existsSync(join(ROOT, PLANS_JSON))) {
     // Open-core checkout without the plan catalog: nothing names the columns, so there is nothing to compare.
-    console.log(`[SKIP] neither ${PLAN_SKU_MAP} nor ${PLANS_JSON} is in this checkout: the tier-matrix columns are not checked.`)
+    console.log(`[SKIP] neither ${PLAN_SKU_LABEL} nor ${PLANS_JSON} is in this checkout: the tier-matrix columns are not checked.`)
     return
   } else {
     // Open-core checkout: no control plane. The docs' own plan data names the columns.
     plans = JSON.parse(read(PLANS_JSON)).map((x) => ({ id: x.id, name: x.name, billing: x.billing }))
     flagsChecked = false
-    console.log(`[SKIP] ${PLAN_SKU_MAP} is not in this checkout: tier-matrix columns are checked against ${PLANS_JSON}, ticks are not.`)
+    console.log(`[SKIP] ${PLAN_SKU_LABEL} is not in this checkout: tier-matrix columns are checked against ${PLANS_JSON}, ticks are not.`)
   }
   const names = plans.map((x) => x.name)
   const table = p.tables.find((t) => (t.header[0] ?? '') === '' && t.header.slice(1).some((h) => names.includes(plain(h))))
   if (!table) throw new Error(`${p.rel} has no table whose columns are plan names`)
   const columns = table.header.slice(1).map(plain)
   if (columns.join() !== names.join()) {
-    findings.push(`${p.rel}:${table.line}: the plan columns are ${columns.join(', ')}; the paid plans are ${names.join(', ')} (${flagsChecked ? PLAN_SKU_MAP : PLANS_JSON}).`)
+    findings.push(`${p.rel}:${table.line}: the plan columns are ${columns.join(', ')}; the paid plans are ${names.join(', ')} (${flagsChecked ? PLAN_SKU_LABEL : PLANS_JSON}).`)
     return
   }
   let ticks = 0
@@ -571,7 +574,7 @@ run('tier matrix', () => {
     plans.forEach((plan, i) => {
       const has = flag.startsWith('billing:') ? plan.billing === flag.slice('billing:'.length) : plan.flags[flag]
       if (has === undefined) {
-        findings.push(`${p.rel}:${row.line}: TIER_ROWS maps "${key}" to ${flag}, which ${PLAN_SKU_MAP} does not define for ${plan.id}.`)
+        findings.push(`${p.rel}:${row.line}: TIER_ROWS maps "${key}" to ${flag}, which ${PLAN_SKU_LABEL} does not define for ${plan.id}.`)
         return
       }
       const ticked = (row.cells[i + 1] ?? '').includes('✓')

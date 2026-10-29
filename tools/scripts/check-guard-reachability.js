@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
+import { privateTree } from './lib/private-tree.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
@@ -78,9 +79,10 @@ for (const id of idFns) {
 // not carry. Skipped there BY NAME — a silent skip would read as six flags
 // checked when zero were, which is the vacuous pass this gate hunts.
 import { existsSync } from 'node:fs'
-const flagWriterPath = 'services/control-plane/src/routes/workspace.ts'
+const priv = privateTree(ROOT)
+const flagWriterPath = priv.file('flagWriter')
 let writableFlags = []
-if (!existsSync(join(ROOT, flagWriterPath))) {
+if (flagWriterPath === null || !existsSync(join(ROOT, flagWriterPath))) {
   console.log(
     '[skip] flag-reachability edge: no control plane in this tree (open-core); ' +
       'checked in the enterprise repo',
@@ -96,11 +98,9 @@ if (!existsSync(join(ROOT, flagWriterPath))) {
 }
 
 /** Files that WRITE flags; a mention there is not a reader. */
-const WRITER_FILES = new Set([
-  'services/control-plane/src/routes/workspace.ts',
-  'packages/shared-types/src/posturePresets.ts',
-  'services/control-plane/__tests__/integration/posturePresets.test.ts',
-])
+const WRITER_FILES = new Set(
+  [flagWriterPath, 'packages/shared-types/src/posturePresets.ts', priv.file('flagWriterTest')].filter(Boolean),
+)
 
 for (const flag of writableFlags) {
   let hits = []
