@@ -3984,7 +3984,7 @@ mod scope_path_tests {
         let d = ScopePathDetector;
         let c = ctx(
             &["packages/proxy"],
-            vec![change(ChangeOp::Read, "services/control-plane/src/app.ts")],
+            vec![change(ChangeOp::Read, "services/api/src/app.ts")],
         );
         assert!(d.detect(&c).is_none(), "reading is not changing");
     }

@@ -169,7 +169,7 @@ If a gate registration is removed or disabled, or the file is deleted, run `intu
 <!-- ENTERPRISE_ONLY_START -->
 ## Fleet deployment
 
-`intutic enterprise install` writes Jamf and Intune manifests for both gates: `gemini-cli-hooks-*.json` places the Gemini CLI hook in Gemini CLI's system settings file, which Gemini CLI applies over user and workspace settings, and `antigravity-hooks-*.json` places the Antigravity hook in each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file). See [`intutic enterprise install`](/reference/cli#intutic-enterprise-install).
+Fleet rollouts write Jamf and Intune manifests for both gates: `gemini-cli-hooks-*.json` places the Gemini CLI hook in Gemini CLI's system settings file, which Gemini CLI applies over user and workspace settings, and `antigravity-hooks-*.json` places the Antigravity hook in each user's `~/.gemini/config/hooks.json` (Antigravity has no machine-wide hooks file).
 <!-- ENTERPRISE_ONLY_END -->
 
 ## Disconnecting

@@ -97,7 +97,7 @@ const PATTERNS = [
 const PRIVATE_ROOTS = ['packages/', 'tools/cli/src/', 'services/sync-daemon/src/']
 const PRIVATE_PATTERNS = [
   ['private', /services\/control-plane\//, 'a path in the private repository'],
-  ['private', /\bintutic-enterprise\b(?!-install)/, 'the private repository'],
+  ['private', /\bintutic-enterprise\b/, 'the private repository'],
 ]
 /** Lines that carry such a string as data, not as a pointer. */
 const PRIVATE_DATA_LINES = ['"services/control-plane/src/app.ts"']

@@ -37,7 +37,6 @@ a control plane, which the open core does not include, and needs `intutic login`
 commands are not in the open-core CLI package: they come from `@intutic/cli-control-plane`,
 installed next to it. Without that package, running one prints where it comes from and exits.
 
-<!-- ENTERPRISE_ONLY_START -->
 The badge names the plan, as in [Plan badges](/guide/plans#badges):
 <Badge type="tip" text="Cloud" /> works on any connected workspace, free included;
 <Badge type="warning" text="Self-serve+" />, <Badge type="warning" text="Biz Org+" /> and

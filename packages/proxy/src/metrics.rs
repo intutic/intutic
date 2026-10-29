@@ -2,7 +2,7 @@
 //!
 //! Every instrument this crate exports is declared here, next to the test
 //! that pins its Prometheus exposition name, because the Grafana dashboard
-//! (`docs/monitoring/snip_compactor_v2_dashboard.json`, enterprise repo)
+//! (`docs/monitoring/snip_compactor_v2_dashboard.json`)
 //! queries those names literally and `check-dashboard-metrics.js` gates the
 //! dashboard's `implemented: true` flag on each name appearing in this
 //! crate's source. Renaming an instrument without updating the dashboard is
