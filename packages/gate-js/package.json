@@ -100,7 +100,7 @@
     "typescript": "^5.5",
     "vitest": "^4",
     "workflow": "^5.0.1",
-    "zod": "^4.2.0"
+    "zod": "^4.6.6"
   },
   "engines": {
     "node": ">=18"
