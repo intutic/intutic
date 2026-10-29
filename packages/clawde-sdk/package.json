@@ -1,6 +1,6 @@
 {
   "name": "@intutic/clawde",
-  "version": "3.0.8",
+  "version": "3.0.9",
   "description": "TypeScript SDK for governing Claude and other agents: the gate client, rule records and refusal types",
   "publishConfig": {
     "access": "public"

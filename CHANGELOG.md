@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.9] - 2026-10-29
+
+### Security
+
+- **Dependency updates for open advisories.** `rustls` 0.23.46 in the proxy crate's own
+  lockfile (the workspace lock already had it), `systeminformation` 5.33.18, `qs` 6.17.0,
+  `@hono/node-server` 2.1.5 and `re2js` 2.9.1 in the npm lock, and `authlib` 1.9.1 and
+  `langgraph` 1.2.18 in the Python SDK's lock. The published packages resolve from their own
+  constraints; the lock files are what the repository's builds and tests use. The `mcp` and
+  `opentelemetry-api` advisories in the Python SDK's lock stay: `strands-agents` and
+  `google-adk` cap those packages below the fixed versions.
+
+### Changed
+
+- **Promotional email waits for a postal address.** The two onboarding emails (day 3 and
+  day 7) carry a one-click unsubscribe link and, as CAN-SPAM requires, the sender's postal
+  address. While `COMPANY_POSTAL_ADDRESS` is unset they are now not sent, with a
+  `email_postal_address_missing` warning naming the template, where they used to go out
+  without an address. Self-host operators who want the emails set `COMPANY_POSTAL_ADDRESS`.
+  A workspace created while it is unset does not get them later. Transactional email
+  (verification, sign-in, billing, alerts) is unaffected.
+- **Shipped docs and source name no private paths.** A few comments, a test fixture and the
+  repository's check scripts named files in a tree this repository does not contain. The
+  scripts now read where that tree is from a file only the full checkout has.
+
 ## [3.0.8] - 2026-10-28
 
 ### Added
