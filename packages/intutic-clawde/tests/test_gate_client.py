@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from intutic_clawde.gate.client import GateClient, VALID_EVENTS
+from intutic_clawde.gate.client import GateClient, JUDGE_STAGE_ONE_BUDGET_MS, JUDGE_TIMEOUT, VALID_EVENTS
 
 # Shared with @intutic/gate's GateClient, which runs the same vectors.
 RESPONSE_VECTORS = json.loads(
@@ -157,6 +157,13 @@ class TestJudgeFinalize:
         c, _ = make_client((200, {"verdict": "TRIGGERED", "triggered": True,
                                   "correctionSummary": "contradicts SOP"}))
         assert c.judge_finalize("text", "gpt-4o")["verdict"] == "TRIGGERED"
+
+    def test_tells_the_control_plane_how_long_stage_one_may_take(self):
+        # This caller waits JUDGE_TIMEOUT, not the proxy's 5 s, so stage 1 gets a longer budget.
+        c, t = make_client((200, {"verdict": "PASS", "triggered": False}))
+        c.judge_finalize("text", "gpt-4o")
+        assert t.calls[0]["body"]["stageOneBudgetMs"] == JUDGE_STAGE_ONE_BUDGET_MS
+        assert JUDGE_STAGE_ONE_BUDGET_MS / 1000 < JUDGE_TIMEOUT
 
     def test_held_for_review_is_review_not_pass(self):
         # A held response (the typed judge was unsure, or did not answer in
