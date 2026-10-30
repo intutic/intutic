@@ -57,6 +57,11 @@ from ..control_plane import NO_CONTROL_PLANE_URL, resolve_control_plane_url
 DEFAULT_TIMEOUT = 2.0
 EVENT_TIMEOUT = 2.0
 JUDGE_TIMEOUT = 120.0
+# How long judge_finalize tells the control plane stage 1 (the quick yes/no checks) may take
+# before it falls back (ms). The control plane's own default is 3 s, sized for the proxy, which
+# gives up at 5 s; this caller waits JUDGE_TIMEOUT, and on a busy judge stage 1 needs 10-20 s.
+# Without this, a response that carries personal SOPs waits for the slow free-text call instead.
+JUDGE_STAGE_ONE_BUDGET_MS = 20_000
 
 # Mirrors HookEventSchema in the control plane.
 VALID_EVENTS = {
@@ -436,6 +441,8 @@ class GateClient:
             # grading its own output is weak evidence and the reviewer needs to
             # know which they are reading.
             "monitoredModel": monitored_model,
+            # An older control plane ignores it.
+            "stageOneBudgetMs": JUDGE_STAGE_ONE_BUDGET_MS,
         }
         if personal_sops:
             body["personalSops"] = personal_sops
