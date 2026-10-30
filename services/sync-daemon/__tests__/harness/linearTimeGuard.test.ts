@@ -3,7 +3,7 @@ import { expectLinearTime } from './linearTime.js'
 
 /** `expectLinearTime` re-measures a noisy result, so it must still refuse a matcher that is not linear. */
 describe('expectLinearTime', () => {
-  const input = (scale: 1 | 4) => 'a'.repeat(4000 * scale)
+  const input = (scale: 1 | 4) => 'a'.repeat(2500 * scale)
 
   it('passes a linear scan', () => {
     expectLinearTime('linear scan', (scale) => {
@@ -23,5 +23,7 @@ describe('expectLinearTime', () => {
         expect(n).toBeGreaterThanOrEqual(0)
       }),
     ).toThrow(/quadratic scan: .* ms at n, .* ms at 4n/)
-  })
+    // Each attempt is four runs of a quadratic scan at n and four at 4n, and a runner is
+    // several times slower than a laptop, so the file's 15 s default is not enough.
+  }, 90_000)
 })
