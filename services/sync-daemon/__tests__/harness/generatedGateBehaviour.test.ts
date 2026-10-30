@@ -483,10 +483,29 @@ function gateEnv(g: GateEntry, snapshot?: boolean | string): NodeJS.ProcessEnv {
   }
 }
 
+/**
+ * A gate that has not decided by its harness's deadline refuses the call
+ * (`GATE_DEADLINE`, by design: the hook timeout would otherwise read as an
+ * allow). On a saturated CI runner that happens to a call whose rules would have
+ * allowed it, and it also makes a call the rules would have refused look refused
+ * for the wrong reason. Neither says anything about the rules, so a run that ended
+ * at the deadline is run again, up to this many times in all. A rule's own refusal
+ * never carries that reason, so it is not retried; a gate that misses its deadline
+ * every time still fails the assertion that follows.
+ */
+const DEADLINE_ATTEMPTS = 3
+
 async function runGate(
   g: GateEntry,
   toolInput: Record<string, string>,
-  opts: { tool?: string; snapshot?: boolean | string; env?: NodeJS.ProcessEnv; extra?: Record<string, unknown> } = {},
+  opts: {
+    tool?: string
+    snapshot?: boolean | string
+    env?: NodeJS.ProcessEnv
+    extra?: Record<string, unknown>
+    /** The test is about the deadline itself: take the first run as it is. */
+    expectDeadline?: boolean
+  } = {},
 ): Promise<RunResult & { signal: NodeJS.Signals | null }> {
   const artifact = join(roots.get(g.name)!, g.artifact)
   const payload = JSON.stringify({
@@ -495,12 +514,17 @@ async function runGate(
     session_id: 'sess_test',
     ...opts.extra,
   })
-  // node by its own path: a test may hand the gate a PATH without the CLI's directory, node's too.
-  return runProcess(g.runner === 'node' ? process.execPath : g.runner, [artifact], {
-    input: payload,
-    env: { ...gateEnv(g, opts.snapshot), ...opts.env },
-    timeoutMs: 20_000,
-  })
+  let r!: RunResult & { signal: NodeJS.Signals | null }
+  for (let attempt = 1; attempt <= (opts.expectDeadline ? 1 : DEADLINE_ATTEMPTS); attempt++) {
+    // node by its own path: a test may hand the gate a PATH without the CLI's directory, node's too.
+    r = await runProcess(g.runner === 'node' ? process.execPath : g.runner, [artifact], {
+      input: payload,
+      env: { ...gateEnv(g, opts.snapshot), ...opts.env },
+      timeoutMs: 20_000,
+    })
+    if (!/GATE_DEADLINE/.test(r.stdout + r.stderr)) break
+  }
+  return r
 }
 
 /**
@@ -867,7 +891,7 @@ for (const g of GATES) {
         argPattern: '(a+)+$',
       }])
       const started = Date.now()
-      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap })
+      const r = await runGate(g, { command: 'a'.repeat(48) + 'b' }, { snapshot: snap, expectDeadline: true })
       const elapsed = Date.now() - started
       assertCleanExit(g, r, 'a call whose WHERE pattern does not finish')
       expect(wasBlocked(g, r), `${g.name} let a call through that its rules never decided`).toBe(true)
