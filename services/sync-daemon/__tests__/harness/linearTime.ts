@@ -14,6 +14,12 @@ import { expect } from 'vitest'
  * scheduler slice is descheduled and a shorter one is not, which inflated the
  * ratio of a linear matcher to 9 under load.
  *
+ * Even so, a linear matcher measured 9.3 on a loaded runner (8.9 ms at n, 82.7 ms
+ * at 4n: a collection pause in the larger run). A quadratic matcher sits near 16
+ * every time and a noisy linear one only sometimes, so a measurement over the
+ * ratio is taken again, up to {@link LINEAR_TIME_ATTEMPTS} in all, and the check
+ * passes on the first one under it. The one reported on failure is the closest.
+ *
  * `run(scale)` runs the input built at `scale` times the base size (1 or 4).
  */
 export function expectLinearTime(label: string, run: (scale: 1 | 4) => void): void {
@@ -28,8 +34,19 @@ export function expectLinearTime(label: string, run: (scale: 1 | 4) => void): vo
     }
     return ms
   }
-  expectLinearTimes(label, best(1), best(4))
+  let closest: [number, number] = [0, Infinity]
+  for (let attempt = 1; attempt <= LINEAR_TIME_ATTEMPTS; attempt++) {
+    const small = best(1)
+    const large = best(4)
+    if (isLinear(small, large)) return
+    if (ratioOf(small, large) < ratioOf(...closest)) closest = [small, large]
+  }
+  expectLinearTimes(label, ...closest)
 }
+
+const ratioOf = (small: number, large: number): number => large / Math.max(small, LINEAR_TIME_FLOOR_MS)
+const isLinear = (small: number, large: number): boolean =>
+  large < LINEAR_TIME_CEILING_MS && ratioOf(small, large) < LINEAR_TIME_RATIO
 
 /** The same check on CPU times measured elsewhere (in a Python process), at n and at 4n. */
 export function expectLinearTimes(label: string, small: number, large: number): void {
@@ -45,6 +62,8 @@ export function expectLinearTimes(label: string, small: number, large: number): 
  * 6.2 and 6.4, failing the 6 this used to be.
  */
 export const LINEAR_TIME_RATIO = 8
+/** Times a measurement over {@link LINEAR_TIME_RATIO} is taken again before the check fails. */
+export const LINEAR_TIME_ATTEMPTS = 3
 /**
  * The time at n is counted as at least this, so noise on a fast run cannot
  * fail it: a saturated machine thrashes the caches a 4n run needs more of. A
