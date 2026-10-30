@@ -44,7 +44,7 @@ minimumReleaseAgeExclude:
 # vite: vitepress 1.6.4 (the latest stable) asks for vite ^5.4.14, and no 5.x
 # release carries the 2026-10-20 launch-editor fixes, so every copy below 6.4.4
 # moves to the patched 6.x (override below). Checked 2026-10-21: the docs build
-# on 6.4.4 renders the same 157 pages as on 5.4.21 (identical once content
+# on 6.4.4 (6.4.5 since 2026-10-30) renders the same 157 pages as on 5.4.21 (identical once content
 # hashes, Vue scope ids and MathJax ids are masked), and `vitepress dev` serves.
 #
 # (Resolved 2026-07-28: @modelcontextprotocol/sdk moved to ^1.30.0 once it
@@ -99,5 +99,6 @@ overrides:
   # Via typedoc (SDK reference generation, dev-only), which accepts ^14.3.0.
   markdown-it: '^14.3.3' # 2026-10-20 advisories, fixed in 14.3.3
   # vitest's and vitepress's vite, to the patched 6.x (see the note above);
-  # GHSA-r825-w8mm-5pxw, GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv.
-  'vite@<6.4.4': '^6.4.4'
+  # GHSA-r825-w8mm-5pxw, GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv; 6.4.5 for
+  # GHSA-8g5g-mxqh-grgj (server.fs.deny bypassed with queries; the dev server only).
+  'vite@<6.4.5': '^6.4.5'
