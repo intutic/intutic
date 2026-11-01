@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-11-01
+
+### Changed
+
+- **`intutic-clawde` gate client tells the control plane how long judge stage 1 may take.**
+  `judge_finalize` now sends a stage-1 time budget, so SDK and demo callers (which wait up to
+  120 s) give the judge's typed first stage longer than the proxy's 3 s window. Callers that
+  send nothing, such as the proxy, keep the previous behaviour.
+
+### Security
+
+- **Dependency advisories cleared in the workspace lockfile.** `follow-redirects` is held at
+  1.16.2 or later (GHSA-mrwp-f3q8-3g9p) and the MCP proxy's production path to `glob` and
+  `minimatch` is gone (GHSA-3g3m-2fjr-6pw4, GHSA-g3hv-75wg-m249), by moving `gaxios` 7.1.3
+  to 7.1.5. The SDK lock now carries `joserfc` 1.7.7 and `pyasn1` 0.6.5.
+
 ## [3.1.0] - 2026-10-29
 
 ### Changed
