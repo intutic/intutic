@@ -94,8 +94,12 @@ overrides:
   # -> cacheable-request, to http-cache-semantics (GHSA-ch52-4w7c-c8xp, which
   # has no patched release). Removing the peer removes both.
   '@workflow/nest>@swc/cli': '-'
+  # gcp-metadata 8.1.4 (OpenTelemetry's GCP resource detector in mcp-proxy) pins gaxios to exactly
+  # 7.1.3, which depends on rimraf 5 > glob 10 > minimatch 9, the only production path to glob.
+  # gaxios 7.1.5 is the same major with no rimraf (Node >= 18 like 7.1.3).
+  'gaxios@7.1.3': '7.1.5' # GHSA-3g3m-2fjr-6pw4 (glob), GHSA-g3hv-75wg-m249 (minimatch), through rimraf
   # Via axios (apps/docs, gate-js), which accepts ^1.16.0.
-  follow-redirects: '^1.16.1' # 2026-10-20 advisories, fixed in 1.16.1
+  follow-redirects: '^1.16.2' # GHSA-mrwp-f3q8-3g9p (cross-realm sensitiveHeaders dropped); earlier: 2026-10-20 advisories, fixed in 1.16.1
   # Via typedoc (SDK reference generation, dev-only), which accepts ^14.3.0.
   markdown-it: '^14.3.3' # 2026-10-20 advisories, fixed in 14.3.3
   # vitest's and vitepress's vite, to the patched 6.x (see the note above);
