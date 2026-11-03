@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The proxy's loop detectors no longer block ordinary agent work.** `consecutive_repeat` flagged
+  five calls in a row to one tool *name*, so five different searches, shell commands or file
+  reads counted as a loop. It also scanned the last 60 calls rather than the latest run, so it
+  kept firing after the agent had moved on, and three warnings later the session was blocked.
+  A loop is now the same tool with the same arguments, five times in a row at the end of the
+  history. `ping_pong_cycle` uses the same identity. The threshold is unchanged (5). On the
+  public BFCL corpus, `consecutive_repeat` false positives go from 2 to 0 and every injected
+  repeat is still caught.
+
 ## [3.1.1] - 2026-11-01
 
 ### Changed

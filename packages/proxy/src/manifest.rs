@@ -124,6 +124,39 @@ pub fn expand_tool_actions(invocations: &[ToolInvocation]) -> Vec<String> {
     out
 }
 
+/// One `name#hash` token per concrete call: the tool and its exact arguments.
+///
+/// The loop detectors' identity. A name alone cannot tell five different
+/// searches from one search asked five times, and the first is how agents work:
+/// a single `bash` tool, a run of `read`s, a knowledge-base query refined each
+/// turn. Hashed rather than stored, because arguments carry whole file bodies
+/// and this lands in the session store. Results are skipped for the same
+/// reason the name is in `expand_tool_actions`: they are the same run reporting
+/// back.
+pub fn call_fingerprints(invocations: &[ToolInvocation]) -> Vec<String> {
+    use sha2::{Digest, Sha256};
+    invocations
+        .iter()
+        .filter(|c| c.source == InvocationSource::Call)
+        .map(|c| {
+            // serde_json's default `Map` is a BTreeMap, so keys serialise sorted;
+            // `fingerprint_ignores_key_order` fails if a feature flip changes that.
+            let digest = Sha256::digest(c.input.to_string().as_bytes());
+            let hex: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
+            format!("{}#{hex}", c.name)
+        })
+        .collect()
+}
+
+/// The tool name in a `call_fingerprints` token; a bare tool name (even one
+/// containing `#`) comes back unchanged.
+pub fn fingerprint_tool(token: &str) -> &str {
+    match token.rsplit_once('#') {
+        Some((name, h)) if h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()) => name,
+        _ => token,
+    }
+}
+
 pub fn extract_request_tool_invocations(body: &serde_json::Value) -> Vec<ToolInvocation> {
     let mut tool_names = Vec::new();
     if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
@@ -988,6 +1021,30 @@ mod tests {
             call_id: None,
             is_error: None,
         }
+    }
+
+    #[test]
+    fn fingerprint_is_tool_plus_exact_arguments() {
+        let q = |s: &str| call("KB_search", json!({"query": s}));
+        let fp = call_fingerprints(&[q("fees"), q("fees"), q("limits")]);
+        assert_eq!(fp[0], fp[1], "same tool, same arguments");
+        assert_ne!(fp[0], fp[2], "same tool, different arguments");
+        assert_eq!(fingerprint_tool(&fp[2]), "KB_search");
+        assert_eq!(fingerprint_tool("mcp#search"), "mcp#search");
+    }
+
+    #[test]
+    fn fingerprint_ignores_key_order() {
+        let a = call_fingerprints(&[call("Edit", json!({"path": "a", "text": "b"}))]);
+        let b = call_fingerprints(&[call("Edit", json!({"text": "b", "path": "a"}))]);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn fingerprint_skips_results() {
+        let mut result = call("Read", json!({"path": "a"}));
+        result.source = InvocationSource::Result;
+        assert!(call_fingerprints(&[result]).is_empty());
     }
 
     /// The defect this module exists to avoid.
