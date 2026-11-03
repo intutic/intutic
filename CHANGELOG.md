@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-11-03
+
 ### Fixed
 
 - **The proxy's loop detectors no longer block ordinary agent work.** `consecutive_repeat` flagged
