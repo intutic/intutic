@@ -218,9 +218,11 @@ pub struct RequestContext {
     /// The same session's concrete calls as `name#hash` of tool and arguments
     /// (`manifest::call_fingerprints`), oldest first, capped like
     /// `tool_sequence`. What the loop detectors compare: five different searches
-    /// are progress, one search five times is a spin. Empty in snapshots taken
-    /// before it existed, where those detectors fall back to `tool_sequence`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// are progress, one search five times is a spin.
+    ///
+    /// Not serialized: WASM rules and snapshots keep the schema they had, and a
+    /// context without it makes those detectors fall back to `tool_sequence`.
+    #[serde(skip)]
     pub tool_call_fingerprints: Vec<String>,
     /// `(tool, count)` — how many times each distinct tool/action appears in
     /// `tool_sequence` above.
