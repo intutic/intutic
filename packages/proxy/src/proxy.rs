@@ -4991,6 +4991,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .record_tool_sequence(&tool_scope_id, &new_tool_calls, TOOL_SEQUENCE_CAP)
         .await
         .unwrap_or_default();
+    // The loop detectors' identity (tool + exact arguments), kept beside the
+    // sequence above in its own list under the same scope.
+    let tool_call_fingerprints = state
+        .store
+        .record_tool_sequence(
+            &format!("{tool_scope_id}#args"),
+            &crate::manifest::call_fingerprints(&new_invocations),
+            TOOL_SEQUENCE_CAP,
+        )
+        .await
+        .unwrap_or_default();
 
     // A pure fold of `tool_sequence` above — no store, no I/O. AssemblyScript
     // has no map type to do this itself, which is the whole reason it is
@@ -5464,6 +5475,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             .unwrap_or(crate::wasm::context::RiskLevel::Low),
         dlp_findings,
         tool_sequence,
+        tool_call_fingerprints,
         tool_call_counts,
         calls_last_60s,
         // Amended below, after the detector pass runs against this same

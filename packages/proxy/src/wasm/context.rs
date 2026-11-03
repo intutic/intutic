@@ -215,6 +215,15 @@ pub struct RequestContext {
     pub risk_tier: RiskLevel,
     pub dlp_findings: Vec<DlpFinding>,
     pub tool_sequence: Vec<String>,
+    /// The same session's concrete calls as `name#hash` of tool and arguments
+    /// (`manifest::call_fingerprints`), oldest first, capped like
+    /// `tool_sequence`. What the loop detectors compare: five different searches
+    /// are progress, one search five times is a spin.
+    ///
+    /// Not serialized: WASM rules and snapshots keep the schema they had, and a
+    /// context without it makes those detectors fall back to `tool_sequence`.
+    #[serde(skip)]
+    pub tool_call_fingerprints: Vec<String>,
     /// `(tool, count)` — how many times each distinct tool/action appears in
     /// `tool_sequence` above.
     ///
@@ -537,6 +546,7 @@ mod tests {
             risk_tier: RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec!["Glob".into(), "View".into()],
+            tool_call_fingerprints: vec![],
             tool_call_counts: vec![("Glob".into(), 1), ("View".into(), 1)],
             calls_last_60s: 2,
             corroborating_detectors: 0,

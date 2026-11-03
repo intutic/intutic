@@ -272,6 +272,14 @@ pub async fn build_ctx(calls: &[ToolInvocation]) -> RequestContext {
         serde_json::from_value(base).expect("corpus context must deserialise");
 
     ctx.tool_sequence = sequence;
+    ctx.tool_call_fingerprints = store
+        .record_tool_sequence(
+            "corpus#args",
+            &intutic_proxy::manifest::call_fingerprints(calls),
+            SEQUENCE_CAP,
+        )
+        .await
+        .unwrap_or_default();
     ctx.changes = changes;
     ctx.new_tool_calls = expanded;
     ctx.tool_calls = calls

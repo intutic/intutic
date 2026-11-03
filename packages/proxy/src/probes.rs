@@ -111,6 +111,7 @@ fn base_ctx() -> RequestContext {
         risk_tier: RiskLevel::Low,
         dlp_findings: vec![],
         tool_sequence: vec![],
+        tool_call_fingerprints: vec![],
         tool_call_counts: vec![],
         calls_last_60s: 0,
         corroborating_detectors: 0,

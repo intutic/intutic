@@ -31,10 +31,25 @@ fn threshold_confidence(observed: usize, threshold: usize) -> f64 {
 
 // ── Loop and cycle detection ────────────────────────────────────────────────
 
-/// Consecutive calls to one tool before it is treated as a spin.
+/// Consecutive identical calls before they are treated as a spin.
 const REPETITION_THRESHOLD: usize = 5;
 
-/// A node calling the same tool over and over is the most common shape of a
+/// What the two burst detectors below compare: each call as tool + exact
+/// arguments, or the bare sequence for a context recorded before fingerprints.
+///
+/// Names alone flagged ordinary work. A single `bash` tool, a run of `read`s, or
+/// a search refined each turn is five calls to one name and five different
+/// actions; the benchmark that surfaced this blocked most SWE-bench and banking
+/// tasks on exactly that.
+fn loop_identity(ctx: &RequestContext) -> &[String] {
+    if ctx.tool_call_fingerprints.is_empty() {
+        &ctx.tool_sequence
+    } else {
+        &ctx.tool_call_fingerprints
+    }
+}
+
+/// A node making the same call over and over is the most common shape of a
 /// graph that has stopped making progress.
 pub struct ConsecutiveRepeatDetector {
     threshold: usize,
@@ -58,31 +73,35 @@ impl AnomalyDetector for ConsecutiveRepeatDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        let seq = &ctx.tool_sequence;
-        let mut run = 1;
-        for i in 1..seq.len() {
-            if seq[i] == seq[i - 1] {
-                run += 1;
-                if run >= self.threshold {
-                    // Reask, not kill: five-in-a-row is a real signal and the
-                    // number five is a guess, and this has never had an FPR
-                    // measured. An agent that is genuinely stuck gets told so
-                    // and can change approach; one doing repetitive but
-                    // productive work says so and continues.
-                    return Some(
-                        AnomalyFinding::reask(
-                            AnomalyKind::LoopDetected,
-                            format!("Loop detected: '{}' called {} {}", seq[i], run, SPIN_MARKER),
-                            threshold_confidence(run, self.threshold),
-                        )
-                        .with_scope(RefusalScope::tools([seq[i].as_str()])),
-                    );
-                }
-            } else {
-                run = 1;
-            }
+        // Only the run ending at the latest call. Scanning the whole window
+        // kept a run the agent had already broken out of firing on every later
+        // request until it aged out, and three reasks later the session was
+        // blocked — so the "change approach and continue" this finding offers
+        // was never actually possible.
+        let last = loop_identity(ctx).last()?;
+        let run = loop_identity(ctx)
+            .iter()
+            .rev()
+            .take_while(|t| *t == last)
+            .count();
+        if run < self.threshold {
+            return None;
         }
-        None
+        let tool = crate::manifest::fingerprint_tool(last);
+        // Reask, not kill: five-in-a-row is a real signal and the number five
+        // is a guess, and this has never had an FPR measured. An agent that is
+        // genuinely stuck gets told so and can change approach; one doing
+        // repetitive but productive work says so and continues.
+        Some(
+            AnomalyFinding::reask(
+                AnomalyKind::LoopDetected,
+                format!(
+                    "Loop detected: '{tool}' called with the same arguments {run} {SPIN_MARKER}"
+                ),
+                threshold_confidence(run, self.threshold),
+            )
+            .with_scope(RefusalScope::tools([tool])),
+        )
     }
 }
 
@@ -114,7 +133,7 @@ impl AnomalyDetector for PingPongCycleDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        let seq = &ctx.tool_sequence;
+        let seq = loop_identity(ctx);
         let needed = self.cycles * 2;
         if seq.len() < needed {
             return None;
@@ -131,8 +150,13 @@ impl AnomalyDetector for PingPongCycleDetector {
         if !alternating {
             return None;
         }
-        // Reask — same reasoning as ConsecutiveRepeat. Read→Write→Read→Write is
-        // a stuck agent and is also how you edit a file you keep re-checking.
+        // Reask — same reasoning as ConsecutiveRepeat. With arguments in the
+        // identity, editing a file you keep re-checking is no longer a cycle;
+        // the same read and the same write three times over still is.
+        let (a, b) = (
+            crate::manifest::fingerprint_tool(a),
+            crate::manifest::fingerprint_tool(b),
+        );
         Some(
             AnomalyFinding::reask(
                 AnomalyKind::LoopDetected,
@@ -142,7 +166,7 @@ impl AnomalyDetector for PingPongCycleDetector {
                 ),
                 threshold_confidence(self.cycles, self.cycles),
             )
-            .with_scope(RefusalScope::tools([a.as_str(), b.as_str()])),
+            .with_scope(RefusalScope::tools([a, b])),
         )
     }
 }
@@ -2372,6 +2396,7 @@ pub mod test_support {
             risk_tier: RiskLevel::Low,
             dlp_findings: vec![],
             tool_sequence: vec![],
+            tool_call_fingerprints: vec![],
             tool_call_counts: vec![],
             calls_last_60s: 0,
             corroborating_detectors: 0,
@@ -2565,6 +2590,75 @@ mod tests {
         let d = ConsecutiveRepeatDetector::default();
         let ctx = ctx_with_sequence(&["Bash", "Bash", "View", "Bash", "Bash", "Bash"]);
         assert!(d.detect(&ctx).is_none());
+    }
+
+    /// A context whose session made these calls, fingerprints included, as
+    /// `proxy.rs` builds it.
+    fn ctx_with_calls(calls: &[(&str, serde_json::Value)]) -> RequestContext {
+        let invocations: Vec<_> = calls
+            .iter()
+            .map(|(name, input)| crate::manifest::ToolInvocation {
+                name: name.to_string(),
+                input: input.clone(),
+                source: crate::manifest::InvocationSource::Call,
+                call_id: None,
+                is_error: None,
+            })
+            .collect();
+        let names: Vec<&str> = calls.iter().map(|(n, _)| *n).collect();
+        let mut ctx = ctx_with_sequence(&names);
+        ctx.tool_call_fingerprints = crate::manifest::call_fingerprints(&invocations);
+        ctx
+    }
+
+    #[test]
+    fn consecutive_repeat_only_counts_the_run_at_the_tail() {
+        // Broken out of: the next request must not keep tripping on it.
+        let d = ConsecutiveRepeatDetector::default();
+        let ctx = ctx_with_sequence(&["Bash", "Bash", "Bash", "Bash", "Bash", "View"]);
+        assert!(d.detect(&ctx).is_none());
+    }
+
+    #[test]
+    fn consecutive_repeat_treats_different_arguments_as_progress() {
+        let d = ConsecutiveRepeatDetector::default();
+        for tool in ["KB_search", "bash", "read"] {
+            let distinct: Vec<_> = (0..5)
+                .map(|i| (tool, serde_json::json!({ "arg": i })))
+                .collect();
+            assert!(d.detect(&ctx_with_calls(&distinct)).is_none(), "{tool}");
+
+            let same = vec![(tool, serde_json::json!({ "arg": 1 })); 5];
+            let hit = d.detect(&ctx_with_calls(&same)).expect(tool);
+            assert_eq!(hit.disposition, Disposition::Reask);
+            assert!(hit.reason.contains(&format!("'{tool}'")), "{}", hit.reason);
+            assert!(hit.reason.contains(SPIN_MARKER));
+        }
+    }
+
+    #[test]
+    fn ping_pong_treats_different_arguments_as_progress() {
+        let d = PingPongCycleDetector::default();
+        let edits: Vec<_> = (0..3)
+            .flat_map(|i| {
+                [
+                    ("read", serde_json::json!({ "path": "a.rs" })),
+                    ("write", serde_json::json!({ "path": "a.rs", "text": i })),
+                ]
+            })
+            .collect();
+        assert!(d.detect(&ctx_with_calls(&edits)).is_none());
+
+        let stuck: Vec<_> = (0..3)
+            .flat_map(|_| {
+                [
+                    ("read", serde_json::json!({ "path": "a.rs" })),
+                    ("write", serde_json::json!({ "path": "a.rs", "text": 0 })),
+                ]
+            })
+            .collect();
+        let hit = d.detect(&ctx_with_calls(&stuck)).unwrap();
+        assert!(hit.reason.contains("'read' and 'write'"), "{}", hit.reason);
     }
 
     #[test]
