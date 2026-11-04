@@ -2672,9 +2672,16 @@ mod tests {
         // A single-tool agent: eight different shell commands are eight steps,
         // not a period-1 cycle. Seen blocking SWE-bench tasks in the governed arm.
         let work: Vec<_> = (0..8)
-            .map(|i| ("bash", serde_json::json!({ "command": format!("step {i}") })))
+            .map(|i| {
+                (
+                    "bash",
+                    serde_json::json!({ "command": format!("step {i}") }),
+                )
+            })
             .collect();
-        assert!(LandmarkCycleDetector.detect(&ctx_with_calls(&work)).is_none());
+        assert!(LandmarkCycleDetector
+            .detect(&ctx_with_calls(&work))
+            .is_none());
 
         // The same read → test pair, run over and over, is still a cycle, and the
         // finding names tools, not fingerprints.
