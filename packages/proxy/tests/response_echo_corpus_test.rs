@@ -339,8 +339,6 @@ const EXPECTED_ECHO_FIRINGS: &[(&str, &[&str])] = &[
     ("resp_echo_0067", &["guardrail-bypass"]),
     ("resp_echo_0070", &["guardrail-bypass"]),
     ("resp_echo_0072", &["instruction-boundary-forgery"]),
-    ("resp_echo_0073", &["instruction-boundary-forgery"]),
-    ("resp_echo_0074", &["instruction-boundary-forgery"]),
 ];
 
 /// This is a RATE-based / pinned-set assertion, NOT a zero-tolerance gate.

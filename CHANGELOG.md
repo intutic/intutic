@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A "### System Details" heading is no longer read as a forged system prompt.** The
+  `instruction-boundary-forgery` injection pattern matched any line starting with `### System`,
+  so GitHub issue templates (astropy's, for one) and ordinary docs headings tripped it, and the
+  agent working on such an issue was reasked and then blocked. `### System` now counts only as a
+  whole line, optionally with a colon. Benign firings on the response-echo corpus go from 3 to 1
+  for this pattern; the other delimiters (`[INST]`, `<|im_start|>`, `<system>`) are unchanged.
+
 ## [3.1.2] - 2026-11-03
 
 ### Fixed
