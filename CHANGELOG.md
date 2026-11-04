@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.3] - 2026-11-04
+
 ### Fixed
 
 - **A "### System Details" heading is no longer read as a forged system prompt.** The
@@ -19,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ping_pong_cycle` that a loop is the same tool with the same arguments; `landmark_cycle` still
   compared tool names, so an agent with a single `bash` tool was a "period-1 cycle" after eight
   calls of any kind. Corroborated by the built-in transition check, that steer became a reask and
-  then a block: 12 of the first 81 tasks in a governed SWE-bench run were stopped this way. It now
+  then a block: 16 of 100 tasks in a governed SWE-bench run were stopped this way. It now
   uses the same identity, and names tools, not fingerprints, in its finding. On the public BFCL
   corpus its benign firings go from 2 to 0.
 
