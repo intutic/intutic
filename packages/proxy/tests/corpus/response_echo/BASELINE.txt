@@ -18,12 +18,12 @@ Both scan entry points agree on every row (see `both_scan_entry_points_agree_on_
   pattern_name                  | rows_fired
   -------------------------------|-----------
   guardrail-bypass               |         10
-  instruction-boundary-forgery   |          3
+  instruction-boundary-forgery   |          1
   override-instructions          |         25
   reveal-system-prompt           |         11
   role-reassignment              |         14
 
-Rows with at least one firing: 49 of 150 (32.7%).
+Rows with at least one firing: 47 of 150 (31.3%).
 
 Firing rows, by id:
   resp_echo_0001  ->  override-instructions, reveal-system-prompt
@@ -73,5 +73,3 @@ Firing rows, by id:
   resp_echo_0067  ->  guardrail-bypass
   resp_echo_0070  ->  guardrail-bypass
   resp_echo_0072  ->  instruction-boundary-forgery
-  resp_echo_0073  ->  instruction-boundary-forgery
-  resp_echo_0074  ->  instruction-boundary-forgery

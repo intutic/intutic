@@ -42,12 +42,11 @@
       "mutator": "collapse_tail",
       "detector_id_expected": "tool_diversity_collapse",
       "also_expected": [
-        "consecutive_repeat",
-        "landmark_cycle"
+        "consecutive_repeat"
       ],
       "mutation_site": "append pwd 10 times",
       "tier": "inject",
-      "note": "10 identical fills DIVERSITY_WINDOW with one name. Consecutive repeat follows because the run is also 10 long, and landmark_cycle because ten of one anchor is a period-1 cycle at full coverage. Both measured, not assumed."
+      "note": "10 identical fills DIVERSITY_WINDOW with one name. Consecutive repeat follows because the run is also 10 long. landmark_cycle no longer does: it compares tool + arguments, so the seed's varied calls before the tail are distinct anchors, elided as hapaxes, and the ten pwd calls cover 10 of the 24-anchor window, below CYCLE_COVERAGE_FLOOR. Measured, not assumed."
     },
     {
       "case_id": "exfil_succession_1",

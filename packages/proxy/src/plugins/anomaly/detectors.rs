@@ -34,7 +34,7 @@ fn threshold_confidence(observed: usize, threshold: usize) -> f64 {
 /// Consecutive identical calls before they are treated as a spin.
 const REPETITION_THRESHOLD: usize = 5;
 
-/// What the two burst detectors below compare: each call as tool + exact
+/// What the three loop detectors below compare: each call as tool + exact
 /// arguments, or the bare sequence for a context recorded before fingerprints.
 ///
 /// Names alone flagged ordinary work. A single `bash` tool, a run of `read`s, or
@@ -443,7 +443,11 @@ impl AnomalyDetector for LandmarkCycleDetector {
         // a mutating GETSET executed before enforcement, so a detector reading
         // it fires exactly once — correct for a one-shot hold, wrong for a
         // cycle check that must hold across the retries a steer produces.
-        let sample = landmark_cycle_coverage(&ctx.tool_sequence)?;
+        // Tool + arguments, like the burst detectors: on names alone a
+        // single-tool agent is a period-1 cycle after eight calls of any kind.
+        // Fingerprints carry no `action:` tokens and share the 60-entry cap, so
+        // the anchor projection and its frequency table hold unchanged.
+        let sample = landmark_cycle_coverage(loop_identity(ctx))?;
         if sample.coverage < CYCLE_COVERAGE_FLOOR {
             return None;
         }
@@ -528,6 +532,8 @@ fn describe_cycle(symbols: &[String], survivors: &[u16], period: usize) -> Strin
         // `symbols` is the table these ids were minted from, so the fallback is
         // unreachable; it is here so a malformed id cannot panic the hot path.
         .map(|&id| symbols.get(id as usize).map(String::as_str).unwrap_or("?"))
+        // Symbols may be fingerprints; the operator reads tool names.
+        .map(crate::manifest::fingerprint_tool)
         .collect::<Vec<&str>>()
         .join(" → ")
 }
@@ -2659,6 +2665,40 @@ mod tests {
             .collect();
         let hit = d.detect(&ctx_with_calls(&stuck)).unwrap();
         assert!(hit.reason.contains("'read' and 'write'"), "{}", hit.reason);
+    }
+
+    #[test]
+    fn landmark_cycle_treats_different_arguments_as_progress() {
+        // A single-tool agent: eight different shell commands are eight steps,
+        // not a period-1 cycle. Seen blocking SWE-bench tasks in the governed arm.
+        let work: Vec<_> = (0..8)
+            .map(|i| {
+                (
+                    "bash",
+                    serde_json::json!({ "command": format!("step {i}") }),
+                )
+            })
+            .collect();
+        assert!(LandmarkCycleDetector
+            .detect(&ctx_with_calls(&work))
+            .is_none());
+
+        // The same read → test pair, run over and over, is still a cycle, and the
+        // finding names tools, not fingerprints.
+        let stuck: Vec<_> = (0..6)
+            .flat_map(|_| {
+                [
+                    ("read", serde_json::json!({ "path": "a.rs" })),
+                    ("bash", serde_json::json!({ "command": "cargo test" })),
+                ]
+            })
+            .collect();
+        let hit = LandmarkCycleDetector
+            .detect(&ctx_with_calls(&stuck))
+            .expect("a repeated pair of identical calls is a cycle");
+        assert!(hit.reason.contains(CYCLE_PERIOD_MARKER), "{}", hit.reason);
+        assert!(!hit.reason.contains('#'), "{}", hit.reason);
+        assert_eq!(hit.scope.expect("scoped").tools, vec!["bash", "read"]);
     }
 
     #[test]
