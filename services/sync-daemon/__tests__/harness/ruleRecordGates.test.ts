@@ -23,6 +23,7 @@ import { writeApprovedPlans } from '../../src/lib/approvedPlans.js'
 import { createHash } from 'node:crypto'
 import {
   compileSopGateRecords as compileShared,
+  ServedGateRecordResponse,
   toServedGateRecord,
   decodeGateRuleRecord,
   encodeGateRuleRecord,
@@ -87,6 +88,9 @@ beforeAll(async () => {
   snaps.scope = await snapshotFor('scope', [SCOPE_SOP])
   snaps.plan = await snapshotFor('plan', [PLAN_SOP])
   snaps.commands = await snapshotFor('commands', [sop('local:commands.md', 'allow_commands: git status, npm test *', 'Read only')])
+  // What a control plane serves, through the schema its route validates with.
+  const served = compileSopGateRecords(sop('sop_1', 'allow_commands: git status')).records.map((r) => ServedGateRecordResponse.parse(toServedGateRecord(r, 'sop_1')))
+  snaps.commandsServed = await snapshotFor('commands-served', [], { gateRecords: served })
   snaps.badEntry = await snapshotFor('bad-entry', [sop('local:bad.md', 'allow_commands: git status, ls $DIR', 'Read only')])
   snaps.commandsShadow = await snapshotFor('commands-shadow', [sop('local:shadow.md', 'mode: shadow\nallow_commands: git status', 'Read only')])
   snaps.lanes = await snapshotFor('lanes', [LANE_SOP])
@@ -544,6 +548,13 @@ describe('allow_commands: at every gate', () => {
       const read = await call(g, 'Read', { file_path: 'src/a.ts' }, snaps.commands!)
       expect(read.refused, 'only shell tools are checked').toBe(false)
     }, 90_000)
+
+    it(`${g.name}: enforces the list when a control plane serves it`, async () => {
+      const ok = await call(g, 'Bash', { command: 'git status' }, snaps.commandsServed!)
+      expect(ok.refused, `${g.name} refused a listed command: ${ok.text.slice(0, 300)}`).toBe(false)
+      const out = await call(g, 'Bash', { command: 'git push' }, snaps.commandsServed!)
+      expect(out.refused, `${g.name} let an unlisted command through`).toBe(true)
+    }, 60_000)
 
     it(`${g.name}: an entry it cannot read refuses every shell call`, async () => {
       const bad = await call(g, 'Bash', { command: 'git status' }, snaps.badEntry!)
