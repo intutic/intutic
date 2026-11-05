@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 
 from .phrases import has_phrase, phrase_text
+from .shell_parse import drop_carried_text
 
 ACTION_PREFIX = "action:"
 
@@ -237,7 +238,7 @@ INFRA_PATH_FRAGMENTS = [
 ]
 
 
-def flatten_input(value) -> str:
+def flatten_input(value, leaf=lambda s: s) -> str:
     """Concatenate the string-ish values of a tool's arguments, lowercased.
 
     Which key holds the command varies by harness (`command`, `cmd`, `script`,
@@ -246,19 +247,55 @@ def flatten_input(value) -> str:
 
     Mirrors the Rust exactly, including the leading space before each nested
     value — spacing changes which patterns can straddle a value boundary.
+    `leaf` sees each string on its own: a quote in one value must not change
+    how another is read.
     """
     if isinstance(value, str):
-        return value.lower()
+        return leaf(value).lower()
     if isinstance(value, (list, tuple)):
-        return "".join(" " + flatten_input(v) for v in value)
+        return "".join(" " + flatten_input(v, leaf) for v in value)
     if isinstance(value, dict):
-        return "".join(" " + flatten_input(v) for v in value.values())
+        return "".join(" " + flatten_input(v, leaf) for v in value.values())
     # Numbers, bools and null contribute nothing, as in the Rust `_ => {}` arm.
     return ""
 
 
 def matches_any(haystack: str, patterns: list[str]) -> bool:
     return any(p in haystack for p in patterns)
+
+
+# Words after `update` in which its `set` may stand: `update t1 join t2 on
+# t1.id = t2.id set` is eight.
+SQL_UPDATE_WINDOW = 8
+
+
+def is_sql_update(words) -> bool:
+    """A whole word `update` with a `set` soon after it.
+
+    No phrase can say this, so it runs beside the needles, like
+    removes_outside_tree. Alone, `update ` is any commit message or status
+    report; script bodies stay in the text, because a heredoc into a file may
+    run in the same command.
+    """
+    toks = words.toks
+    for i, tok in enumerate(toks):
+        if not tok.endswith("update"):
+            continue
+        before = tok[-7:-6]
+        if before == "_" or before.isascii() and before.isalnum():
+            continue
+        for later in toks[i + 1 : i + 1 + SQL_UPDATE_WINDOW]:
+            if later == "set" or later.startswith("set("):
+                return True
+    return False
+
+
+def is_db_write(words) -> bool:
+    """`db_write` from the needles, with `update ` held to its SQL shape."""
+    return any(
+        has_phrase(words, p) and (p != "update " or is_sql_update(words))
+        for p in DB_WRITE_PATTERNS
+    )
 
 
 def matches_phrase(words, patterns: list[str]) -> bool:
@@ -338,12 +375,15 @@ def classify(tool_name: str, tool_input) -> list[str]:
     Returns prefixed tokens (`action:deploy`, ...) in the order the Rust emits
     them. Order matters: the ordering detectors read position in the sequence.
     """
-    args = flatten_input(tool_input)
+    # What a command only carries is not what it does: a commit message saying
+    # `git push` pushes nothing.
+    shell = tool_is(tool_name, SHELL_TOOLS)
+    args = flatten_input(tool_input, drop_carried_text if shell else lambda s: s)
     actions: list[str] = []
     # Cut into words once, for every phrase list below.
     words = phrase_text(args)
 
-    if tool_is(tool_name, SHELL_TOOLS):
+    if shell:
         # Tests first: `make test && git push` is both, and the ordering rule
         # needs the test to be seen as having happened before the deploy.
         if matches_phrase(words, TEST_PATTERNS):
@@ -356,13 +396,14 @@ def classify(tool_name: str, tool_input) -> list[str]:
             actions.append("release")
         # Source before sink, so that (secret_read -> http_post) can still fire
         # on a single command that does both.
-        if matches_any(args, SECRET_PATH_FRAGMENTS):
+        # `.env` is a file; `os.environ` in a script reads no secret.
+        if matches_any(args.replace(".environ", ""), SECRET_PATH_FRAGMENTS):
             actions.append("secret_read")
         if matches_any(args, PII_PATH_FRAGMENTS):
             actions.append("pii_export")
         if matches_phrase(words, HTTP_POST_PATTERNS):
             actions.append("http_post")
-        if matches_phrase(words, DB_WRITE_PATTERNS):
+        if is_db_write(words):
             actions.append("db_write")
         # The newer tokens, after the eight, in this order in every
         # classifier: each is a lane (see TOKEN_CLASS), not an ordering step.

@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   detector. Inside a fitted model, an unknown tool now scores neutral rather than through the table.
   Replaying saved traces through the registry: interrupted tasks go from 6 to 0 of 100 on SWE-bench
   and 2 to 0 of 40 on banking. On the public BFCL corpus, benign firings go from 2 to 0.
+- **A commit message is not a database write, and `os.environ` is not a `.env` file.** `update `
+  matched any text with the word in it, so `git commit -m "update readme"` read as `action:db_write`
+  and could trip a `review_before:` hold. It now counts only with a `set` within eight words, in the
+  proxy, `@intutic/gate` and `intutic-clawde`. `.env` matched inside `os.environ`, so a script that
+  read an environment variable counted as `action:secret_read`, one `curl -d` away from the
+  exfiltration kill. Script bodies are still read, so `UPDATE` or `DROP TABLE` in a heredoc still
+  classifies. Hook gates keep the plain `update ` needle until a gate version changes it.
+- **What a command only carries is no longer read as what it does.** `git commit -m "fix git push"`
+  read as a deploy. A new shell parser in the proxy, `@intutic/gate` and `intutic-clawde` reads a
+  command as the commands it runs, and text from a lone `echo`, `printf` or `git commit` is dropped
+  before classifying. A pipe, redirect, group, substitution, heredoc, control word or unterminated
+  quote leaves the whole command as it was, so `echo 'drop table t' | psql` still classifies.
 
 ### Changed
 

@@ -44,7 +44,12 @@ describe('db_write, whatever separates the keywords', () => {
   // between the words used to classify as nothing here.
   const vectors = JSON.parse(
     readFileSync(join(__dirname, '../../../proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
-  ) as { held: Array<[string, string[]]>; notHeld: string[]; adversarial: Array<[string, number]> }
+  ) as {
+    held: Array<[string, string[]]>
+    notHeld: string[]
+    falsePositives: Array<[string, string]>
+    adversarial: Array<[string, number]>
+  }
 
   it.each(vectors.held)('classifies %j as %j', (command, tokens) => {
     expect(classify('bash', { command })).toEqual(tokens)
@@ -52,6 +57,10 @@ describe('db_write, whatever separates the keywords', () => {
 
   it.each(vectors.notHeld)('classifies %j as nothing', (command) => {
     expect(classify('bash', { command })).toEqual([])
+  })
+
+  it.each(vectors.falsePositives)('does not read %j as %s', (command, token) => {
+    expect(classify('bash', { command })).not.toContain(token)
   })
 
   // The proxy's regex (SQL_GAP in actions.rs) is safe in Rust's linear

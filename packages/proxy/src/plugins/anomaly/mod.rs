@@ -75,6 +75,7 @@ pub mod broadcast;
 pub mod detectors;
 pub mod graph_detectors;
 pub mod outcome;
+pub mod shell_parse;
 
 /// The 12-value runtime anomaly taxonomy.
 ///
