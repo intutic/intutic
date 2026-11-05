@@ -566,7 +566,8 @@ type GateRuleCode =
   | "PREREQUISITE_UNMET"
   | "OUT_OF_SCOPE"
   | "OFF_PLAN"
-  | "PLAN_NOT_APPROVED";
+  | "PLAN_NOT_APPROVED"
+  | "COMMAND_NOT_ALLOWED";
 ```
 
 The refusal codes Tier R gives.
@@ -584,7 +585,11 @@ type GateRuleKind = "requires_outcome" | "scope_paths" | "plan_approval" | "allo
 ### GateRuleRecord
 
 ```ts
-type GateRuleRecord = RequiresOutcomeRecord | ScopePathsRecord | PlanApprovalRecord;
+type GateRuleRecord = 
+  | RequiresOutcomeRecord
+  | ScopePathsRecord
+  | PlanApprovalRecord
+  | AllowCommandsRecord;
 ```
 
 ***
@@ -770,7 +775,7 @@ How long the hook script the sandbox bootstrap writes may run, from process star
 ### GATE\_REFUSAL\_CODES
 
 ```ts
-const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "PREREQUISITE_UNMET", "OUT_OF_SCOPE", "OFF_PLAN", "PLAN_NOT_APPROVED", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "INSUFFICIENT_SCOPE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
+const GATE_REFUSAL_CODES: readonly ["SSO_GROUP", "SNAPSHOT", "HELD", "PREREQUISITE_UNMET", "OUT_OF_SCOPE", "COMMAND_NOT_ALLOWED", "OFF_PLAN", "PLAN_NOT_APPROVED", "SERVER_BLOCKED", "SERVER_HELD", "SERVER_NOT_APPROVED", "TOOL_DISABLED", "SERVER_NOT_ALLOWED", "POLICY_SNAPSHOT_UNVERIFIED", "SOP_RULE", "HOOK_GATE", "INSUFFICIENT_SCOPE", "COMMAND_TOO_LARGE", "CHAOS_FAULT", "E_UNPINNED_LATEST", "E_UNPINNED_TAG", "E_UNKNOWN_REGISTRY", "E_UNKNOWN_IMAGE", "E_DIGEST_MISMATCH", "E_MANIFEST_UNPARSEABLE", "DECIDE_REFUSED", "DECIDE_ESCALATED", "GOVERNANCE_UNAVAILABLE", "WORKFLOW_SANDBOX", "NO_GATE"];
 ```
 
 Every `code` an [IntuticGateRefusal](classes/IntuticGateRefusal.md) can carry: the tier that refused,
