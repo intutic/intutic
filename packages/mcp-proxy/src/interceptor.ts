@@ -466,6 +466,25 @@ export class ToolCallInterceptor {
       if (!this.failOpen) return block('GOVERNANCE_UNAVAILABLE', 'mcpProxyFailBehavior', FAIL_CLOSED_REASON)
     }
 
+    // 2.5. `allow_commands:`, on a shell tool. Evaluated whatever a SOP rule
+    // said: a rule that warns does not widen the list.
+    try {
+      const commands = this.policy.checkCommands(toolName, toolInput)
+      for (const finding of commands.shadow) {
+        log.warn({ action: 'commands_shadow', toolName, ruleId: finding.ruleId }, finding.reason)
+        this.emitter.emit('tool_flagged', toolName, toolInput, `${finding.reason} [${finding.ruleId}]`)
+      }
+      if (commands.refusal) {
+        const { ruleId, reason } = commands.refusal
+        log.warn({ action: 'commands_block', toolName, ruleId }, reason)
+        this.emitter.emit('tool_blocked', toolName, toolInput, reason)
+        return block('COMMAND_NOT_ALLOWED', ruleId, reason)
+      }
+    } catch (err) {
+      log.error({ action: 'commands_error', err: (err as Error).message }, 'allow_commands evaluation error')
+      if (!this.failOpen) return block('GOVERNANCE_UNAVAILABLE', 'mcpProxyFailBehavior', FAIL_CLOSED_REASON)
+    }
+
     // 3. Prompt-injection scan (request direction) — the `toolInput` a
     // MISBEHAVING or COMPROMISED calling agent sends, e.g. an agent that
     // itself already ingested injected content from an earlier step and is

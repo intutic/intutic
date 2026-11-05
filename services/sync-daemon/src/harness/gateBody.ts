@@ -854,6 +854,53 @@ def intutic_trajectory_check(harness, tool, session, records_text, tool_input_js
 `
 
 /**
+ * `update ` held to its SQL shape in the phrase rules and the classifier, in
+ * both dialects: `is_sql_update` of intutic_clawde and `isSqlUpdate` of
+ * `@intutic/gate`, which no phrase can say.
+ */
+const PY_NEEDLE_HELPERS = `def _intutic_is_sql_update(words):
+    # is_sql_update (intutic_clawde actions.py, gate-js actions.ts): a whole
+    # word update with a set within eight words. Alone, update is any status
+    # report or commit message.
+    toks = words.toks
+    for i, tok in enumerate(toks):
+        if not tok.endswith("update"):
+            continue
+        before = tok[-7:-6]
+        if before == "_" or before.isascii() and before.isalnum():
+            continue
+        for later in toks[i + 1 : i + 9]:
+            if later == "set" or later.startswith("set("):
+                return True
+    return False
+
+
+def _intutic_has_needle(words, needle, whole=False):
+    if needle.strip() == "update" and not _intutic_is_sql_update(words):
+        return False
+    return has_phrase(words, needle, whole)`
+
+const JS_NEEDLE_HELPERS = `/** isSqlUpdate (@intutic/gate actions.ts): a whole word update with a set within eight words. */
+function intuticIsSqlUpdate(words) {
+  var toks = words.toks;
+  for (var i = 0; i < toks.length; i++) {
+    var tok = toks[i];
+    if (!tok.endsWith('update')) continue;
+    var before = tok.charAt(tok.length - 7);
+    if ((before >= 'a' && before <= 'z') || (before >= '0' && before <= '9') || before === '_') continue;
+    var end = Math.min(i + 8, toks.length - 1);
+    for (var j = i + 1; j <= end; j++) if (toks[j] === 'set' || toks[j].startsWith('set(')) return true;
+  }
+  return false;
+}
+
+/** hasPhrase for a needle, with \`update\` held to its SQL shape. */
+function intuticHasNeedle(words, needle, whole) {
+  if (needle.trim() === 'update' && !intuticIsSqlUpdate(words)) return false;
+  return hasPhrase(words, needle, whole);
+}`
+
+/**
  * The Python the bash gates run, defined once per gate script: the phrase
  * matcher ({@link PHRASES_PY_SOURCE}), the MCP registry decision
  * ({@link MCP_REGISTRY_PY_SOURCE}), the shared rule-record ports (test
@@ -933,29 +980,32 @@ def _intutic_removes_outside_tree(args):
     return False
 
 
+${PY_NEEDLE_HELPERS}
+
 def intutic_actions(tool, command):
     if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
         return " "
-    words = phrase_text(command)
+    text = drop_carried_text(str(command or ""))
+    words = phrase_text(text)
     out = " "
     for action, needles in _INTUTIC_ACTION_NEEDLES:
-        if any(has_phrase(words, n) for n in needles):
+        if any(_intutic_has_needle(words, n) for n in needles):
             out += action + " "
     # A recursive, forced remove outside the working tree is destroy too
     # (Q3); no phrase can say "outside the tree", so it is a predicate.
-    if " ${DESTROY_TOKEN} " not in out and _intutic_removes_outside_tree(str(command or "")):
+    if " ${DESTROY_TOKEN} " not in out and _intutic_removes_outside_tree(text):
         out += "${DESTROY_TOKEN} "
     # The force-push compound: the git push phrase and a whole-word flag.
     if has_phrase(words, "git push"):
-        padded = " " + " ".join(str(command or "").lower().split()) + " "
+        padded = " " + " ".join(text.lower().split()) + " "
         if any(f in padded for f in _INTUTIC_FORCE_FLAGS):
             out += "${FORCE_PUSH_TOKEN} "
     return out
 ${GATE_RULE_TIERS_PY}
 
 def intutic_phrase_rule(source, command):
-    words = phrase_text(command)
-    return any(has_phrase(words, p, True) for p in source.split("|"))
+    words = phrase_text(drop_carried_text(str(command or "")))
+    return any(_intutic_has_needle(words, p, True) for p in source.split("|"))
 
 
 def intutic_mcp_registry(record_b64, tool):
@@ -1383,6 +1433,8 @@ export function emitJsActionClassifier(): string {
   return `// The phrase matcher, emitted from @intutic/shared-types phrases.ts. No
 // regex runs on a command to find words that may be split apart.
 ${PHRASES_JS_SOURCE}
+// The shell parser, from shellParse.ts: what a command only carries is not read.
+${SHELL_PARSE_JS_SOURCE}
 const INTUTIC_ACTION_NEEDLES = ${JSON.stringify(ACTION_NEEDLES)};
 const INTUTIC_ACTION_TOOLS = ${JSON.stringify(ACTION_TOOL_NAMES)};
 const INTUTIC_FORCE_FLAGS = ${JSON.stringify(FORCE_PUSH_FLAGS)};
@@ -1426,21 +1478,29 @@ function intuticRemovesOutsideTree(args) {
   return false;
 }
 
+${JS_NEEDLE_HELPERS}
+
+/** The words of what a command runs: the text of a lone echo, printf or git commit is not among them. */
+function intuticCommandWords(command) {
+  return phraseText(dropCarriedText(String(command == null ? '' : command)));
+}
+
 /** Space-padded action tokens for a shell command (" action:deploy "), or " ". */
 function intuticActions(toolName, command) {
   if (INTUTIC_ACTION_TOOLS.indexOf(String(toolName || '').toLowerCase()) === -1) return ' ';
-  var words = phraseText(command), out = ' ';
+  var text = dropCarriedText(String(command == null ? '' : command));
+  var words = phraseText(text), out = ' ';
   for (var i = 0; i < INTUTIC_ACTION_NEEDLES.length; i++) {
     var needles = INTUTIC_ACTION_NEEDLES[i][1];
     for (var j = 0; j < needles.length; j++) {
-      if (hasPhrase(words, needles[j])) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
+      if (intuticHasNeedle(words, needles[j])) { out += INTUTIC_ACTION_NEEDLES[i][0] + ' '; break; }
     }
   }
   // A recursive, forced remove outside the working tree is destroy too (Q3).
-  if (out.indexOf(' ${DESTROY_TOKEN} ') === -1 && intuticRemovesOutsideTree(String(command == null ? '' : command))) out += '${DESTROY_TOKEN} ';
+  if (out.indexOf(' ${DESTROY_TOKEN} ') === -1 && intuticRemovesOutsideTree(text)) out += '${DESTROY_TOKEN} ';
   // The force-push compound: the git push phrase and a whole-word flag.
   if (hasPhrase(words, 'git push')) {
-    var padded = ' ' + String(command == null ? '' : command).toLowerCase().split(/\\s+/).filter(Boolean).join(' ') + ' ';
+    var padded = ' ' + text.toLowerCase().split(/\\s+/).filter(Boolean).join(' ') + ' ';
     for (var f = 0; f < INTUTIC_FORCE_FLAGS.length; f++) {
       if (padded.indexOf(INTUTIC_FORCE_FLAGS[f]) !== -1) { out += '${FORCE_PUSH_TOKEN} '; break; }
     }
@@ -1451,7 +1511,7 @@ function intuticActions(toolName, command) {
 /** A \`phrase\`-subject rule: its source is |-separated phrases matched as words. */
 function intuticPhraseRule(source, words) {
   var phrases = String(source).split('|');
-  for (var i = 0; i < phrases.length; i++) if (hasPhrase(words, phrases[i], true)) return true;
+  for (var i = 0; i < phrases.length; i++) if (intuticHasNeedle(words, phrases[i], true)) return true;
   return false;
 }`
 }
@@ -2658,7 +2718,6 @@ const JS_RULE_LIB = `// Rule records, test outcomes, scope matching and refusal 
 const intuticRuleLib = (function () {
 ${TEST_OUTCOME_JS_SOURCE}
 ${SCOPE_MATCH_JS_SOURCE}
-${SHELL_PARSE_JS_SOURCE}
 ${RULE_RECORD_JS_SOURCE}
 ${REFUSAL_DETAIL_JS_SOURCE}
   return { decode: decodeGateRuleRecord, exitCode: extractExitCode, outcome: decideTestOutcome,
@@ -3618,7 +3677,7 @@ function intuticRuleSubjects(rule, c) {
   // A phrase rule's source is |-separated phrases matched as words against
   // the raw command — never as a regex, which backtracks on crafted input.
   if (rule.subject === 'phrase') {
-    if (c.words === null) c.words = phraseText(c.command);
+    if (c.words === null) c.words = intuticCommandWords(c.command);
     return intuticPhraseRule(rule.src != null ? rule.src : rule.re.source, c.words) ? [c.nCommand] : [];
   }
   // Each field is tested separately rather than concatenated — joining them
@@ -4286,6 +4345,7 @@ ${NORMALISE_CONTRACT.pySource}
 
 # The phrase matcher (intutic_clawde/gate/phrases.py), for phrase rules.
 ${PHRASES_PY_SOURCE}
+${PY_NEEDLE_HELPERS}
 
 
 # The sequence-rule matcher (intutic_clawde/gate/sequence.py), for rules whose
@@ -4403,7 +4463,7 @@ def _intutic_evaluate(text):
                 # a regex, which backtracks on crafted text.
                 if words is None:
                     words = phrase_text(text)
-                if not any(has_phrase(words, p, True) for p in src.split("|")):
+                if not any(_intutic_has_needle(words, p, True) for p in src.split("|")):
                     continue
             elif not _intutic_rule_search(src, subject, flags_re, seq):
                 continue
@@ -4485,6 +4545,7 @@ ${NORMALISE_CONTRACT.jsSource}
 
 // The phrase matcher (@intutic/shared-types phrases.ts), for phrase rules.
 ${PHRASES_JS_SOURCE}
+${JS_NEEDLE_HELPERS}
 
 ${JS_DECIDE_LIB}
 
@@ -4609,7 +4670,7 @@ function intuticGateWorkflow(workflow, record, workspaceId) {
       if (rule.subject === 'phrase') {
         if (leafWords === null) leafWords = _leaves.map(phraseText);
         var _phrases = (rule.src != null ? rule.src : rule.re.source).split('|');
-        if (!leafWords.some(function (w) { return _phrases.some(function (p) { return hasPhrase(w, p, true); }); })) continue;
+        if (!leafWords.some(function (w) { return _phrases.some(function (p) { return intuticHasNeedle(w, p, true); }); })) continue;
       }
       // A node has no separate command/target — its parameters are both. A
       // 'tool' rule matches the node TYPE and nothing else, for the same

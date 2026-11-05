@@ -103,7 +103,8 @@ export function controlPlaneCommandIn(args: readonly string[]): string | undefin
 export function missingPluginMessage(command: string): string {
   return (
     `\`intutic ${command}\` is a control-plane command. The open-core CLI does not include it: ` +
-    `it comes from the ${CONTROL_PLANE_PLUGIN} package, which is not installed alongside this CLI.\n` +
+    `it comes from the ${CONTROL_PLANE_PLUGIN} package, which is not installed alongside this CLI. ` +
+    `To use a control plane, install it: npm install -g ${CONTROL_PLANE_PLUGIN}\n` +
     NO_CONTROL_PLANE_MESSAGE
   )
 }

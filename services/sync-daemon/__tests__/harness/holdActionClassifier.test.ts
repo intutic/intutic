@@ -32,13 +32,13 @@ import { REFUSAL_DETAIL_PY_SOURCE } from '../../src/lib/refusalDetailPy.js'
  * Among the near-misses (`notHeld`), each names a needle's word without the
  * needle: a hold on a command nobody is running teaches people to disable the
  * hook. What no classifier avoids, because the rule's intent does not allow
- * it: a needle quoted inside another command (`echo "drop table"`) is held —
- * a text classifier cannot tell quoting from the shell carrying a statement to
- * a client.
+ * it: a needle quoted inside a command that may consume it (`psql -c "drop
+ * table t"`) is held. The text of a lone `echo`, `printf` or `git commit` is
+ * not (`falsePositives`).
  */
 const VECTORS = JSON.parse(
   readFileSync(join(__dirname, '../../../../packages/proxy/src/plugins/anomaly/action_vectors.json'), 'utf-8'),
-) as { held: Array<[string, string[]]>; notHeld: string[]; adversarial: Array<[string, number]> }
+) as { held: Array<[string, string[]]>; notHeld: string[]; falsePositives: Array<[string, string]>; adversarial: Array<[string, number]> }
 /**
  * The lane vectors' classify cases: the lane tokens, the
  * force-push compound and the out-of-tree `rm -rf` (Q3), which every
@@ -150,6 +150,16 @@ describe('the hold classifier', () => {
       expectLinearTimes(`bash gate (Python), ${JSON.stringify(unit)}`, pythonAdversarialMs[i]![1], pythonAdversarialMs[i]![4])
     },
   )
+
+  it('does not read what a command only carries', async () => {
+    const cases = VECTORS.falsePositives.filter(([, token]) => HOLD_TOKENS.has(token))
+    expect(cases.length).toBeGreaterThan(5)
+    const py = await pythonActions(cases.map(([c]) => ['Bash', c] as const))
+    cases.forEach(([command, token], i) => {
+      expect(jsActions('Bash', command), `js: ${command}`).not.toContain(token)
+      expect(py[i]![0], `python: ${command}`).not.toContain(token)
+    })
+  })
 
   it('classifies shell tools only', () => {
     expect(jsActions('Write', 'git push')).toBe(' ')

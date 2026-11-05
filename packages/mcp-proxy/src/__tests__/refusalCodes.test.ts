@@ -3,6 +3,7 @@
  * and the rule id that decided, and the list of codes is the shared one.
  */
 import { describe, it, expect, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import * as node_os from 'node:os'
 import * as node_path from 'node:path'
@@ -13,6 +14,7 @@ import type { McpPrincipal, McpRegistryPolicy, SopRule, SsoGroupPolicy } from '.
 import { GovernanceEmitter } from '../emitter.js'
 import { handleHarnessLine, processServerLine, type PendingRequest } from '../proxy.js'
 import { MCP_REFUSAL_CODES } from '../refusals.js'
+import { compileSopGateRecords, parseFrontMatterEnforcing, toServedGateRecord } from '@intutic/shared-types'
 
 const HERE = node_path.dirname(fileURLToPath(import.meta.url))
 const SHARED = JSON.parse(readFileSync(node_path.join(HERE, '../../../shared-types/fixtures/refusal-codes.json'), 'utf8')).mcp
@@ -157,5 +159,45 @@ describe('refusal frames', () => {
     const outcome = processServerLine(JSON.stringify({ jsonrpc: '2.0', id: 3, result }), pending, [], {}, 'block')
     const frame = JSON.parse(outcome.line) as { error: { data: unknown } }
     expect(frame.error.data).toEqual({ code: 'RESULT_WITHHELD_INJECTION', ruleId: 'injection.tool_result' })
+  })
+})
+
+describe('allow_commands', () => {
+  const served = (front: string) =>
+    compileSopGateRecords({ sopId: 'sop_1', sopTitle: 'Read only' }, parseFrontMatterEnforcing(front), (t) => createHash('sha256').update(t, 'utf8').digest('hex')).records.map((r) =>
+      toServedGateRecord(r, 'sop_1'),
+    )
+  const gated = (records: unknown) => {
+    const policy = new Policy()
+    ;(policy as unknown as { absorbGateRecords(v: unknown): void }).absorbGateRecords(records)
+    const emitter = new GovernanceEmitter('http://localhost:0', '', '/dev/null', 'ws_codes')
+    const flagged: string[] = []
+    vi.spyOn(emitter, 'emit').mockImplementation((type: string, _t?: string, _i?: unknown, reason?: string) => {
+      if (type === 'tool_flagged') flagged.push(reason ?? '')
+    })
+    return { interceptor: new ToolCallInterceptor(policy, emitter, true), flagged }
+  }
+
+  it('refuses a shell tool outside the list, and nothing else', async () => {
+    const { interceptor } = gated(served('allow_commands: git status'))
+    expect(await interceptor.decide('bash', { command: 'git status' })).toEqual({ action: 'allow' })
+    const refused = await interceptor.decide('bash', { command: 'git push' })
+    expect(refused).toMatchObject({ action: 'block', code: 'COMMAND_NOT_ALLOWED', ruleId: 'allow_commands.Read only' })
+    expect(await interceptor.decide('run_command', { cmd: 'git status > f' })).toMatchObject({ code: 'COMMAND_NOT_ALLOWED' })
+    expect(await interceptor.decide('search_docs', { command: 'git push' })).toEqual({ action: 'allow' })
+  })
+
+  it('reports under mode: shadow and refuses nothing', async () => {
+    const { interceptor, flagged } = gated(served('mode: shadow\nallow_commands: git status'))
+    expect(await interceptor.decide('bash', { command: 'git push' })).toEqual({ action: 'allow' })
+    expect(flagged).toHaveLength(1)
+    expect(flagged[0]).toContain('[allow_commands.Read only]')
+  })
+
+  it('refuses every shell call under a record it cannot read', async () => {
+    const records = served('allow_commands: git status')
+    records[0]!.payload.commands = 'git status'
+    const { interceptor } = gated(records)
+    expect(await interceptor.decide('bash', { command: 'git status' })).toMatchObject({ code: 'COMMAND_NOT_ALLOWED' })
   })
 })

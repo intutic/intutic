@@ -756,6 +756,23 @@ pub struct CommandGate {
     pub rule: String,
 }
 
+/// What a shell call's arguments run that `allow` does not cover.
+pub(crate) fn commands_outside(args: &Value, allow: &[String]) -> Vec<String> {
+    // Every key: which one a harness runs is not known here.
+    let commands: Vec<&str> = crate::manifest::COMMAND_KEYS
+        .iter()
+        .filter_map(|k| args.get(*k).and_then(Value::as_str))
+        .filter(|c| !c.is_empty())
+        .collect();
+    if commands.is_empty() {
+        return vec!["(no command)".to_string()];
+    }
+    commands
+        .iter()
+        .flat_map(|c| crate::plugins::anomaly::shell_parse::commands_outside_allow(c, allow))
+        .collect()
+}
+
 /// The most of a refused command a reason quotes, in characters.
 const COMMAND_QUOTE_MAX_CHARS: usize = 120;
 
@@ -926,22 +943,7 @@ impl ArgGates {
                 crate::plugins::anomaly::actions::SHELL_TOOLS,
             )
         }) {
-            // Every key: which one a harness runs is not known here.
-            let commands: Vec<&str> = crate::manifest::COMMAND_KEYS
-                .iter()
-                .filter_map(|k| args.get(*k).and_then(Value::as_str))
-                .filter(|c| !c.is_empty())
-                .collect();
-            let outside: Vec<String> = if commands.is_empty() {
-                vec!["(no command)".to_string()]
-            } else {
-                commands
-                    .iter()
-                    .flat_map(|c| {
-                        crate::plugins::anomaly::shell_parse::commands_outside_allow(c, &gate.allow)
-                    })
-                    .collect()
-            };
+            let outside = commands_outside(args, &gate.allow);
             if !outside.is_empty() {
                 return Some(DenialReason::CommandNotAllowed {
                     tool: tool.to_string(),

@@ -7,16 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.4] - 2026-11-05
+
 ### Added
 
 - **`allow_commands:`, exact-command permissions.** A SOP can list the shell commands an agent may
   run: `allow_commands: git status, npm test *`. Each entry is one command, matched word by word,
   and a trailing ` *` allows further arguments. Every command in a call must match, and what the
   shell parser cannot read is refused rather than let through, so a redirect or substitution is
-  refused even when the command is listed. The proxy, the SDK gates and the hook gates enforce it,
-  as `COMMAND_NOT_ALLOWED`, from local SOPs and from SOPs a control plane serves. Hook gates move
+  refused even when the command is listed. The proxy, the MCP proxy, the SDK gates and the hook gates
+  enforce it, as `COMMAND_NOT_ALLOWED`, from local SOPs and from SOPs a control plane serves. Hook gates move
   to version 24; an older gate refuses every shell call under such a SOP and asks for an upgrade. A
   proxy, CLI or sync daemon older than 3.1.4 does not know the key and ignores it.
+
+- **`intutic connect` needs no release token.** The control-plane commands install from npm,
+  `npm install -g @intutic/cli @intutic/cli-control-plane`, and `connect` downloads its proxy from
+  this repository's release: `intutic-proxy-connected-<platform>`, the same source built with
+  `--features control-plane`, covered by `checksums.json`. The plain `intutic-proxy-*` assets are
+  unchanged. The package is proprietary, under the license it ships with; what it can do is decided
+  by the control plane it signs in to.
+- **A `mode: shadow` `allow_commands:` is reported at the proxy too,** on the request after the call
+  ran, in the trace's SOP shadow reports.
 
 ### Fixed
 
@@ -37,10 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proxy, `@intutic/gate` and `intutic-clawde`. `.env` matched inside `os.environ`, so a script that
   read an environment variable counted as `action:secret_read`, one `curl -d` away from the
   exfiltration kill. Script bodies are still read, so `UPDATE` or `DROP TABLE` in a heredoc still
-  classifies. Hook gates keep the plain `update ` needle until a gate version changes it.
+  classifies. Hook gates read `update` the same way.
 - **What a command only carries is no longer read as what it does.** `git commit -m "fix git push"`
-  read as a deploy. A new shell parser in the proxy, `@intutic/gate` and `intutic-clawde` reads a
-  command as the commands it runs, and text from a lone `echo`, `printf` or `git commit` is dropped
+  read as a deploy. A new shell parser in the proxy, the hook gates, `@intutic/gate` and
+  `intutic-clawde` reads a command as the commands it runs, and text from a lone `echo`, `printf` or `git commit` is dropped
   before classifying. A pipe, redirect, group, substitution, heredoc, control word or unterminated
   quote leaves the whole command as it was, so `echo 'drop table t' | psql` still classifies.
 

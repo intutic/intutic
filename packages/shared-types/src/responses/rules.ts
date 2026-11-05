@@ -213,7 +213,10 @@ const McpCuration = z.object({
 export const SopRulesResponse = listEnvelope('rules', 'camel')
   .extend({ ok: z.literal(true), rules: z.array(SopRuleResponse) })
   .merge(McpCuration)
-  .extend({ interventionMode: InterventionMode })
+  .extend({
+    interventionMode: InterventionMode,
+    gateRecords: z.array(z.lazy(() => ServedGateRecordResponse)).describe('The `allow_commands` records of the enforced SOPs with no `roles:`, which the MCP proxy enforces on a shell tool.'),
+  })
 export type SopRulesResponse = z.infer<typeof SopRulesResponse>
 
 /**

@@ -35,7 +35,9 @@ read-only commands and manage their own login and keys.
 Commands without a badge run on your machine with no account. A badge on a command means it calls
 a control plane, which the open core does not include, and needs `intutic login` first. These
 commands are not in the open-core CLI package: they come from `@intutic/cli-control-plane`,
-installed next to it. Without that package, running one prints where it comes from and exits.
+installed next to it with `npm install -g @intutic/cli @intutic/cli-control-plane`. It is
+proprietary, under the license in the package. Without it, running one prints where it comes
+from and exits.
 
 The badge names the plan, as in [Plan badges](/guide/plans#badges):
 <Badge type="tip" text="Cloud" /> works on any connected workspace, free included;

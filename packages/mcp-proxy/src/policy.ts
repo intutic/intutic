@@ -11,7 +11,8 @@ import { createStderrLogger as createLogger } from './stderrLog.js'
 import { callDaemonSocket } from './daemonClient.js'
 import { HttpStatusError, httpRequest } from './httpJson.js'
 import type { ResolvedPolicy } from './daemon/policyCache.js'
-import type { PolicyResolveResponse, SopRulesResponse, WireFields } from '@intutic/shared-types'
+import type { GateRuleCall, GateRuleEvaluation, GateRuleRecord, PolicyResolveResponse, ServedGateRecord, SopRulesResponse, WireFields } from '@intutic/shared-types'
+import { evaluateGateRuleRecords, fromServedGateRecord } from '@intutic/shared-types'
 import {
   isOpaqueInterventionMode,
   parseMcpBudgetPolicy,
@@ -189,8 +190,22 @@ export function parseSsoGroupPolicy(value: unknown): SsoGroupPolicy | undefined 
 /** How long a proxy waits between on-demand refreshes while it has no registry. */
 const UNKNOWN_REGISTRY_RETRY_MS = 5_000
 
+/**
+ * An entry no gate can read: it is not one plain command, so a record holding
+ * it refuses every shell call, which is what a gate's fallback line does for a
+ * record that does not decode.
+ */
+const UNREADABLE_ENTRY = '(unreadable rule)'
+
+/** The call a record is evaluated against. `allow_commands` reads only the tool and its input. */
+function commandCall(tool: string, input: unknown): GateRuleCall {
+  return { tool, input, actions: [], cwd: '', root: '', sessionId: '', harness: 'mcp-proxy', outcomes: null, observable: false, plan: { status: 'none' }, nowMs: 0 }
+}
+
 export class PolicyClient {
   private rules: SopRule[] = []
+  /** The `allow_commands` records in force, enforcing and shadow. */
+  private commandRecords: GateRuleRecord[] = []
   /** Workspace injection-pattern sources (`mcpInjectionPatterns`); empty = floor only. */
   private injectionPatterns: string[] = []
   /**
@@ -524,6 +539,23 @@ export class PolicyClient {
     return decided
   }
 
+  /** The served records this proxy enforces: `allow_commands`, on a shell tool. */
+  private absorbGateRecords(value: unknown): void {
+    const served = Array.isArray(value) ? (value as ServedGateRecord[]).filter((r) => isPlainObject(r) && r.kind === 'allow_commands') : []
+    this.commandRecords = served.map((r) => {
+      const record = fromServedGateRecord(r)
+      if (record) return record
+      const sopTitle = isPlainObject(r.payload) && typeof r.payload.sopTitle === 'string' ? r.payload.sopTitle : r.sopId
+      log.warn({ action: 'gate_record_unreadable', sopId: r.sopId }, 'An allow_commands record does not decode: every shell call is refused')
+      return { v: 1, ref: '', sopTitle, kind: 'allow_commands', rollout: r.rollout === 'shadow' ? 'shadow' : 'enforce', fallbackId: null, commands: [UNREADABLE_ENTRY] }
+    })
+  }
+
+  /** `allow_commands:` on one call: what it refuses, and what shadow rules report. */
+  checkCommands(tool: string, input: unknown): GateRuleEvaluation {
+    return evaluateGateRuleRecords(this.commandRecords, commandCall(tool, input))
+  }
+
   /** Fetch fresh rules from the control plane. */
   async refresh(): Promise<void> {
     this.lastRefreshAttemptAt = Date.now()
@@ -546,6 +578,7 @@ export class PolicyClient {
             if (isSopRule(candidate)) accepted.push(candidate)
           }
           this.rules = accepted
+          this.absorbGateRecords(policy.gateRecords)
           const dropped = candidates.length - accepted.length
           if (dropped > 0) {
             log.warn(
@@ -607,6 +640,7 @@ export class PolicyClient {
     const parsed = JSON.parse(body) as WireFields<SopRulesResponse>
     const rules = Array.isArray(parsed.rules) ? (parsed.rules as SopRule[]) : []
     this.rules = rules
+    this.absorbGateRecords(parsed['gateRecords'])
     this.absorbCuration(parsed)
     // A control plane that sends no registry has none: unrestricted, not unknown.
     this.registry = parseRegistry(parsed['mcpRegistry']) ?? UNRESTRICTED_REGISTRY

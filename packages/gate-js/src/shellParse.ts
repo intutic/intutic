@@ -223,5 +223,5 @@ export function commandsOutsideAllow(text: string, allow: readonly string[]): st
 /** The parser and the allow list as JavaScript source, for the hook gates to embed. */
 export const SHELL_PARSE_JS_SOURCE = [
   `const SHELL_CONTROL_WORDS = ${JSON.stringify(SHELL_CONTROL_WORDS)};`,
-  ...[shellIsAssignment, parseShell, allowEntry, isAllowEntry, commandsOutsideAllow].map((fn) => fn.toString()),
+  ...[shellIsAssignment, parseShell, dropCarriedText, allowEntry, isAllowEntry, commandsOutsideAllow].map((fn) => fn.toString()),
 ].join('\n')
