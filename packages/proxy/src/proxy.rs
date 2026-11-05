@@ -162,14 +162,37 @@ fn evaluate_sop_shadows(
                 .into_iter()
                 .filter(|f| !baseline.contains(&(f.detector_id, f.reason.clone())))
                 .collect();
+            let mut kinds: Vec<String> = findings
+                .iter()
+                .map(|f| f.kind.as_str().to_string())
+                .collect();
+            // No detector reads `allow_commands:`: the check is the response
+            // gate's, and a shadow SOP is not in it, so the calls that ran are
+            // read here, as the turn this request reports on carries them.
+            let unlisted = !s.allow_commands.is_empty()
+                && base_ctx.turn_tool_calls.iter().any(|c| {
+                    crate::plugins::anomaly::actions::tool_is(
+                        &c.name,
+                        crate::plugins::anomaly::actions::SHELL_TOOLS,
+                    ) && !crate::plugins::response_gate::commands_outside(
+                        &c.arguments,
+                        &s.allow_commands,
+                    )
+                    .is_empty()
+                });
+            if unlisted {
+                let kind = crate::plugins::anomaly::AnomalyKind::UnauthorizedTool
+                    .as_str()
+                    .to_string();
+                if !kinds.contains(&kind) {
+                    kinds.push(kind);
+                }
+            }
             crate::sops::SopShadowReport {
                 title: s.title.clone(),
                 scope: s.scope,
-                would_act: !findings.is_empty(),
-                findings: findings
-                    .iter()
-                    .map(|f| f.kind.as_str().to_string())
-                    .collect(),
+                would_act: !kinds.is_empty(),
+                findings: kinds,
             }
         })
         .collect()
@@ -14374,6 +14397,51 @@ mod tests {
             "kubectl was called and is denied — this must be would_act: true"
         );
         assert!(!reports[0].findings.is_empty());
+    }
+
+    /// `allow_commands:` under `mode: shadow`: the call ran, so it is read
+    /// from the turn this request reports on, and only an unlisted command
+    /// is a would-act.
+    #[test]
+    fn evaluate_sop_shadows_reports_a_command_outside_allow_commands() {
+        use crate::plugins::anomaly::detectors::test_support::base_ctx;
+        use crate::wasm::context::ToolCall;
+
+        let ctx_with = |command: &str| crate::wasm::context::RequestContext {
+            action_outcomes: None,
+            revert_hold_tokens: Vec::new(),
+            sibling_overlap: None,
+            context_isolation: Default::default(),
+            modes: Default::default(),
+            turn_tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: "Bash".into(),
+                arguments: serde_json::json!({ "command": command }),
+            }],
+            ..base_ctx()
+        };
+        let shadow_sop = crate::sops::Sop {
+            title: "Read only".into(),
+            allow_commands: vec!["git status".into()],
+            mode: crate::sops::SopMode::Shadow,
+            ..crate::sops::Sop::default()
+        };
+        let registry = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+        let sops = [shadow_sop];
+
+        let listed = evaluate_sop_shadows(&sops, "", &ctx_with("git status"), &registry);
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].would_act, "a listed command is no would-act");
+
+        let unlisted = evaluate_sop_shadows(&sops, "", &ctx_with("git push"), &registry);
+        assert_eq!(unlisted.len(), 1);
+        assert!(unlisted[0].would_act);
+        assert_eq!(
+            unlisted[0].findings,
+            vec![crate::plugins::anomaly::AnomalyKind::UnauthorizedTool
+                .as_str()
+                .to_string()]
+        );
     }
 
     fn hook_sop(title: &str, mode: crate::sops::SopMode, line: &str) -> crate::sops::Sop {

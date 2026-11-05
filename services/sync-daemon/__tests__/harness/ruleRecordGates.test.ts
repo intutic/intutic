@@ -91,6 +91,7 @@ beforeAll(async () => {
   // What a control plane serves, through the schema its route validates with.
   const served = compileSopGateRecords(sop('sop_1', 'allow_commands: git status')).records.map((r) => ServedGateRecordResponse.parse(toServedGateRecord(r, 'sop_1')))
   snaps.commandsServed = await snapshotFor('commands-served', [], { gateRecords: served })
+  snaps.wideLane = await snapshotFor('wide-lane', [sop('local:wide.md', 'closed_lanes: reversible_wide', 'Wide')])
   snaps.badEntry = await snapshotFor('bad-entry', [sop('local:bad.md', 'allow_commands: git status, ls $DIR', 'Read only')])
   snaps.commandsShadow = await snapshotFor('commands-shadow', [sop('local:shadow.md', 'mode: shadow\nallow_commands: git status', 'Read only')])
   snaps.lanes = await snapshotFor('lanes', [LANE_SOP])
@@ -565,6 +566,21 @@ describe('allow_commands: at every gate', () => {
       const shadow = await call(g, 'Bash', { command: 'git push' }, snaps.commandsShadow!)
       expect(shadow.refused, shadow.text.slice(0, 300)).toBe(false)
     }, 60_000)
+  }
+})
+
+describe('text a command only carries, at every gate', () => {
+  for (const g of ALL) {
+    it(`${g.name}: a lane hold reads what runs, not what a commit message says`, async () => {
+      for (const command of ['git commit -m "update readme"', 'git commit -m "fix git push"', 'echo "run npm publish next"', 'echo "status update"']) {
+        const out = await call(g, 'Bash', { command }, snaps.wideLane!)
+        expect(out.refused, `${g.name} held ${command}: ${out.text.slice(0, 300)}`).toBe(false)
+      }
+      for (const command of ['git push', 'psql -c "update t set a = 1"', 'echo "git push" | sh']) {
+        const out = await call(g, 'Bash', { command }, snaps.wideLane!)
+        expect(out.refused, `${g.name} let ${command} through`).toBe(true)
+      }
+    }, 90_000)
   }
 })
 

@@ -1903,21 +1903,44 @@ def _intutic_removes_outside_tree(args):
     return False
 
 
+def _intutic_is_sql_update(words):
+    # is_sql_update (intutic_clawde actions.py, gate-js actions.ts): a whole
+    # word update with a set within eight words. Alone, update is any status
+    # report or commit message.
+    toks = words.toks
+    for i, tok in enumerate(toks):
+        if not tok.endswith("update"):
+            continue
+        before = tok[-7:-6]
+        if before == "_" or before.isascii() and before.isalnum():
+            continue
+        for later in toks[i + 1 : i + 9]:
+            if later == "set" or later.startswith("set("):
+                return True
+    return False
+
+
+def _intutic_has_needle(words, needle, whole=False):
+    if needle.strip() == "update" and not _intutic_is_sql_update(words):
+        return False
+    return has_phrase(words, needle, whole)
+
 def intutic_actions(tool, command):
     if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
         return " "
-    words = phrase_text(command)
+    text = drop_carried_text(str(command or ""))
+    words = phrase_text(text)
     out = " "
     for action, needles in _INTUTIC_ACTION_NEEDLES:
-        if any(has_phrase(words, n) for n in needles):
+        if any(_intutic_has_needle(words, n) for n in needles):
             out += action + " "
     # A recursive, forced remove outside the working tree is destroy too
     # (Q3); no phrase can say "outside the tree", so it is a predicate.
-    if " action:destroy " not in out and _intutic_removes_outside_tree(str(command or "")):
+    if " action:destroy " not in out and _intutic_removes_outside_tree(text):
         out += "action:destroy "
     # The force-push compound: the git push phrase and a whole-word flag.
     if has_phrase(words, "git push"):
-        padded = " " + " ".join(str(command or "").lower().split()) + " "
+        padded = " " + " ".join(text.lower().split()) + " "
         if any(f in padded for f in _INTUTIC_FORCE_FLAGS):
             out += "action:force_push "
     return out
@@ -2191,8 +2214,8 @@ def intutic_trajectory_check(harness, tool, session, records_text, tool_input_js
 
 
 def intutic_phrase_rule(source, command):
-    words = phrase_text(command)
-    return any(has_phrase(words, p, True) for p in source.split("|"))
+    words = phrase_text(drop_carried_text(str(command or "")))
+    return any(_intutic_has_needle(words, p, True) for p in source.split("|"))
 
 
 def intutic_mcp_registry(record_b64, tool):
@@ -5672,21 +5695,44 @@ def _intutic_removes_outside_tree(args):
     return False
 
 
+def _intutic_is_sql_update(words):
+    # is_sql_update (intutic_clawde actions.py, gate-js actions.ts): a whole
+    # word update with a set within eight words. Alone, update is any status
+    # report or commit message.
+    toks = words.toks
+    for i, tok in enumerate(toks):
+        if not tok.endswith("update"):
+            continue
+        before = tok[-7:-6]
+        if before == "_" or before.isascii() and before.isalnum():
+            continue
+        for later in toks[i + 1 : i + 9]:
+            if later == "set" or later.startswith("set("):
+                return True
+    return False
+
+
+def _intutic_has_needle(words, needle, whole=False):
+    if needle.strip() == "update" and not _intutic_is_sql_update(words):
+        return False
+    return has_phrase(words, needle, whole)
+
 def intutic_actions(tool, command):
     if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
         return " "
-    words = phrase_text(command)
+    text = drop_carried_text(str(command or ""))
+    words = phrase_text(text)
     out = " "
     for action, needles in _INTUTIC_ACTION_NEEDLES:
-        if any(has_phrase(words, n) for n in needles):
+        if any(_intutic_has_needle(words, n) for n in needles):
             out += action + " "
     # A recursive, forced remove outside the working tree is destroy too
     # (Q3); no phrase can say "outside the tree", so it is a predicate.
-    if " action:destroy " not in out and _intutic_removes_outside_tree(str(command or "")):
+    if " action:destroy " not in out and _intutic_removes_outside_tree(text):
         out += "action:destroy "
     # The force-push compound: the git push phrase and a whole-word flag.
     if has_phrase(words, "git push"):
-        padded = " " + " ".join(str(command or "").lower().split()) + " "
+        padded = " " + " ".join(text.lower().split()) + " "
         if any(f in padded for f in _INTUTIC_FORCE_FLAGS):
             out += "action:force_push "
     return out
@@ -5960,8 +6006,8 @@ def intutic_trajectory_check(harness, tool, session, records_text, tool_input_js
 
 
 def intutic_phrase_rule(source, command):
-    words = phrase_text(command)
-    return any(has_phrase(words, p, True) for p in source.split("|"))
+    words = phrase_text(drop_carried_text(str(command or "")))
+    return any(_intutic_has_needle(words, p, True) for p in source.split("|"))
 
 
 def intutic_mcp_registry(record_b64, tool):
@@ -9447,21 +9493,44 @@ def _intutic_removes_outside_tree(args):
     return False
 
 
+def _intutic_is_sql_update(words):
+    # is_sql_update (intutic_clawde actions.py, gate-js actions.ts): a whole
+    # word update with a set within eight words. Alone, update is any status
+    # report or commit message.
+    toks = words.toks
+    for i, tok in enumerate(toks):
+        if not tok.endswith("update"):
+            continue
+        before = tok[-7:-6]
+        if before == "_" or before.isascii() and before.isalnum():
+            continue
+        for later in toks[i + 1 : i + 9]:
+            if later == "set" or later.startswith("set("):
+                return True
+    return False
+
+
+def _intutic_has_needle(words, needle, whole=False):
+    if needle.strip() == "update" and not _intutic_is_sql_update(words):
+        return False
+    return has_phrase(words, needle, whole)
+
 def intutic_actions(tool, command):
     if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
         return " "
-    words = phrase_text(command)
+    text = drop_carried_text(str(command or ""))
+    words = phrase_text(text)
     out = " "
     for action, needles in _INTUTIC_ACTION_NEEDLES:
-        if any(has_phrase(words, n) for n in needles):
+        if any(_intutic_has_needle(words, n) for n in needles):
             out += action + " "
     # A recursive, forced remove outside the working tree is destroy too
     # (Q3); no phrase can say "outside the tree", so it is a predicate.
-    if " action:destroy " not in out and _intutic_removes_outside_tree(str(command or "")):
+    if " action:destroy " not in out and _intutic_removes_outside_tree(text):
         out += "action:destroy "
     # The force-push compound: the git push phrase and a whole-word flag.
     if has_phrase(words, "git push"):
-        padded = " " + " ".join(str(command or "").lower().split()) + " "
+        padded = " " + " ".join(text.lower().split()) + " "
         if any(f in padded for f in _INTUTIC_FORCE_FLAGS):
             out += "action:force_push "
     return out
@@ -9735,8 +9804,8 @@ def intutic_trajectory_check(harness, tool, session, records_text, tool_input_js
 
 
 def intutic_phrase_rule(source, command):
-    words = phrase_text(command)
-    return any(has_phrase(words, p, True) for p in source.split("|"))
+    words = phrase_text(drop_carried_text(str(command or "")))
+    return any(_intutic_has_needle(words, p, True) for p in source.split("|"))
 
 
 def intutic_mcp_registry(record_b64, tool):
@@ -13211,21 +13280,44 @@ def _intutic_removes_outside_tree(args):
     return False
 
 
+def _intutic_is_sql_update(words):
+    # is_sql_update (intutic_clawde actions.py, gate-js actions.ts): a whole
+    # word update with a set within eight words. Alone, update is any status
+    # report or commit message.
+    toks = words.toks
+    for i, tok in enumerate(toks):
+        if not tok.endswith("update"):
+            continue
+        before = tok[-7:-6]
+        if before == "_" or before.isascii() and before.isalnum():
+            continue
+        for later in toks[i + 1 : i + 9]:
+            if later == "set" or later.startswith("set("):
+                return True
+    return False
+
+
+def _intutic_has_needle(words, needle, whole=False):
+    if needle.strip() == "update" and not _intutic_is_sql_update(words):
+        return False
+    return has_phrase(words, needle, whole)
+
 def intutic_actions(tool, command):
     if str(tool or "").lower() not in _INTUTIC_ACTION_TOOLS:
         return " "
-    words = phrase_text(command)
+    text = drop_carried_text(str(command or ""))
+    words = phrase_text(text)
     out = " "
     for action, needles in _INTUTIC_ACTION_NEEDLES:
-        if any(has_phrase(words, n) for n in needles):
+        if any(_intutic_has_needle(words, n) for n in needles):
             out += action + " "
     # A recursive, forced remove outside the working tree is destroy too
     # (Q3); no phrase can say "outside the tree", so it is a predicate.
-    if " action:destroy " not in out and _intutic_removes_outside_tree(str(command or "")):
+    if " action:destroy " not in out and _intutic_removes_outside_tree(text):
         out += "action:destroy "
     # The force-push compound: the git push phrase and a whole-word flag.
     if has_phrase(words, "git push"):
-        padded = " " + " ".join(str(command or "").lower().split()) + " "
+        padded = " " + " ".join(text.lower().split()) + " "
         if any(f in padded for f in _INTUTIC_FORCE_FLAGS):
             out += "action:force_push "
     return out
@@ -13499,8 +13591,8 @@ def intutic_trajectory_check(harness, tool, session, records_text, tool_input_js
 
 
 def intutic_phrase_rule(source, command):
-    words = phrase_text(command)
-    return any(has_phrase(words, p, True) for p in source.split("|"))
+    words = phrase_text(drop_carried_text(str(command or "")))
+    return any(_intutic_has_needle(words, p, True) for p in source.split("|"))
 
 
 def intutic_mcp_registry(record_b64, tool):

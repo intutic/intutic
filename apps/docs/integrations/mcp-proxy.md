@@ -126,7 +126,7 @@ variants:
 8. **Anomaly detectors** and **WASM rules**, native or [Rego](/guide/rego-policies) — see the session-scope note and [Custom rules](#custom-rules) below. A Rego rule's hold takes the same path as a `require_approval` rule.
 9. **Call budgets** (`mcpBudgets`) — counts the call in Valkey against every budget that covers it, and refuses it when one is used up. Last, so a call another step refuses spends nothing. See [Call budgets](/guide/mcp-governance#call-budgets).
 
-[Decide rules](/guide/decide), `allow_commands:` and the 3.0 SOP keys (a qualified `requires_before`, `scope_paths_mode: enforce`, `plan_approval:`, `closed_lanes:`, `node_kind:`) are not evaluated here: the hook gates, the gate SDKs or the LLM proxy enforce each of them ([SOP Front Matter](/reference/sop-front-matter#the-keys)), and none of their refusal codes is one of this proxy's [refusal codes](#refusal-codes). Where this proxy is a harness's only enforcement, as on Claude Desktop, and on Roo Code unless its model traffic goes through the LLM proxy ([Harness Matrix](/reference/harness-security-matrix)), those rules do not apply to MCP tool calls.
+[Decide rules](/guide/decide) and the 3.0 SOP keys (a qualified `requires_before`, `scope_paths_mode: enforce`, `plan_approval:`, `closed_lanes:`, `node_kind:`) are not evaluated here: the hook gates, the gate SDKs or the LLM proxy enforce each of them ([SOP Front Matter](/reference/sop-front-matter#the-keys)), and none of their refusal codes is one of this proxy's [refusal codes](#refusal-codes). Where this proxy is a harness's only enforcement, as on Claude Desktop, and on Roo Code unless its model traffic goes through the LLM proxy ([Harness Matrix](/reference/harness-security-matrix)), those rules do not apply to MCP tool calls.
 
 The DLP scan also runs the enabled [PII detectors](/guide/policies#pii-detectors):
 card numbers, IBANs and SSNs by default, or the actions the workspace's
@@ -157,6 +157,7 @@ Every refusal is a JSON-RPC `-32603` error whose message is written for the agen
 | `SSO_GROUP` | `sso_group.high_risk.<tool>` or `sso_group.require_obo.<tool>` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
 | `DLP` | `dlp.<pattern>` | The arguments contain a credential, a destructive command or a PII value the DLP scan blocks |
 | `SOP_RULE` | The SOP rule id | A `block` SOP rule matched |
+| `COMMAND_NOT_ALLOWED` | `allow_commands.<SOP title>` | A shell tool's command is outside `allow_commands`, or could not be read as plain commands |
 | `HELD` | The SOP rule id | A `require_approval` SOP rule matched: the call is held for a person's approval, and `holdId` names the hold |
 | `INJECTION` | `injection.tool_input` | The arguments matched a prompt-injection pattern, and the workspace blocks injection |
 | `ANOMALY` | The detector id | An anomaly detector stopped the call |

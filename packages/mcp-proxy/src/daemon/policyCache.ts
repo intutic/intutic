@@ -12,7 +12,7 @@ import { scryptSync } from 'node:crypto'
 import { Redis } from 'ioredis'
 import { describeConnectionError } from '../valkeyErrors.js'
 import { createLogger } from '@intutic/logger'
-import type { PolicyResolveResponse, WireFields } from '@intutic/shared-types'
+import type { PolicyResolveGatesResponse, WireFields } from '@intutic/shared-types'
 import {
   UNRESTRICTED_REGISTRY,
   parsePrincipal,
@@ -51,6 +51,8 @@ valkey.on('error', (err: Error) => {
 export interface ResolvedPolicy {
   workspaceId:   string
   sopRules:      Record<string, unknown>[]
+  /** The rule records policy resolve serves; a snapshot carries them too. */
+  gateRecords?:  Record<string, unknown>[]
   interventionMode: string
   /**
    * Additive MCP tool allowlist; empty means unrestricted. Was silently
@@ -238,6 +240,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type PolicyResponseBody = Pick<
   ResolvedPolicy,
   | 'sopRules'
+  | 'gateRecords'
   | 'interventionMode'
   | 'allowedTools'
   | 'toolDescriptionOverrides'
@@ -274,13 +277,14 @@ function parsePolicyResponse(raw: string): PolicyResponseBody | null {
     return null
   }
   if (!isRecord(parsed)) return null
-  return policyFromBody(parsed as WireFields<PolicyResolveResponse>)
+  return policyFromBody(parsed as WireFields<PolicyResolveGatesResponse>)
 }
 
 /** The fields of a `GET /api/v1/policy/resolve` body, each checked. */
-function policyFromBody(parsed: WireFields<PolicyResolveResponse>): PolicyResponseBody {
+function policyFromBody(parsed: WireFields<PolicyResolveGatesResponse>): PolicyResponseBody {
 
   const sopRules                  = parsed['sopRules']
+  const gateRecords               = parsed['gateRecords']
   const interventionMode          = parsed['interventionMode']
   const allowedTools              = parsed['allowedTools']
   const toolDescriptionOverrides  = parsed['toolDescriptionOverrides']
@@ -292,6 +296,7 @@ function policyFromBody(parsed: WireFields<PolicyResolveResponse>): PolicyRespon
 
   return {
     sopRules:    Array.isArray(sopRules) ? sopRules.filter(isRecord) : [],
+    gateRecords: Array.isArray(gateRecords) ? gateRecords.filter(isRecord) : [],
     // 'TRANSPARENT', matching every other default in this pipeline: the
     // control plane's resolver (the control plane
     // interventionMode.ts), the interventionMode workspace setting's default,
@@ -386,6 +391,7 @@ async function fetchFromControlPlane(workspaceId: string): Promise<ResolvedPolic
           resolve({
             workspaceId,
             sopRules:         parsed.sopRules,
+            gateRecords:      parsed.gateRecords,
             interventionMode: parsed.interventionMode,
             allowedTools:     parsed.allowedTools,
             toolDescriptionOverrides: parsed.toolDescriptionOverrides,
@@ -488,6 +494,7 @@ export async function seedFromSnapshot(snapshotPath?: string): Promise<string | 
     const entry: ResolvedPolicy = {
       workspaceId,
       sopRules: raw.filter(isRecord),
+      gateRecords: Array.isArray(parsed['gateRecords']) ? parsed['gateRecords'].filter(isRecord) : [],
       interventionMode:
         typeof parsed['interventionMode'] === 'string' ? parsed['interventionMode'] : 'TRANSPARENT',
       // The sync daemon's snapshot (services/sync-daemon/src/lib/policySnapshot.ts)

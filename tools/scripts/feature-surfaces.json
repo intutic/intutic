@@ -729,6 +729,7 @@
           "mcp:TOOL_NOT_ALLOWED",
           "mcp:DLP",
           "mcp:SOP_RULE",
+          "mcp:COMMAND_NOT_ALLOWED",
           "mcp:INJECTION",
           "mcp:ANOMALY",
           "mcp:WASM_RULE",

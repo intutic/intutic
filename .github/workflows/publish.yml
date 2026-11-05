@@ -301,10 +301,27 @@ jobs:
           else
             cp target/${{ matrix.target }}/release/intutic-proxy dist-release/${{ matrix.artifact_name }}
           fi
+      # The proxy `intutic connect` runs: the same source, with the clients that
+      # talk to a control plane. The plain build above has none and refuses to
+      # start with CONTROL_PLANE_URL set, so it stays what `npx @intutic/proxy`
+      # downloads, and this one has a name of its own.
+      - name: Build Connected Proxy Binary
+        run: cargo build --release --target ${{ matrix.target }} --package intutic-proxy --features control-plane
+        working-directory: .
+      - name: Stage Connected Artifact
+        shell: bash
+        run: |
+          name="${{ matrix.artifact_name }}"
+          name="intutic-proxy-connected-${name#intutic-proxy-}"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp target/${{ matrix.target }}/release/intutic-proxy.exe "dist-release/$name"
+          else
+            cp target/${{ matrix.target }}/release/intutic-proxy "dist-release/$name"
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist-release/${{ matrix.artifact_name }}
+          path: dist-release/
 
   build-cli-binaries:
     # `pkg` cross-builds every target in one invocation, so this job has no
