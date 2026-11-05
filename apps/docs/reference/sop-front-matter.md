@@ -200,12 +200,11 @@ Some ordering rules are enforced with no configuration at all:
 | `action:deploy` requires `action:run_tests` | No deploy without a test first. |
 | `action:publish` requires `action:run_tests` | Same, for publish. |
 | `action:release` requires `action:run_tests` | Same, for release. |
-| `action:pii_export -> action:db_write` forbidden | Exported PII must not then be written. |
-| `action:pii_export -> action:http_post` forbidden | …or sent. |
+| `action:pii_export -> action:http_post` forbidden | Exported PII must not then be sent. |
 | `action:secret_read -> action:http_post` forbidden | Read a credential, then send it somewhere. |
 
 Declaring rules under a key **replaces that detector's floor** — so
-`forbid_after:` replaces the three forbidden pairs, and `requires_before:`
+`forbid_after:` replaces the two forbidden pairs, and `requires_before:`
 replaces the three required ones. Each detector reads only its own key, so
 declaring one cannot silently disarm the other.
 

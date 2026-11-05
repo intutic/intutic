@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Replaying saved traces through the registry: interrupted tasks go from 6 to 0 of 100 on SWE-bench
   and 2 to 0 of 40 on banking. On the public BFCL corpus, benign firings go from 2 to 0.
 
+### Changed
+
+- **`action:db_write` after `action:pii_export` is no longer a built-in kill.** These tokens come
+  from substring matches over the whole shell command, including the text of a document being
+  written, so a memo mentioning "customer" and a "status update" ended the run with no database
+  involved: 35 of 100 legal tasks in a replay of a Harvey LAB run. The two floors that stop data
+  leaving for the network stay. To keep this rule, declare it with `forbid_after:` and restate
+  `action:pii_export -> action:http_post` and `action:secret_read -> action:http_post`: declaring
+  any rule under that key replaces the floors.
+
 ## [3.1.3] - 2026-11-04
 
 ### Fixed

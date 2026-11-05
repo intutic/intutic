@@ -968,9 +968,9 @@ impl AnomalyDetector for MissingPredecessorDetector {
     }
 }
 
-/// A tool that must not run *after* another has run.
+/// A tool that must not run *after* another has run. Each floor is data leaving for
+/// the network: a kill on free-text tokens has to mean more than "wrote something".
 const FORBIDDEN_SUCCESSIONS: &[(&str, &str)] = &[
-    ("action:pii_export", "action:db_write"),
     ("action:pii_export", "action:http_post"),
     ("action:secret_read", "action:http_post"),
 ];
@@ -2807,9 +2807,23 @@ mod tests {
     }
 
     #[test]
-    fn forbidden_succession_blocks_write_after_pii_export() {
+    fn forbidden_succession_blocks_sending_after_pii_export() {
         let d = ForbiddenSuccessionDetector::default();
-        let ctx = ctx_with_sequence(&["action:pii_export", "Bash", "action:db_write"]);
+        let ctx = ctx_with_sequence(&["action:pii_export", "Bash", "action:http_post"]);
+        assert!(d.detect(&ctx).unwrap().blocks());
+    }
+
+    /// Writing a document is not moving personal data into a database. The tokens
+    /// come from substring matches over the whole command, so a memo that says
+    /// "customer" and later "status update" killed 35 of 100 replayed legal tasks.
+    /// An operator who means this rule can still declare it.
+    #[test]
+    fn a_write_after_pii_export_is_a_declared_rule_not_a_floor() {
+        let d = ForbiddenSuccessionDetector::default();
+        let mut ctx = ctx_with_sequence(&["action:pii_export", "Bash", "action:db_write"]);
+        assert!(d.detect(&ctx).is_none());
+
+        ctx.forbid_after = vec![("action:pii_export".into(), "action:db_write".into(), false)];
         assert!(d.detect(&ctx).unwrap().blocks());
     }
 
@@ -3061,19 +3075,19 @@ mod tests {
 
     #[test]
     fn forbidden_succession_allows_reverse_order() {
-        // A write *before* the export is not the hazard this guards against.
+        // A send *before* the export is not the hazard this guards against.
         //
-        // The fixture used unprefixed `db_write` / `pii_export`, which match no
+        // The fixture used unprefixed `http_post` / `pii_export`, which match no
         // rule in FORBIDDEN_SUCCESSIONS — every rule is in the `action:`
         // vocabulary. So `detect()` returned None through the `continue` path
         // without ever reaching the ordering comparison, and the test passed for
         // a reason unrelated to what it claims to check. It would have passed
         // just as happily with the ordering logic deleted.
         let d = ForbiddenSuccessionDetector::default();
-        let ctx = ctx_with_sequence(&["action:db_write", "action:pii_export"]);
+        let ctx = ctx_with_sequence(&["action:http_post", "action:pii_export"]);
         assert!(
             d.detect(&ctx).is_none(),
-            "the rule is (pii_export → db_write); the reverse is not a violation",
+            "the rule is (pii_export → http_post); the reverse is not a violation",
         );
     }
 
