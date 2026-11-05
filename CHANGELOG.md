@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Repetition checks no longer read a tool's name as repetition.** The built-in transition table
+  and `tool_diversity_collapse` both counted tool names, so ten different commands from an agent
+  whose only tool is `bash` read as one fact from two detectors: corroborated, reasked three times
+  on the same history, then blocked. 4 of 100 tasks in a governed SWE-bench run on 3.1.3 were
+  stopped this way. The table can only fall below its threshold through same-tool steps, so it also
+  flagged any long run of one tool, and paired with `context_growth` on large contexts. Both now
+  compare tool and arguments like the loop detectors: the same tool with different arguments is a
+  step, and ten identical calls are still caught. A missing fitted model still does not disable the
+  detector. Inside a fitted model, an unknown tool now scores neutral rather than through the table.
+  Replaying saved traces through the registry: interrupted tasks go from 6 to 0 of 100 on SWE-bench
+  and 2 to 0 of 40 on banking. On the public BFCL corpus, benign firings go from 2 to 0.
+
+### Changed
+
+- **`action:db_write` after `action:pii_export` is no longer a built-in kill.** These tokens come
+  from substring matches over the whole shell command, including the text of a document being
+  written, so a memo mentioning "customer" and a "status update" ended the run with no database
+  involved: 35 of 100 legal tasks in a replay of a Harvey LAB run. The two floors that stop data
+  leaving for the network stay. To keep this rule, declare it with `forbid_after:` and restate
+  `action:pii_export -> action:http_post` and `action:secret_read -> action:http_post`: declaring
+  any rule under that key replaces the floors.
+
 ## [3.1.3] - 2026-11-04
 
 ### Fixed

@@ -50,11 +50,10 @@ const MEASURED: &[&str] = &[
 /// Seeds that fire on unmutated input — pinned by NAME, not by count.
 ///
 /// A count passes when one seed stops firing and another starts, which is
-/// exactly the drift worth noticing. These two are long trajectories with
-/// genuine repetition in them; they are false positives, and naming them is how
-/// a threshold change becomes visible rather than absorbed.
-const EXPECTED_BENIGN_FIRINGS: &[&str] =
-    &["multi_turn_long_context_38", "multi_turn_long_context_46"];
+/// exactly the drift worth noticing. None since the built-in transition table
+/// compares arguments: `multi_turn_long_context_38` and `_46` tripped it on
+/// long runs of one tool with different arguments, which are not repeats.
+const EXPECTED_BENIGN_FIRINGS: &[&str] = &[];
 
 fn mutations() -> serde_json::Value {
     serde_json::from_str(include_str!("corpus/mutations.json")).expect("mutations.json parses")
@@ -666,9 +665,12 @@ async fn cycle_coverage_floor_has_empirical_headroom_against_real_traffic() {
     // `landmark_cycle` is (at least) one of them, at the current floor. Pinned
     // by NAME, matching the file's own convention: a name changing is the
     // signal worth seeing, a count changing is not.
+    //
+    // Coverage here is over tool names, so these two stay pinned after the
+    // detector moved to tool + arguments and stopped firing on them.
     assert_eq!(
         at_or_above_floor,
-        EXPECTED_BENIGN_FIRINGS.to_vec(),
+        vec!["multi_turn_long_context_38", "multi_turn_long_context_46"],
         "the set of real trajectories reaching CYCLE_COVERAGE_FLOOR ({}) changed — this is the \
          floor's real-traffic false-positive set, and a different set here (not just a \
          different count) is the regression this test exists to catch before it reaches a customer",

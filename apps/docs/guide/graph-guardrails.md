@@ -106,7 +106,7 @@ the shared anomaly taxonomy:
 | Tool contract drift | a tool definition differs from the workspace+harness pin | `TOOL_ABUSE` |
 | Transition plausibility | low-scoring `A -> B` run | `TOOL_ABUSE` |
 | Missing predecessor | `deploy` with no earlier `run_tests` | `SCOPE_VIOLATION` |
-| Forbidden succession | `db_write` after `pii_export` | `SCOPE_VIOLATION` |
+| Forbidden succession | `http_post` after `pii_export` or `secret_read` | `SCOPE_VIOLATION` |
 | Call ceiling | a token run more often than its `max_calls:` allows | `SCOPE_VIOLATION` |
 | Plan adherence | too much work outside an SOP's `plan_steps` (below) | `SCOPE_VIOLATION` |
 | Scope path | a change outside an SOP's `scope_paths` (below) | `SCOPE_VIOLATION` |
@@ -114,7 +114,7 @@ the shared anomaly taxonomy:
 | Declared taint | `forbid_with:` material and its forbidden action in one request | `DATA_EXFILTRATION` |
 | Code as action | a code-execution call bundling credential access with network egress, or a destructive operation | `DATA_EXFILTRATION` / `TOOL_ABUSE` |
 | DLP escalation | 3+ distinct sensitive patterns in one request | `DATA_EXFILTRATION` |
-| Diversity collapse | last 10 calls used one tool | `TOKEN_WASTE` |
+| Diversity collapse | last 10 calls were the same tool with the same arguments | `TOKEN_WASTE` |
 | Context growth | large context after several hops | `TOKEN_WASTE` |
 | Sibling context overlap | a sibling node was handed nearly the same context (below) | `TOKEN_WASTE` |
 | Budget exhaustion | no headroom left | `BUDGET_BREACH` |
@@ -192,9 +192,10 @@ The ping-pong detector exists because a consecutive-repeat check cannot see two
 nodes handing work back and forth — no tool ever repeats twice in a row, yet
 nothing progresses.
 
-Self-transitions score low deliberately: `run_command -> run_command` sits at
-`0.15`, because a node calling the same tool repeatedly is the most common shape
-of a graph that has stopped making progress.
+Repeating a call scores low deliberately: `run_command -> run_command` sits at
+`0.15`, because a node making the same call over and over is the most common shape
+of a graph that has stopped making progress. Without a fitted model, a call to the
+same tool with different arguments is a step, not a repeat, and scores neutral.
 
 All detectors run on every request rather than stopping at the first hit — a
 request that trips three checks tells you more than one that trips one — and the
@@ -279,11 +280,11 @@ Some constraints are only expressible over the sequence — "tests before deploy
 is meaningless to a single node in isolation, because the node that deploys is
 usually not the node that tested.
 
-**Both of the examples below are already enforced, with no configuration at
-all.** `action:deploy` requiring `action:run_tests`, and `action:db_write` after
-`action:pii_export`, are two of the built-in floors the proxy ships with. You do
-not have to write them. Declaring your own under the same key replaces that
-key's built-ins, so restate any you want to keep.
+`action:deploy` requiring `action:run_tests`, and `action:http_post` after
+`action:pii_export` or `action:secret_read`, are built-in floors the proxy ships
+with: you do not have to write them. `action:db_write` after `action:pii_export`
+is not a floor, so the example below is a rule you are adding. Declaring your own
+under a key replaces that key's built-ins, so restate any you want to keep.
 
 To declare your own, write them in SOP front matter — no toolchain, and the rule
 stays readable in review:
