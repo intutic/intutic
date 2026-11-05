@@ -179,9 +179,10 @@ GATE_REFUSAL_CODES = (
     "SNAPSHOT",
     "HELD",
     # Tier R, the snapshot's rule records (rule_record.py): a qualified
-    # requires_before, scope_paths_mode: enforce, plan_approval.
+    # requires_before, scope_paths_mode: enforce, plan_approval, allow_commands.
     "PREREQUISITE_UNMET",
     "OUT_OF_SCOPE",
+    "COMMAND_NOT_ALLOWED",
     "OFF_PLAN",
     "PLAN_NOT_APPROVED",
     # The MCP server registry and allowlist, from the policy snapshot or the

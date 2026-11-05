@@ -17,6 +17,8 @@
 
 /** The proxy release that first reads the newer keys. */
 export const LOOP_GRAPH_GATE_PROXY_VERSION = '3.0.0'
+/** The proxy release that first reads `allow_commands:`. */
+export const ALLOW_COMMANDS_PROXY_VERSION = '3.1.4'
 
 /**
  * Each key, as written at the start of its line, and the proxy version that
@@ -35,6 +37,7 @@ export const SOP_KEY_SINCE: Readonly<Record<string, string | null>> = {
   'context_isolation:': LOOP_GRAPH_GATE_PROXY_VERSION,
   'node_kind:': LOOP_GRAPH_GATE_PROXY_VERSION,
   'node_kind_allow:': LOOP_GRAPH_GATE_PROXY_VERSION,
+  'allow_commands:': ALLOW_COMMANDS_PROXY_VERSION,
 }
 
 /** `major.minor.patch` (a `v` prefix and any `-pre` or `+build` suffix ignored) as three numbers, or null. */

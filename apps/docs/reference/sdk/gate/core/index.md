@@ -576,7 +576,7 @@ The refusal codes Tier R gives.
 ### GateRuleKind
 
 ```ts
-type GateRuleKind = "requires_outcome" | "scope_paths" | "plan_approval";
+type GateRuleKind = "requires_outcome" | "scope_paths" | "plan_approval" | "allow_commands";
 ```
 
 ***

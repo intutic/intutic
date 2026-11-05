@@ -20,6 +20,7 @@ import { PHRASES_PY_SOURCE } from '../../src/lib/phrasesPy.js'
 import { TEST_OUTCOME_PY_SOURCE } from '../../src/lib/testOutcomePy.js'
 import { SCOPE_MATCH_PY_SOURCE } from '../../src/lib/scopeMatchPy.js'
 import { RULE_RECORD_PY_SOURCE } from '../../src/lib/ruleRecordPy.js'
+import { SHELL_PARSE_PY_SOURCE } from '../../src/lib/shellParsePy.js'
 import { REFUSAL_DETAIL_PY_SOURCE } from '../../src/lib/refusalDetailPy.js'
 
 /**
@@ -160,6 +161,7 @@ describe('the hold classifier', () => {
     ['test_outcome.py', TEST_OUTCOME_PY_SOURCE],
     ['scope_match.py', SCOPE_MATCH_PY_SOURCE],
     ['rule_record.py', RULE_RECORD_PY_SOURCE],
+    ['shell_parse.py', SHELL_PARSE_PY_SOURCE],
     ['refusal_detail.py', REFUSAL_DETAIL_PY_SOURCE],
   ])('emits a byte-identical copy of intutic-clawde’s %s', (file, source) => {
     const clawde = readFileSync(join(__dirname, '../../../../packages/intutic-clawde/intutic_clawde/gate', file), 'utf-8')

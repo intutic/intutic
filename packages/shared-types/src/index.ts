@@ -898,6 +898,8 @@ export { HARNESS_RULES_FILES, rulesFileOf, harnessesReading, decisionsTargetOf, 
 export type { HarnessRulesTarget } from './harnessRules.js'
 export { phraseText, hasPhrase, PHRASES_JS_SOURCE } from './phrases.js'
 export type { PhraseText } from './phrases.js'
+export { parseShell, dropCarriedText, isAllowEntry, commandsOutsideAllow, SHELL_PARSE_JS_SOURCE } from './shellParse.js'
+export type { SimpleCommand } from './shellParse.js'
 export { sequenceAlternatives, compileSequence, sequenceMatch, SEQUENCE_JS_SOURCE } from './sequence.js'
 export {
   COMMAND_SIZE_LIMIT,

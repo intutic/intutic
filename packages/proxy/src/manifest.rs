@@ -515,7 +515,7 @@ const PATH_KEYS: &[&str] = &[
     "notebook_path",
 ];
 /// Argument keys that carry a shell command.
-const COMMAND_KEYS: &[&str] = &["command", "cmd", "script"];
+pub(crate) const COMMAND_KEYS: &[&str] = &["command", "cmd", "script"];
 /// Argument keys that name a URL.
 const URL_KEYS: &[&str] = &["url", "uri"];
 /// Argument keys whose value is *content*. Their length is recorded; their text

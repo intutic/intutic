@@ -102,14 +102,14 @@ function scopeAsciiLower(s: string): string {
 }
 
 /** `tool_is`, actions.rs: the name, lower-cased, is one of `group` or ends with one. */
-function scopeToolIs(name: string, group: readonly string[]): boolean {
+export function scopeToolIs(name: string, group: readonly string[]): boolean {
   const lower = name.toLowerCase()
   for (const t of group) if (lower === t || lower.slice(-t.length) === t) return true
   return false
 }
 
 /** The first of `keys` whose value in `input` is a non-empty string. */
-function scopeKeyed(input: unknown, keys: readonly string[]): string | null {
+export function scopeKeyed(input: unknown, keys: readonly string[]): string | null {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return null
   const o = input as Record<string, unknown>
   for (const k of keys) {

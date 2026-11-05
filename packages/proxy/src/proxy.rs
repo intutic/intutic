@@ -5315,7 +5315,17 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             None
         },
         (!node_kind.limits.is_none()).then(|| node_kind.clone()),
-    );
+    )
+    .with_commands((!gov.allow_commands.is_empty()).then(|| {
+        crate::plugins::response_gate::CommandGate {
+            allow: gov.allow_commands.clone(),
+            rule: enforcing_sops
+                .iter()
+                .find(|s| s.applies_to(&node.agent_role) && !s.allow_commands.is_empty())
+                .map(|s| crate::refusal::tool_rule_id("allow_commands", &s.title))
+                .unwrap_or_else(|| "allow_commands".to_string()),
+        }
+    }));
     // Hook-rule guardrails, enforcing and shadow together: each rule carries
     // its SOP's mode. Enforced on the response's tool calls below, and on the
     // calls of the turn this request reports on. A rule scoped to workspace

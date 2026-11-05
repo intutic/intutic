@@ -45,6 +45,7 @@ PROXY_REFUSALS: Dict[str, Tuple[int, str]] = {
     "SQL_GUARD": (200, "kill"),
     "PREREQUISITE_UNMET": (200, "kill"),
     "OUT_OF_SCOPE": (200, "kill"),
+    "COMMAND_NOT_ALLOWED": (200, "kill"),
     "RESPONSE_UNPARSEABLE": (200, "kill"),
     "OUTPUT_DLP": (200, "kill"),
 }

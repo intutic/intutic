@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`allow_commands:`, exact-command permissions.** A SOP can list the shell commands an agent may
+  run: `allow_commands: git status, npm test *`. Each entry is one command, matched word by word,
+  and a trailing ` *` allows further arguments. Every command in a call must match, and what the
+  shell parser cannot read is refused rather than let through, so a redirect or substitution is
+  refused even when the command is listed. The proxy, the SDK gates and the hook gates enforce it,
+  as `COMMAND_NOT_ALLOWED`. Hook gates move to version 24; an older gate refuses every shell call
+  under such a SOP and asks for an upgrade.
+
 ### Fixed
 
 - **Repetition checks no longer read a tool's name as repetition.** The built-in transition table

@@ -8,17 +8,18 @@
  * fails safe: every caller keeps its old behaviour on it.
  *
  * A port of the proxy's `shell_parse.rs`; intutic-clawde `gate/shell_parse.py`
- * is another. All three run `shell-parse-vectors.json` in
- * `@intutic/shared-types`.
+ * is another. All three run `fixtures/shell-parse-vectors.json`. Self-contained,
+ * because `@intutic/gate` keeps a byte-identical copy and the hook gates embed
+ * {@link SHELL_PARSE_JS_SOURCE}.
  *
  * @module
  */
 
 /** Words that open a construct this parser does not model. `alias` is here because it changes what the next word means. */
-const CONTROL_WORDS: ReadonlySet<string> = new Set([
+const SHELL_CONTROL_WORDS: readonly string[] = [
   'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case', 'esac',
   'select', 'function', 'coproc', 'alias',
-])
+]
 
 /** One command and its arguments. */
 export interface SimpleCommand {
@@ -32,7 +33,7 @@ export interface SimpleCommand {
 }
 
 /** `NAME=` at `i`: the word sets a variable for the command after it. */
-function isAssignment(text: string, i: number): boolean {
+function shellIsAssignment(text: string, i: number): boolean {
   let j = i
   while (j < text.length && /[A-Za-z0-9_]/.test(text[j]!)) j++
   return j > i && !/[0-9]/.test(text[i]!) && text[j] === '='
@@ -110,7 +111,7 @@ export function parseShell(text: string): SimpleCommand[][] | null {
       const doubled = (c === '&' || c === '|') && text[i + 1] === c
       if (command !== null) {
         const done: SimpleCommand = command
-        if (CONTROL_WORDS.has(done.argv[0]!)) return null
+        if (SHELL_CONTROL_WORDS.indexOf(done.argv[0]!) !== -1) return null
         pipeline.push(done)
         command = null
       } else if (c === '\n') {
@@ -130,7 +131,7 @@ export function parseShell(text: string): SimpleCommand[][] | null {
       }
       i += doubled ? 2 : 1
     } else {
-      if ('$*?[~'.includes(c) || (word === null && isAssignment(text, i))) {
+      if ('$*?[~'.includes(c) || (word === null && shellIsAssignment(text, i))) {
         startWord(i)
         command!.literal = false
       }
@@ -142,7 +143,7 @@ export function parseShell(text: string): SimpleCommand[][] | null {
   endWord(text.length)
   if (command !== null) {
     const done: SimpleCommand = command
-    if (CONTROL_WORDS.has(done.argv[0]!)) return null
+    if (SHELL_CONTROL_WORDS.indexOf(done.argv[0]!) !== -1) return null
     pipeline.push(done)
   } else if (pipeOpen) {
     return null
@@ -160,7 +161,8 @@ export function dropCarriedText(text: string): string {
   for (const pipeline of pipelines) {
     if (pipeline.length !== 1) continue
     const only = pipeline[0]!
-    const carries = only.argv[0] === 'echo' || only.argv[0] === 'printf' || (only.argv[0] === 'git' && only.argv[1] === 'commit')
+    // `printf -v` keeps the text for whatever reads the variable.
+    const carries = only.argv[0] === 'echo' || (only.argv[0] === 'printf' && only.argv[1] !== '-v') || (only.argv[0] === 'git' && only.argv[1] === 'commit')
     if (carries) {
       out += text.slice(kept, only.start)
       kept = only.end
@@ -168,3 +170,58 @@ export function dropCarriedText(text: string): string {
   }
   return out + text.slice(kept)
 }
+
+/** One `allow_commands:` entry as the words it allows, and whether more may follow them. */
+interface AllowEntry {
+  argv: string[]
+  open: boolean
+}
+
+/**
+ * An `allow_commands:` entry, or null when it is not one plain command: `git
+ * status`, or `npm test *` for any further arguments. A word that could
+ * expand matches nothing exactly, so an entry may not hold one.
+ */
+function allowEntry(entry: string): AllowEntry | null {
+  const open = entry.endsWith(' *')
+  const parsed = parseShell(open ? entry.slice(0, -2) : entry)
+  if (parsed === null || parsed.length !== 1 || parsed[0]!.length !== 1) return null
+  const only = parsed[0]![0]!
+  if (!only.literal || only.argv.some((w) => /[$*?[~]/.test(w))) return null
+  return { argv: only.argv, open }
+}
+
+/** Whether `entry` is one `allow_commands:` can use. */
+export function isAllowEntry(entry: string): boolean {
+  return allowEntry(entry) !== null
+}
+
+/**
+ * The commands in `text` that `allow` does not allow, as written, in order.
+ * All of `text` when it did not parse, or when an entry cannot be read: an
+ * allow list that reaches no verdict allows nothing, the opposite of
+ * {@link dropCarriedText}, which keeps its old behaviour on the same input.
+ */
+export function commandsOutsideAllow(text: string, allow: readonly string[]): string[] {
+  const parsed = parseShell(text)
+  const entries = allow.map(allowEntry)
+  if (parsed === null || entries.some((e) => e === null)) return [text]
+  const out: string[] = []
+  for (const pipeline of parsed) {
+    for (const c of pipeline) {
+      const allowed = entries.some((e) => {
+        const n = e!.argv.length
+        if (e!.open ? c.argv.length < n : !c.literal || c.argv.length !== n) return false
+        return e!.argv.every((w, i) => w === c.argv[i])
+      })
+      if (!allowed) out.push(text.slice(c.start, c.end))
+    }
+  }
+  return out
+}
+
+/** The parser and the allow list as JavaScript source, for the hook gates to embed. */
+export const SHELL_PARSE_JS_SOURCE = [
+  `const SHELL_CONTROL_WORDS = ${JSON.stringify(SHELL_CONTROL_WORDS)};`,
+  ...[shellIsAssignment, parseShell, allowEntry, isAllowEntry, commandsOutsideAllow].map((fn) => fn.toString()),
+].join('\n')

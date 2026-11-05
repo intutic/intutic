@@ -34,9 +34,11 @@ import re
 try:
     from .actions import LANE_PHRASES
     from .scope_match import (
-        SCOPE_DELETE_TOOLS, SCOPE_EDIT_TOOLS, SCOPE_EDITOR_TOOLS, SCOPE_MOVE_TOOLS, SCOPE_SHELL_TOOLS,
-        SCOPE_WRITE_TOOLS, change_targets, is_plan_exempt_tool, is_within_scope, scope_relative_path,
+        SCOPE_COMMAND_KEYS, SCOPE_DELETE_TOOLS, SCOPE_EDIT_TOOLS, SCOPE_EDITOR_TOOLS, SCOPE_MOVE_TOOLS,
+        SCOPE_SHELL_TOOLS, SCOPE_WRITE_TOOLS, _keyed, _tool_is, change_targets, is_plan_exempt_tool,
+        is_within_scope, scope_relative_path,
     )
+    from .shell_parse import commands_outside_allow, is_allow_entry
     from .test_outcome import prerequisite_case, prerequisite_unmet_reason
 except (ImportError, KeyError):  # embedded in a bash gate (exec without __name__), beside the sources it needs
     pass
@@ -46,7 +48,10 @@ RULE_SNAPSHOT_FORMAT = 3
 RULE_SOP_TITLE_MAX_CHARS = 80
 RULE_SCOPE_PATHS_MAX = 64
 RULE_SCOPE_PATH_MAX_CHARS = 512
-GATE_RULE_KINDS = ("requires_outcome", "scope_paths", "plan_approval")
+RULE_ALLOW_COMMANDS_MAX = 64
+RULE_ALLOW_COMMAND_MAX_CHARS = 512
+RULE_COMMAND_QUOTE_MAX_CHARS = 120
+GATE_RULE_KINDS = ("requires_outcome", "scope_paths", "plan_approval", "allow_commands")
 V22_ACTION_TOKENS = ("action:deploy", "action:publish", "action:release", "action:db_write")
 
 # The payload fields of each kind, sorted; the kind, fallback id and rollout are columns.
@@ -54,6 +59,7 @@ _FIELDS = {
     "requires_outcome": ["adjacent", "first", "qualifier", "ref", "sopTitle", "then", "v"],
     "scope_paths": ["ref", "scopePaths", "sopTitle", "v"],
     "plan_approval": ["mode", "ref", "sopTitle", "v"],
+    "allow_commands": ["commands", "ref", "sopTitle", "v"],
 }
 _REF = re.compile(r"^[^\n\r\u2028\u2029]+#([a-z_]+):([1-9][0-9]{0,5})\Z")
 _TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}\Z")
@@ -114,6 +120,12 @@ def decode_gate_rule_record(line):
             return None
         if any(not _text(p, RULE_SCOPE_PATH_MAX_CHARS, 1) for p in paths):
             return None
+    elif kind == "allow_commands":
+        commands = r["commands"]
+        if not isinstance(commands, list) or not 1 <= len(commands) <= RULE_ALLOW_COMMANDS_MAX:
+            return None
+        if any(not _text(c, RULE_ALLOW_COMMAND_MAX_CHARS, 1) or not is_allow_entry(c) for c in commands):
+            return None
     elif r["mode"] not in ("required", "strict"):
         return None
     return r
@@ -126,6 +138,9 @@ def gate_rule_fallback_reason(kind, sop_title):
     if kind == "scope_paths":
         return ("scope_paths_mode: enforce (" + sop_title + "): this gate cannot check a change against the "
                 "scope, so every file change is refused; upgrade the Intutic gate")
+    if kind == "allow_commands":
+        return ("allow_commands (" + sop_title + "): this gate cannot check a command against the list, so every "
+                "shell call is refused; upgrade the Intutic gate")
     return ("plan_approval (" + sop_title + "): this gate cannot check plan approval, so every call is refused; "
             "upgrade the Intutic gate")
 
@@ -141,6 +156,8 @@ def gate_rule_fallback(record):
     base = {"id": record["fallbackId"], "severity": "block", "reason": gate_rule_fallback_reason(record["kind"], record["sopTitle"])}
     if record["kind"] == "plan_approval":
         return dict(base, subject="tool", source=" [^ ]+ ", ignoreCase=False)
+    if record["kind"] == "allow_commands":
+        return dict(base, subject="tool", source=" [^ ]*(" + "|".join(_escape(t) for t in SCOPE_SHELL_TOOLS) + ") ", ignoreCase=True)
     if record["kind"] == "scope_paths":
         tools = SCOPE_WRITE_TOOLS + SCOPE_EDIT_TOOLS + SCOPE_DELETE_TOOLS + SCOPE_MOVE_TOOLS + SCOPE_EDITOR_TOOLS
         return dict(base, subject="tool", source=" [^ ]*(" + "|".join(_escape(t) for t in tools) + ") ", ignoreCase=True)
@@ -251,12 +268,38 @@ def _scope_finding(records, call):
     }
 
 
+def _command_finding(records, call):
+    """A shell command outside the union of the records' lists, or None."""
+    if not records or not _tool_is(call["tool"], SCOPE_SHELL_TOOLS):
+        return None
+    allow = []
+    for r in records:
+        for c in r["commands"]:
+            if c not in allow:
+                allow.append(c)
+    # Every key: which one a harness runs is not known here.
+    commands = [c for c in (_keyed(call["input"], [k]) for k in SCOPE_COMMAND_KEYS) if c is not None]
+    outside = [o for c in commands for o in commands_outside_allow(c, allow)] if commands else ["(no command)"]
+    if not outside:
+        return None
+    rec = records[0]
+    quoted = [c[:RULE_COMMAND_QUOTE_MAX_CHARS] for c in outside]
+    return {
+        "code": "COMMAND_NOT_ALLOWED",
+        "ruleId": "allow_commands." + rec["sopTitle"],
+        "reason": "Not on the allowed command list: " + "; ".join(quoted) + " (allowed: " + ", ".join(allow) + ")",
+        "scope": {"tools": [call["tool"]]},
+        "ref": rec["ref"],
+    }
+
+
 def _findings(records, call):
     out = []
     for finding in (
         _plan_finding([r for r in records if r["kind"] == "plan_approval"], call),
         _requires_finding([r for r in records if r["kind"] == "requires_outcome"], call),
         _scope_finding([r for r in records if r["kind"] == "scope_paths"], call),
+        _command_finding([r for r in records if r["kind"] == "allow_commands"], call),
     ):
         if finding is not None:
             out.append(finding)

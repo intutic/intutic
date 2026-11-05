@@ -33,6 +33,7 @@ construction — the model may ignore it.
 | `allow_harnesses:` | `claude-code, cursor` | Restricts which harnesses a role may use. |
 | `plan_steps:` | `Read, Edit, Bash, action:run_tests` | Work drifting outside the declared steps is steered. |
 | `scope_paths:` | `src, docs` | A file write outside these paths is steered; reads are not checked. |
+| `allow_commands:` | `git status, npm test *` | Refuses a shell command that is not on the list. See [Allowed commands](#allowed-commands). |
 | `review_before:` | `action:deploy` | Holds the run for human approval — at every hook gate before the call runs, and at the proxy after it. Approval needs a control plane: without one, the gates refuse the call. |
 | `requires_before:` | `A -> B` | B is refused unless A appeared earlier. |
 | `forbid_after:` | `A -> B` | B is refused if A appeared earlier. |
@@ -355,6 +356,44 @@ from a program (`python -c …`), and migration tools (`prisma migrate reset`,
 `rails db:drop`) — none of these are SQL-client invocations, and a migration
 command passes untouched. The response gate must be on
 (`intutic_settings.response_gate.enabled`, the default); with it off, so is this.
+
+## Allowed commands {#allowed-commands}
+
+```yaml
+---
+allow_commands: git status, git diff *, npm test *
+---
+```
+
+Each entry is one command, matched word by word after quoting is removed, so
+`git status` allows `git  status` and `"git" status` and nothing else. End an
+entry with ` *` to allow any further arguments. Every command in a shell call
+must match, so `git status && git push` is refused for `git push`. The entries
+of every SOP in force are a union. A call is refused `COMMAND_NOT_ALLOWED`.
+Under `mode: shadow` the gates report what they would refuse, and the proxy does
+not read the list.
+
+This is an allowlist, so what cannot be read is refused rather than let through:
+
+- A redirect, subshell, group, substitution, heredoc, control word or unterminated
+  quote refuses the whole call. `npm test > log.txt` is refused even with `npm
+  test *` on the list.
+- A variable or wildcard never matches an exact entry. `npm test $FLAGS` passes
+  only under `npm test *`.
+- A variable set in front of a command is part of it, so `PATH=/tmp git status`
+  is refused: it could run a different `git`.
+- An entry that is not one plain command, such as `a; b` or `ls $DIR`, refuses
+  every shell call while it is in force, and the load names it.
+
+Only shell tools are checked. A file the agent writes with another tool can still
+be run by an allowed command, so `python3 *` allows anything: list the commands
+you would be happy to see run with any arguments, and pair this with
+`scope_paths:` and a sandbox.
+
+The proxy, the SDK gates and the hook gates enforce this. A gate older than
+version 24 cannot read the list, so it refuses every shell call and asks for an
+upgrade. A SOP with `roles:` reaches the proxy only, since a gate knows no agent
+role.
 
 ## Hook rules
 

@@ -1,5 +1,5 @@
 {
-  "$comment": "Shell commands and how every parser must read them: packages/proxy shell_parse.rs, @intutic/gate shellParse.ts, intutic-clawde gate/shell_parse.py. `parsed` is a list of pipelines, each a list of simple commands: argv after quote removal, and literal, false when a word still holds an expansion or glob, so argv is not exactly what runs. parsed is null when the text is not confidently understood: a redirect, subshell, group, substitution, heredoc, control word, unterminated quote or stray operator. Null is the answer that fails safe: every caller must keep its old behaviour on it.",
+  "$comment": "Shell commands and how every parser must read them: packages/proxy shell_parse.rs, @intutic/gate shellParse.ts, intutic-clawde gate/shell_parse.py. `parsed` is a list of pipelines, each a list of simple commands: argv after quote removal, and literal, false when a word still holds an expansion or glob, so argv is not exactly what runs. parsed is null when the text is not confidently understood: a redirect, subshell, group, substitution, heredoc, control word, unterminated quote or stray operator. Null is the answer that fails safe: every caller must keep its old behaviour on it. allow lists commandsOutsideAllow cases: `outside` is the commands refused, as written; all of the text when it did not parse or an entry cannot be read. A trailing ` *` allows further arguments; a word that could expand never matches an exact entry.",
   "cases": [
     {
       "text": "git status",
@@ -567,6 +567,331 @@
             "literal": true
           }
         ]
+      ]
+    }
+  ],
+  "allow": [
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git status",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git  status",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "\"git\" status",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git status --short",
+      "outside": [
+        "git status --short"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git diff",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git diff --stat HEAD~1",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git diff $X",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "npm test && git status",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "npm test | tail",
+      "outside": [
+        "tail"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git status; rm -rf x",
+      "outside": [
+        "rm -rf x"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git push",
+      "outside": [
+        "git push"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git status\ncurl x",
+      "outside": [
+        "curl x"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "echo hello",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "echo \"hello\"",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "echo $HOME",
+      "outside": [
+        "echo $HOME"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "FOO=bar git status",
+      "outside": [
+        "FOO=bar git status"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "PATH=/tmp git status",
+      "outside": [
+        "PATH=/tmp git status"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "$X status",
+      "outside": [
+        "$X status"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "npm test > log.txt",
+      "outside": [
+        "npm test > log.txt"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "git status $(rm -rf x)",
+      "outside": [
+        "git status $(rm -rf x)"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "(git status)",
+      "outside": [
+        "(git status)"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "bash -c 'git status'",
+      "outside": [
+        "bash -c 'git status'"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "eval git status",
+      "outside": [
+        "eval git status"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "git diff *",
+        "npm test *",
+        "echo hello"
+      ],
+      "text": "# nothing",
+      "outside": []
+    },
+    {
+      "allow": [
+        "git status",
+        "a; b"
+      ],
+      "text": "git status",
+      "outside": [
+        "git status"
+      ]
+    },
+    {
+      "allow": [
+        "git status",
+        "ls $X"
+      ],
+      "text": "git status",
+      "outside": [
+        "git status"
+      ]
+    },
+    {
+      "allow": [
+        "ls *.py"
+      ],
+      "text": "ls *.py",
+      "outside": [
+        "ls *.py"
+      ]
+    },
+    {
+      "allow": [
+        "'$X' *"
+      ],
+      "text": "$X a",
+      "outside": [
+        "$X a"
+      ]
+    },
+    {
+      "allow": [],
+      "text": "git status",
+      "outside": [
+        "git status"
       ]
     }
   ]

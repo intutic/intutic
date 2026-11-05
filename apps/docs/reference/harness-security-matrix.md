@@ -68,6 +68,7 @@ OPAQUE workspace gets neither, as it gets no rule id.
 | `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
 | `PREREQUISITE_UNMET` | A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, the harness reports no tool results, or there is no session id |
 | `OUT_OF_SCOPE` | A file-changing call targets a path outside `scope_paths` under `scope_paths_mode: enforce`, or outside the workspace |
+| `COMMAND_NOT_ALLOWED` | A shell command is outside `allow_commands`, or could not be read as plain commands |
 | `OFF_PLAN` | `plan_approval: strict` is set and the tool is not a step of the session's approved plan |
 | `PLAN_NOT_APPROVED` | `plan_approval:` is set and the session has no APPROVED or EXECUTING plan, the approved plans could not be read, or there is no session id |
 | `SERVER_BLOCKED` | The MCP server is blocked in the MCP server registry |

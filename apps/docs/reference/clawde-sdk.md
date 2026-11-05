@@ -96,6 +96,7 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 200 | `SQL_GUARD` | `kill` | The model called a shell tool to run destructive SQL against a database the SQL allowlist does not admit; the call was withheld |
 | 200 | `PREREQUISITE_UNMET` | `kill` | The model called a tool a qualified `requires_before` gates (`action:run_tests[ok] -> …`) and its prerequisite is not met: no test run in the session, the last one failed, its result could not be read, or files changed after it; the call was withheld |
 | 200 | `OUT_OF_SCOPE` | `kill` | The model called a file-changing tool on a path outside `scope_paths` under `scope_paths_mode: enforce`; the call was withheld |
+| 200 | `COMMAND_NOT_ALLOWED` | `kill` | The model called a shell tool with a command outside `allow_commands`, or one that could not be read as plain commands; the call was withheld |
 | 200 | `RESPONSE_UNPARSEABLE` | `kill` | The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed |
 | 200 | `OUTPUT_DLP` | `kill` | The model's response held sensitive content that could not be redacted safely, so it was withheld |
 

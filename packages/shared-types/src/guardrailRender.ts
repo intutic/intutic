@@ -391,6 +391,8 @@ export interface ParsedFrontMatter {
   denyTools: string[]
   planSteps: string[]
   scopePaths: string[]
+  /** `allow_commands:`: the shell commands allowed; see `./shellParse.ts`. */
+  allowCommands: string[]
   reviewBefore: string[]
   /** `[first, then, adjacent]` — `adjacent` is true for `~>`. */
   requiresBefore: Array<[string, string, boolean]>
@@ -702,6 +704,7 @@ export function parseFrontMatterEnforcing(front: string): ParsedFrontMatter {
     denyTools: listKey(front, 'deny_tools:', false),
     planSteps: listKey(front, 'plan_steps:', false),
     scopePaths: listKey(front, 'scope_paths:', false),
+    allowCommands: listKey(front, 'allow_commands:', false),
     reviewBefore: listKey(front, 'review_before:', false),
     requiresBefore: requires.ok,
     forbidAfter: forbids.ok,
@@ -721,6 +724,7 @@ export function isEnforceableFrontMatter(fm: ParsedFrontMatter): boolean {
     fm.allowHarnesses.length > 0 ||
     fm.planSteps.length > 0 ||
     fm.scopePaths.length > 0 ||
+    fm.allowCommands.length > 0 ||
     fm.reviewBefore.length > 0 ||
     fm.requiresBefore.length > 0 ||
     fm.forbidAfter.length > 0 ||

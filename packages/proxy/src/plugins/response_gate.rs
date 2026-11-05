@@ -151,6 +151,14 @@ pub enum DenialReason {
         /// `scope_paths.<sop title>`.
         rule: String,
     },
+    /// A shell call outside `allow_commands:`.
+    CommandNotAllowed {
+        tool: String,
+        /// The commands refused, as written, each cut short for the reason.
+        commands: Vec<String>,
+        /// `allow_commands.<sop title>`.
+        rule: String,
+    },
     /// A call this node's kind may not make.
     NodeKind {
         tool: String,
@@ -229,6 +237,9 @@ impl Denial {
             DenialReason::Decide(d) => Refusal::new(Code::ToolDenied, d.rule_id.clone()),
             DenialReason::Prerequisite(p) => Refusal::new(Code::PrerequisiteUnmet, p.rule.clone()),
             DenialReason::OutOfScope { rule, .. } => Refusal::new(Code::OutOfScope, rule.clone()),
+            DenialReason::CommandNotAllowed { rule, .. } => {
+                Refusal::new(Code::CommandNotAllowed, rule.clone())
+            }
             DenialReason::NodeKind { denial, .. } => {
                 Refusal::new(Code::ToolDenied, denial.rule.clone())
             }
@@ -263,6 +274,9 @@ impl Denial {
                 .with_rule(p.rule.clone()),
             DenialReason::OutOfScope { paths, rule, .. } => {
                 RefusalScope::paths(paths.iter().cloned()).with_rule(rule.clone())
+            }
+            DenialReason::CommandNotAllowed { tool, rule, .. } => {
+                RefusalScope::tools([tool.as_str()]).with_rule(rule.clone())
             }
             DenialReason::NodeKind { tool, denial } => {
                 RefusalScope::tools([tool.as_str()]).with_rule(denial.rule.clone())
@@ -349,6 +363,17 @@ impl Denial {
                 paths.join(", "),
                 rule
             ),
+            DenialReason::CommandNotAllowed {
+                tool,
+                commands,
+                rule,
+            } => format!(
+                "Response blocked by anomaly policy [{}]: tool call {} runs a command outside the allowed list: {} ({})",
+                AnomalyKind::ScopeViolation.as_str(),
+                tool,
+                commands.join("; "),
+                rule
+            ),
             DenialReason::NodeKind { denial, .. } => format!(
                 "Response blocked by anomaly policy [{}]: {} [{}]",
                 AnomalyKind::UnauthorizedTool.as_str(),
@@ -408,6 +433,12 @@ impl Denial {
                  The call was withheld by the proxy and never reached the client, so it did not run. \
                  Keep changes inside the declared scope, or ask an operator to widen it.",
                 paths.join(", ")
+            ),
+            DenialReason::CommandNotAllowed { tool, commands, .. } => format!(
+                "[Intutic] Blocked tool call: {tool}. It runs {}, which is not on the allowed command list. \
+                 The call was withheld by the proxy and never reached the client, so it did not run. \
+                 Use a command on the list, without redirects or substitutions, or ask an operator to add it.",
+                commands.join("; ")
             ),
             DenialReason::NodeKind { denial, .. } => format!(
                 "[Intutic] Blocked tool call: {}. [{}] \
@@ -699,6 +730,8 @@ pub struct ArgGates {
     pub outcomes: Option<Vec<(String, crate::plugins::anomaly::outcome::OutcomeEntry)>>,
     /// The enforced scope and the rule id it is refused under.
     pub scope: Option<ScopeGate>,
+    /// The allowed commands and the rule id they are refused under.
+    pub commands: Option<CommandGate>,
     /// The node kind in force, when it limits anything.
     pub node_kind: Option<crate::plugins::anomaly::graph_detectors::EffectiveNodeKind>,
     /// A file write has been seen earlier in this response.
@@ -715,6 +748,17 @@ pub struct ScopeGate {
     pub rule: String,
 }
 
+/// The union of `allow_commands:`, and its rule id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandGate {
+    pub allow: Vec<String>,
+    /// `allow_commands.<sop title>`, the first such SOP's title.
+    pub rule: String,
+}
+
+/// The most of a refused command a reason quotes, in characters.
+const COMMAND_QUOTE_MAX_CHARS: usize = 120;
+
 impl ArgGates {
     pub fn new(
         prerequisites: Vec<(String, String, bool)>,
@@ -726,16 +770,24 @@ impl ArgGates {
             prerequisites,
             outcomes,
             scope,
+            commands: None,
             node_kind,
             wrote: false,
             called: false,
         }
     }
 
+    /// With the allowed commands in force.
+    pub fn with_commands(mut self, commands: Option<CommandGate>) -> Self {
+        self.commands = commands;
+        self
+    }
+
     /// Nothing declared: the gate has nothing to check.
     pub fn is_empty(&self) -> bool {
         self.prerequisites.is_empty()
             && self.scope.is_none()
+            && self.commands.is_none()
             && self.node_kind.as_ref().is_none_or(|k| k.limits.is_none())
     }
 
@@ -758,6 +810,9 @@ impl ArgGates {
             return true;
         }
         if self.scope.is_some() && crate::manifest::may_change_files(tool) {
+            return true;
+        }
+        if self.commands.is_some() && tool_is(tool, SHELL_TOOLS) {
             return true;
         }
         if let Some(k) = self.node_kind.as_ref().filter(|k| !k.limits.is_none()) {
@@ -862,6 +917,39 @@ impl ArgGates {
                     tool: tool.to_string(),
                     paths: outside,
                     rule: scope.rule.clone(),
+                });
+            }
+        }
+        if let Some(gate) = self.commands.as_ref().filter(|_| {
+            crate::plugins::anomaly::actions::tool_is(
+                tool,
+                crate::plugins::anomaly::actions::SHELL_TOOLS,
+            )
+        }) {
+            // Every key: which one a harness runs is not known here.
+            let commands: Vec<&str> = crate::manifest::COMMAND_KEYS
+                .iter()
+                .filter_map(|k| args.get(*k).and_then(Value::as_str))
+                .filter(|c| !c.is_empty())
+                .collect();
+            let outside: Vec<String> = if commands.is_empty() {
+                vec!["(no command)".to_string()]
+            } else {
+                commands
+                    .iter()
+                    .flat_map(|c| {
+                        crate::plugins::anomaly::shell_parse::commands_outside_allow(c, &gate.allow)
+                    })
+                    .collect()
+            };
+            if !outside.is_empty() {
+                return Some(DenialReason::CommandNotAllowed {
+                    tool: tool.to_string(),
+                    commands: outside
+                        .iter()
+                        .map(|c| c.chars().take(COMMAND_QUOTE_MAX_CHARS).collect())
+                        .collect(),
+                    rule: gate.rule.clone(),
                 });
             }
         }
@@ -2262,6 +2350,62 @@ mod lld75_arg_gate_tests {
         // Shell commands are never judged as paths.
         let shell = openai(&[("Bash", json!({"command": "echo x > infra/main.tf"}))]);
         assert!(gate_response_args(&cfg(), Some(&shell), &gates).is_none());
+    }
+
+    fn command_gates() -> ArgGates {
+        ArgGates::new(Vec::new(), None, None, None).with_commands(Some(CommandGate {
+            allow: vec!["git status".into(), "npm test *".into()],
+            rule: "allow_commands.Read only".into(),
+        }))
+    }
+
+    #[test]
+    fn a_command_off_the_list_is_refused_before_it_runs() {
+        let mut gates = command_gates();
+        assert!(gates.holds("Bash"), "a stream must wait for the arguments");
+        assert!(!gates.holds("Read"));
+        assert!(gates
+            .check(
+                "Bash",
+                &serde_json::json!({ "command": "npm test -- --ci" })
+            )
+            .is_none());
+
+        let refused = gates.check(
+            "Bash",
+            &serde_json::json!({ "command": "git status && git push" }),
+        );
+        let Some(DenialReason::CommandNotAllowed { commands, rule, .. }) = refused else {
+            panic!("git push is not on the list: {refused:?}");
+        };
+        assert_eq!(commands, vec!["git push"]);
+        assert_eq!(rule, "allow_commands.Read only");
+    }
+
+    #[test]
+    fn a_command_the_parser_cannot_read_is_refused() {
+        let mut gates = command_gates();
+        for command in ["git status > f", "git status $(rm -rf x)", "(git status)"] {
+            assert!(
+                gates
+                    .check("Bash", &serde_json::json!({ "command": command }))
+                    .is_some(),
+                "{command}"
+            );
+        }
+        assert!(gates.check("Bash", &serde_json::json!({})).is_some());
+        assert!(
+            gates
+                .check(
+                    "Bash",
+                    &serde_json::json!({ "command": "git status", "cmd": "rm -rf x" })
+                )
+                .is_some(),
+            "every command key is checked"
+        );
+        assert!(gates
+            .check("Read", &serde_json::json!({ "file_path": "a" }))
+            .is_none());
     }
 
     #[test]

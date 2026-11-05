@@ -41,6 +41,7 @@ export const PROXY_REFUSALS: Readonly<Record<string, { status: number; verdict: 
   SQL_GUARD: { status: 200, verdict: 'kill' },
   PREREQUISITE_UNMET: { status: 200, verdict: 'kill' },
   OUT_OF_SCOPE: { status: 200, verdict: 'kill' },
+  COMMAND_NOT_ALLOWED: { status: 200, verdict: 'kill' },
   RESPONSE_UNPARSEABLE: { status: 200, verdict: 'kill' },
   OUTPUT_DLP: { status: 200, verdict: 'kill' },
 }

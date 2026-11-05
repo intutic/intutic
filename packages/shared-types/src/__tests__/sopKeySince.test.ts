@@ -18,6 +18,7 @@ describe('SOP_KEY_SINCE', () => {
       'context_isolation:',
       'node_kind:',
       'node_kind_allow:',
+      'allow_commands:',
     ])
     expect(SOP_KEY_SINCE['plan_approval:']).toBeNull()
   })

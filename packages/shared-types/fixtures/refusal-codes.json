@@ -24,6 +24,7 @@
       { "code": "SQL_GUARD", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model called a shell tool to run destructive SQL against a database the SQL allowlist does not admit; the call was withheld" },
       { "code": "PREREQUISITE_UNMET", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model called a tool a qualified `requires_before` gates (`action:run_tests[ok] -> …`) and its prerequisite is not met: no test run in the session, the last one failed, its result could not be read, or files changed after it; the call was withheld" },
       { "code": "OUT_OF_SCOPE", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model called a file-changing tool on a path outside `scope_paths` under `scope_paths_mode: enforce`; the call was withheld" },
+      { "code": "COMMAND_NOT_ALLOWED", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model called a shell tool with a command outside `allow_commands`, or one that could not be read as plain commands; the call was withheld" },
       { "code": "RESPONSE_UNPARSEABLE", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed" },
       { "code": "OUTPUT_DLP", "status": 200, "verdict": "kill", "inBand": true, "meaning": "The model's response held sensitive content that could not be redacted safely, so it was withheld" }
     ],
@@ -47,6 +48,7 @@
       { "code": "HELD", "meaning": "A hold rule matched: the call is held for a person's approval, and `holdId` names the hold" },
       { "code": "PREREQUISITE_UNMET", "meaning": "A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, the harness reports no tool results, or there is no session id" },
       { "code": "OUT_OF_SCOPE", "meaning": "A file-changing call targets a path outside `scope_paths` under `scope_paths_mode: enforce`, or outside the workspace" },
+      { "code": "COMMAND_NOT_ALLOWED", "meaning": "A shell command is outside `allow_commands`, or could not be read as plain commands" },
       { "code": "OFF_PLAN", "meaning": "`plan_approval: strict` is set and the tool is not a step of the session's approved plan" },
       { "code": "PLAN_NOT_APPROVED", "meaning": "`plan_approval:` is set and the session has no APPROVED or EXECUTING plan, the approved plans could not be read, or there is no session id" },
       { "code": "SERVER_BLOCKED", "meaning": "The MCP server is blocked in the MCP server registry" },
@@ -81,6 +83,7 @@
       { "code": "HELD", "meaning": "A hold rule matched: the call is held for a person's approval, and `holdId` names the hold" },
       { "code": "PREREQUISITE_UNMET", "meaning": "A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, the harness reports no tool results, or there is no session id" },
       { "code": "OUT_OF_SCOPE", "meaning": "A file-changing call targets a path outside `scope_paths` under `scope_paths_mode: enforce`, or outside the workspace" },
+      { "code": "COMMAND_NOT_ALLOWED", "meaning": "A shell command is outside `allow_commands`, or could not be read as plain commands" },
       { "code": "OFF_PLAN", "meaning": "`plan_approval: strict` is set and the tool is not a step of the session's approved plan" },
       { "code": "PLAN_NOT_APPROVED", "meaning": "`plan_approval:` is set and the session has no APPROVED or EXECUTING plan, the approved plans could not be read, or there is no session id" },
       { "code": "SERVER_BLOCKED", "meaning": "The MCP server is blocked in the MCP server registry" },

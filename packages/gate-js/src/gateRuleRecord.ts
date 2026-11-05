@@ -25,11 +25,12 @@
  * | `requires_outcome` | `requires_before: action:run_tests[ok] -> X` | X refused `PREREQUISITE_UNMET` unless the latest test run in the session passed |
  * | `scope_paths` | `scope_paths:` with `scope_paths_mode: enforce` | a file change outside the scope refused `OUT_OF_SCOPE` |
  * | `plan_approval` | `plan_approval: required\|strict` | refused `PLAN_NOT_APPROVED` until the session's plan is approved; under `strict`, a tool not in the plan refused `OFF_PLAN` |
+ * | `allow_commands` | `allow_commands:` | a shell command outside the union of the entries, or one the parser cannot read, refused `COMMAND_NOT_ALLOWED` |
  *
  * Only SOPs with no `roles:` compile: a gate knows no agent role.
  *
- * Self-contained but for `./testOutcome.ts`, `./scopeMatch.ts`, `./lanes.ts`
- * and `./phrases.ts` (all carried by `@intutic/gate` as byte-identical
+ * Self-contained but for `./testOutcome.ts`, `./scopeMatch.ts`, `./lanes.ts`,
+ * `./shellParse.ts` and `./phrases.ts` (all carried by `@intutic/gate` as byte-identical
  * copies), so `@intutic/gate` keeps a byte-identical copy of this file too.
  * The Python port is `intutic_clawde/gate/rule_record.py`; both run
  * `fixtures/rule-record-vectors.json`.
@@ -38,7 +39,8 @@
  */
 
 import { LANE_PHRASES } from './lanes.js'
-import { changeTargets, isPlanExemptTool, isWithinScope, scopeRelativePath, SCOPE_DELETE_TOOLS, SCOPE_EDIT_TOOLS, SCOPE_EDITOR_TOOLS, SCOPE_MOVE_TOOLS, SCOPE_SHELL_TOOLS, SCOPE_WRITE_TOOLS } from './scopeMatch.js'
+import { changeTargets, isPlanExemptTool, isWithinScope, scopeKeyed, scopeRelativePath, scopeToolIs, SCOPE_COMMAND_KEYS, SCOPE_DELETE_TOOLS, SCOPE_EDIT_TOOLS, SCOPE_EDITOR_TOOLS, SCOPE_MOVE_TOOLS, SCOPE_SHELL_TOOLS, SCOPE_WRITE_TOOLS } from './scopeMatch.js'
+import { commandsOutsideAllow, isAllowEntry } from './shellParse.js'
 import { prerequisiteCase, prerequisiteUnmetReason, type OutcomeState, type PrerequisiteCase } from './testOutcome.js'
 import type { RefusalScope } from './refusalDetail.js'
 
@@ -52,8 +54,14 @@ export const RULE_SOP_TITLE_MAX_CHARS = 80
 export const RULE_SCOPE_PATHS_MAX = 64
 export const RULE_SCOPE_PATH_MAX_CHARS = 512
 
-export type GateRuleKind = 'requires_outcome' | 'scope_paths' | 'plan_approval'
-export const GATE_RULE_KINDS: readonly GateRuleKind[] = ['requires_outcome', 'scope_paths', 'plan_approval']
+/** The most `allow_commands:` entries one record carries, and the longest of them in code points. */
+export const RULE_ALLOW_COMMANDS_MAX = 64
+export const RULE_ALLOW_COMMAND_MAX_CHARS = 512
+/** The most of a refused command a reason quotes, in code points. */
+export const RULE_COMMAND_QUOTE_MAX_CHARS = 120
+
+export type GateRuleKind = 'requires_outcome' | 'scope_paths' | 'plan_approval' | 'allow_commands'
+export const GATE_RULE_KINDS: readonly GateRuleKind[] = ['requires_outcome', 'scope_paths', 'plan_approval', 'allow_commands']
 
 /** The four action tokens a v22 hook gate's classifier knows: a fallback on one of them can use the `action` subject. */
 export const V22_ACTION_TOKENS: readonly string[] = ['action:deploy', 'action:publish', 'action:release', 'action:db_write']
@@ -88,7 +96,12 @@ export interface PlanApprovalRecord extends GateRuleRecordBase {
   mode: 'required' | 'strict'
 }
 
-export type GateRuleRecord = RequiresOutcomeRecord | ScopePathsRecord | PlanApprovalRecord
+export interface AllowCommandsRecord extends GateRuleRecordBase {
+  kind: 'allow_commands'
+  commands: string[]
+}
+
+export type GateRuleRecord = RequiresOutcomeRecord | ScopePathsRecord | PlanApprovalRecord | AllowCommandsRecord
 
 /**
  * The fields of each kind's payload, sorted: `{v, ref, sopTitle, …kind
@@ -99,6 +112,7 @@ const RULE_RECORD_FIELDS: Record<GateRuleKind, readonly string[]> = {
   requires_outcome: ['adjacent', 'first', 'qualifier', 'ref', 'sopTitle', 'then', 'v'],
   scope_paths: ['ref', 'scopePaths', 'sopTitle', 'v'],
   plan_approval: ['mode', 'ref', 'sopTitle', 'v'],
+  allow_commands: ['commands', 'ref', 'sopTitle', 'v'],
 }
 
 /** `ref`: `<sopId>#<kind>:<n>`. */
@@ -115,6 +129,7 @@ export function gateRuleFallbackId(kind: GateRuleKind, n: number, sopId: string,
 export function gateRuleFallbackReason(kind: GateRuleKind, sopTitle: string): string {
   if (kind === 'requires_outcome') return 'Qualified requires_before (' + sopTitle + '): this gate cannot read test results, so the call it gates is refused; upgrade the Intutic gate'
   if (kind === 'scope_paths') return 'scope_paths_mode: enforce (' + sopTitle + '): this gate cannot check a change against the scope, so every file change is refused; upgrade the Intutic gate'
+  if (kind === 'allow_commands') return 'allow_commands (' + sopTitle + '): this gate cannot check a command against the list, so every shell call is refused; upgrade the Intutic gate'
   return 'plan_approval (' + sopTitle + '): this gate cannot check plan approval, so every call is refused; upgrade the Intutic gate'
 }
 
@@ -176,7 +191,7 @@ export function decodeGateRuleRecord(line: string): GateRuleRecord | null {
   const f = line.split('\t')
   if (f.length !== 5 || f[0] !== '@rule' || !f[4]) return null
   const kind = f[2] as GateRuleKind
-  if (kind !== 'requires_outcome' && kind !== 'scope_paths' && kind !== 'plan_approval') return null
+  if (kind !== 'requires_outcome' && kind !== 'scope_paths' && kind !== 'plan_approval' && kind !== 'allow_commands') return null
   let r: unknown
   try {
     r = JSON.parse(ruleFromBase64(f[4]))
@@ -206,6 +221,10 @@ export function decodeGateRuleRecord(line: string): GateRuleRecord | null {
   } else if (kind === 'scope_paths') {
     const paths = r.scopePaths
     if (!Array.isArray(paths) || paths.length < 1 || paths.length > 64 || paths.some((p) => !ruleText(p, 512, 1))) return null
+  } else if (kind === 'allow_commands') {
+    const commands = r.commands
+    if (!Array.isArray(commands) || commands.length < 1 || commands.length > 64) return null
+    if (commands.some((c) => !ruleText(c, 512, 1) || !isAllowEntry(c as string))) return null
   } else if (r.mode !== 'required' && r.mode !== 'strict') {
     return null
   }
@@ -255,6 +274,7 @@ export interface GateRuleFrontMatter {
   scopePaths: readonly string[]
   scopePathsMode: 'advise' | 'enforce'
   planApproval: 'required' | 'strict' | null
+  allowCommands: readonly string[]
 }
 
 /** One fallback line, in the shape the snapshot writer's `GuardPattern` takes (it adds the rationale). */
@@ -282,12 +302,14 @@ function ruleEscape(s: string): string {
  * its place. `requires_outcome`: the gated call (by the action subject for
  * the four tokens a v22 classifier knows, by the token's phrases for a newer
  * token, by the shell tools for a token with no phrases, by the tool subject
- * for a tool); `scope_paths`: every mutation tool; `plan_approval`: every call.
+ * for a tool); `scope_paths`: every mutation tool; `plan_approval`: every call;
+ * `allow_commands`: every shell tool.
  */
 export function gateRuleFallback(record: GateRuleRecord): GateRuleFallback | null {
   if (record.fallbackId === null) return null
   const base = { id: record.fallbackId, severity: 'block' as const, reason: gateRuleFallbackReason(record.kind, record.sopTitle) }
   if (record.kind === 'plan_approval') return { ...base, subject: 'tool', source: ' [^ ]+ ', ignoreCase: false }
+  if (record.kind === 'allow_commands') return { ...base, subject: 'tool', source: ' [^ ]*(' + SCOPE_SHELL_TOOLS.map(ruleEscape).join('|') + ') ', ignoreCase: true }
   if (record.kind === 'scope_paths') {
     const tools = [...SCOPE_WRITE_TOOLS, ...SCOPE_EDIT_TOOLS, ...SCOPE_DELETE_TOOLS, ...SCOPE_MOVE_TOOLS, ...SCOPE_EDITOR_TOOLS]
     return { ...base, subject: 'tool', source: ' [^ ]*(' + tools.map(ruleEscape).join('|') + ') ', ignoreCase: true }
@@ -305,7 +327,9 @@ export function gateRuleFallback(record: GateRuleRecord): GateRuleFallback | nul
 /**
  * The records (and, for each enforcing one, its fallback line) one SOP
  * compiles to: each qualified `requires_before`, then its `scope_paths` when
- * `scope_paths_mode: enforce`, then its `plan_approval:`. Nothing for a SOP
+ * `scope_paths_mode: enforce`, then its `plan_approval:`, then its
+ * `allow_commands:`. An entry that cannot be read keeps its place, so the
+ * record does not decode and its fallback stays in force. Nothing for a SOP
  * with `roles:` (a gate knows no role). A shadow SOP (`mode: shadow`, or
  * `entry.shadow`, which the writer sets for SILENT_LOG) gets shadow records
  * and no fallback lines.
@@ -342,6 +366,7 @@ export function compileSopGateRecords(
     if (paths.length > 0) add({ ...base('scope_paths', 1), kind: 'scope_paths', scopePaths: paths })
   }
   if (fm.planApproval !== null) add({ ...base('plan_approval', 1), kind: 'plan_approval', mode: fm.planApproval })
+  if (fm.allowCommands.length > 0) add({ ...base('allow_commands', 1), kind: 'allow_commands', commands: fm.allowCommands.slice(0, 65) })
   return out
 }
 
@@ -350,7 +375,7 @@ export function compileSopGateRecords(
 // ---------------------------------------------------------------------------
 
 /** The refusal codes Tier R gives. */
-export type GateRuleCode = 'PREREQUISITE_UNMET' | 'OUT_OF_SCOPE' | 'OFF_PLAN' | 'PLAN_NOT_APPROVED'
+export type GateRuleCode = 'PREREQUISITE_UNMET' | 'OUT_OF_SCOPE' | 'OFF_PLAN' | 'PLAN_NOT_APPROVED' | 'COMMAND_NOT_ALLOWED'
 
 /** The session's plan as a gate reads it: approved (APPROVED or EXECUTING) with its tools, none, or not readable. */
 export type GateRulePlan = { status: 'approved'; tools: readonly string[] } | { status: 'none' } | { status: 'unavailable' }
@@ -490,7 +515,27 @@ function ruleScopeFinding(records: readonly ScopePathsRecord[], call: GateRuleCa
   }
 }
 
-/** The findings of one rollout's records, in order: plan approval, then qualified prerequisites, then scope. */
+/** A shell command outside the union of the records' lists, or null. */
+function ruleCommandFinding(records: readonly AllowCommandsRecord[], call: GateRuleCall): GateRuleFinding | null {
+  if (records.length === 0 || !scopeToolIs(call.tool, SCOPE_SHELL_TOOLS)) return null
+  const allow: string[] = []
+  for (const r of records) for (const c of r.commands) if (allow.indexOf(c) === -1) allow.push(c)
+  // Every key: which one a harness runs is not known here.
+  const commands = SCOPE_COMMAND_KEYS.map((k) => scopeKeyed(call.input, [k])).filter((c): c is string => c !== null)
+  const outside = commands.length === 0 ? ['(no command)'] : commands.flatMap((c) => commandsOutsideAllow(c, allow))
+  if (outside.length === 0) return null
+  const rec = records[0]!
+  const quoted = outside.map((c) => Array.from(c).slice(0, 120).join(''))
+  return {
+    code: 'COMMAND_NOT_ALLOWED',
+    ruleId: 'allow_commands.' + rec.sopTitle,
+    reason: 'Not on the allowed command list: ' + quoted.join('; ') + ' (allowed: ' + allow.join(', ') + ')',
+    scope: { tools: [call.tool] },
+    ref: rec.ref,
+  }
+}
+
+/** The findings of one rollout's records, in order: plan approval, then qualified prerequisites, then scope, then commands. */
 function ruleFindings(records: readonly GateRuleRecord[], call: GateRuleCall): GateRuleFinding[] {
   const out: GateRuleFinding[] = []
   const plan = rulePlanFinding(records.filter((r): r is PlanApprovalRecord => r.kind === 'plan_approval'), call)
@@ -499,6 +544,8 @@ function ruleFindings(records: readonly GateRuleRecord[], call: GateRuleCall): G
   if (requires) out.push(requires)
   const scope = ruleScopeFinding(records.filter((r): r is ScopePathsRecord => r.kind === 'scope_paths'), call)
   if (scope) out.push(scope)
+  const commands = ruleCommandFinding(records.filter((r): r is AllowCommandsRecord => r.kind === 'allow_commands'), call)
+  if (commands) out.push(commands)
   return out
 }
 
@@ -530,6 +577,7 @@ export const RULE_RECORD_JS_SOURCE = [
   `const SCOPE_MOVE_TOOLS = ${JSON.stringify(SCOPE_MOVE_TOOLS)};`,
   `const SCOPE_EDITOR_TOOLS = ${JSON.stringify(SCOPE_EDITOR_TOOLS)};`,
   `const SCOPE_SHELL_TOOLS = ${JSON.stringify(SCOPE_SHELL_TOOLS)};`,
+  `const SCOPE_COMMAND_KEYS = ${JSON.stringify(SCOPE_COMMAND_KEYS)};`,
   ...[
     ruleIsObject,
     ruleFromBase64,
@@ -543,6 +591,7 @@ export const RULE_RECORD_JS_SOURCE = [
     rulePlanFinding,
     ruleRequiresFinding,
     ruleScopeFinding,
+    ruleCommandFinding,
     ruleFindings,
     evaluateGateRuleRecords,
     gateRulePlanFromResponse,

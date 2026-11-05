@@ -1,68 +1,67 @@
 """A shell command, read as the commands it runs, or not at all.
 
 Deliberately a small subset of shell: words, quotes, escapes, comments and the
-operators `;`, `&`, `&&`, `|`, `|&`, `||` and newline. Anything else (a
-redirect, subshell, group, substitution, heredoc, control word) returns `None`,
-and so does anything malformed, because `None` is the answer that fails safe:
+operators ;, &, &&, |, |&, || and newline. Anything else (a
+redirect, subshell, group, substitution, heredoc, control word) returns None,
+and so does anything malformed, because None is the answer that fails safe:
 every caller keeps its old behaviour on it.
 
-A port of the proxy's `shell_parse.rs`; `@intutic/gate` `shellParse.ts` is
-another. All three run `shell-parse-vectors.json` in `@intutic/shared-types`.
+A port of the proxy's shell_parse.rs; @intutic/gate shellParse.ts is
+another. All three run shell-parse-vectors.json in @intutic/shared-types.
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass, field
-
-# Words that open a construct this parser does not model. `alias` is here
+# Words that open a construct this parser does not model. alias is here
 # because it changes what the next word means.
-CONTROL_WORDS = frozenset(
+SHELL_CONTROL_WORDS = frozenset(
     "if then else elif fi for while until do done case esac "
     "select function coproc alias".split()
 )
-_NAME = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+_BACKTICK = chr(96)  # no such character in this file: the gate's copy sits in a template string
+_SHELL_NAME = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
 
-@dataclass
 class SimpleCommand:
     """One command and its arguments.
 
-    `argv` is the words after quote removal. `literal` is False when a word
-    still holds an expansion or glob, so `argv` is not exactly what runs.
+    argv is the words after quote removal. literal is False when a word
+    still holds an expansion or glob, so argv is not exactly what runs.
     """
 
-    start: int
-    end: int
-    argv: list[str] = field(default_factory=list)
-    literal: bool = True
+    __slots__ = ("start", "end", "argv", "literal")
+
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+        self.argv = []
+        self.literal = True
 
 
-def _is_assignment(text: str, i: int) -> bool:
-    """`NAME=` at `i`: the word sets a variable for the command after it."""
+def _shell_is_assignment(text, i):
+    """NAME= at i: the word sets a variable for the command after it."""
     j = i
-    while j < len(text) and text[j] in _NAME:
+    while j < len(text) and text[j] in _SHELL_NAME:
         j += 1
     return j > i and not text[i].isdigit() and text[j:j + 1] == "="
 
 
-def parse(text: str) -> list[list[SimpleCommand]] | None:
-    """`text` as pipelines of simple commands, or None when not understood."""
-    pipelines: list[list[SimpleCommand]] = []
-    pipeline: list[SimpleCommand] = []
-    command: SimpleCommand | None = None
-    word: list[str] | None = None
+def parse_shell(text):
+    """text as pipelines of simple commands, or None when not understood."""
+    pipelines = []
+    pipeline = []
+    command = None
+    word = None
     pipe_open = False
     i = 0
     n = len(text)
 
-    def start_word(at: int) -> None:
+    def start_word(at):
         nonlocal word, command
         if word is None:
             word = []
         if command is None:
             command = SimpleCommand(start=at, end=at)
 
-    def end_word(at: int) -> None:
+    def end_word(at):
         nonlocal word
         if word is not None and command is not None:
             command.argv.append("".join(word))
@@ -98,7 +97,7 @@ def parse(text: str) -> list[list[SimpleCommand]] | None:
                 q = text[i]
                 if q == '"':
                     break
-                if q == "`":
+                if q == _BACKTICK:
                     return None
                 if q == "$":
                     if text[i + 1:i + 2] == "(":
@@ -108,7 +107,7 @@ def parse(text: str) -> list[list[SimpleCommand]] | None:
                     if i + 1 >= n:
                         return None
                     following = text[i + 1]
-                    if following not in '$"\\`\n':
+                    if following not in '$"\\\n' + _BACKTICK:
                         word.append("\\")
                     if following != "\n":
                         word.append(following)
@@ -120,13 +119,13 @@ def parse(text: str) -> list[list[SimpleCommand]] | None:
         elif c == "#" and word is None:
             while i < n and text[i] != "\n":
                 i += 1
-        elif c in "<>(){}`":
+        elif c in "<>(){}" + _BACKTICK:
             return None
         elif c in "\n;&|":
             end_word(i)
             doubled = c in "&|" and text[i + 1:i + 2] == c
             if command is not None:
-                if command.argv[0] in CONTROL_WORDS:
+                if command.argv[0] in SHELL_CONTROL_WORDS:
                     return None
                 pipeline.append(command)
                 command = None
@@ -146,7 +145,7 @@ def parse(text: str) -> list[list[SimpleCommand]] | None:
                 pipeline = []
             i += 2 if doubled else 1
         else:
-            if c in "$*?[~" or (word is None and _is_assignment(text, i)):
+            if c in "$*?[~" or (word is None and _shell_is_assignment(text, i)):
                 start_word(i)
                 command.literal = False
             start_word(i)
@@ -155,7 +154,7 @@ def parse(text: str) -> list[list[SimpleCommand]] | None:
 
     end_word(n)
     if command is not None:
-        if command.argv[0] in CONTROL_WORDS:
+        if command.argv[0] in SHELL_CONTROL_WORDS:
             return None
         pipeline.append(command)
     elif pipe_open:
@@ -165,20 +164,66 @@ def parse(text: str) -> list[list[SimpleCommand]] | None:
     return pipelines
 
 
-def drop_carried_text(text: str) -> str:
-    """`text` without the text no command consumes: a lone `echo`, `printf` or
-    `git commit`. Unchanged unless the whole of it parsed."""
-    pipelines = parse(text)
+def drop_carried_text(text):
+    """text without the text no command consumes: a lone echo, printf or
+    git commit. Unchanged unless the whole of it parsed."""
+    pipelines = parse_shell(text)
     if pipelines is None:
         return text
-    out: list[str] = []
+    out = []
     kept = 0
     for pipeline in pipelines:
         if len(pipeline) != 1:
             continue
         only = pipeline[0]
-        if only.argv[0] in ("echo", "printf") or only.argv[:2] == ["git", "commit"]:
+        # printf -v keeps the text for whatever reads the variable.
+        carries = only.argv[0] == "echo" or (only.argv[0] == "printf" and only.argv[1:2] != ["-v"])
+        if carries or only.argv[:2] == ["git", "commit"]:
             out.append(text[kept:only.start])
             kept = only.end
     out.append(text[kept:])
     return "".join(out)
+
+
+def _allow_entry(entry):
+    """An allow_commands: entry as (argv, open), or None when it is not one
+    plain command: git status, or npm test * for any further arguments. A
+    word that could expand matches nothing exactly, so an entry may not hold
+    one."""
+    is_open = entry.endswith(" *")
+    parsed = parse_shell(entry[:-2] if is_open else entry)
+    if parsed is None or len(parsed) != 1 or len(parsed[0]) != 1:
+        return None
+    only = parsed[0][0]
+    if not only.literal or any(c in word for word in only.argv for c in "$*?[~"):
+        return None
+    return only.argv, is_open
+
+
+def is_allow_entry(entry):
+    """Whether entry is one allow_commands: can use."""
+    return _allow_entry(entry) is not None
+
+
+def commands_outside_allow(text, allow):
+    """The commands in text that allow does not allow, as written, in order.
+
+    All of text when it did not parse, or when an entry cannot be read: an
+    allow list that reaches no verdict allows nothing, the opposite of
+    drop_carried_text, which keeps its old behaviour on the same input.
+    """
+    parsed = parse_shell(text)
+    entries = [_allow_entry(e) for e in allow]
+    if parsed is None or any(e is None for e in entries):
+        return [text]
+    out = []
+    for pipeline in parsed:
+        for c in pipeline:
+            allowed = any(
+                (len(c.argv) >= len(argv) if is_open else c.literal and len(c.argv) == len(argv))
+                and c.argv[: len(argv)] == argv
+                for argv, is_open in entries
+            )
+            if not allowed:
+                out.append(text[c.start:c.end])
+    return out
