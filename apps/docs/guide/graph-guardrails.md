@@ -114,7 +114,7 @@ the shared anomaly taxonomy:
 | Declared taint | `forbid_with:` material and its forbidden action in one request | `DATA_EXFILTRATION` |
 | Code as action | a code-execution call bundling credential access with network egress, or a destructive operation | `DATA_EXFILTRATION` / `TOOL_ABUSE` |
 | DLP escalation | 3+ distinct sensitive patterns in one request | `DATA_EXFILTRATION` |
-| Diversity collapse | last 10 calls used one tool | `TOKEN_WASTE` |
+| Diversity collapse | last 10 calls were the same tool with the same arguments | `TOKEN_WASTE` |
 | Context growth | large context after several hops | `TOKEN_WASTE` |
 | Sibling context overlap | a sibling node was handed nearly the same context (below) | `TOKEN_WASTE` |
 | Budget exhaustion | no headroom left | `BUDGET_BREACH` |
@@ -192,9 +192,10 @@ The ping-pong detector exists because a consecutive-repeat check cannot see two
 nodes handing work back and forth — no tool ever repeats twice in a row, yet
 nothing progresses.
 
-Self-transitions score low deliberately: `run_command -> run_command` sits at
-`0.15`, because a node calling the same tool repeatedly is the most common shape
-of a graph that has stopped making progress.
+Repeating a call scores low deliberately: `run_command -> run_command` sits at
+`0.15`, because a node making the same call over and over is the most common shape
+of a graph that has stopped making progress. Without a fitted model, a call to the
+same tool with different arguments is a step, not a repeat, and scores neutral.
 
 All detectors run on every request rather than stopping at the first hit — a
 request that trips three checks tells you more than one that trips one — and the

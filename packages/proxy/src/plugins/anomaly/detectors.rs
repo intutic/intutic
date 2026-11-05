@@ -34,7 +34,7 @@ fn threshold_confidence(observed: usize, threshold: usize) -> f64 {
 /// Consecutive identical calls before they are treated as a spin.
 const REPETITION_THRESHOLD: usize = 5;
 
-/// What the three loop detectors below compare: each call as tool + exact
+/// What the repetition checks in this file compare: each call as tool + exact
 /// arguments, or the bare sequence for a context recorded before fingerprints.
 ///
 /// Names alone flagged ordinary work. A single `bash` tool, a run of `read`s, or
@@ -619,6 +619,10 @@ const TRANSITION_SCORING_WINDOW: usize = 20;
 /// sequence should pull the average down, not condemn the request on its own.
 const UNSEEN_TRANSITION: f64 = 0.10;
 
+/// Score for a step nothing here has an opinion on. Above `MIN_TRANSITION_PROBABILITY`:
+/// no evidence is not evidence of a problem.
+const NEUTRAL_TRANSITION: f64 = 0.50;
+
 /// Scores each `A → B` step of the tool sequence for plausibility.
 ///
 /// Prefers this workspace's fitted model, carried on `RequestContext`, and falls back
@@ -693,12 +697,25 @@ impl TransitionProbabilityDetector {
             {
                 return UNSEEN_TRANSITION;
             }
+            return NEUTRAL_TRANSITION;
         }
         Self::builtin_probability(from, to)
     }
 
+    /// `from` and `to` come from [`loop_identity`], so the same tool with different
+    /// arguments is a step, not a repeat. Every pair of different tools below scores
+    /// at least 0.50, so only repeats can pull the mean under the threshold; on names
+    /// alone that flagged any agent with one tool, or a long run of one, and the
+    /// steer corroborated whatever else fired: reasks, then a block, on SWE-bench.
     fn builtin_probability(from: &str, to: &str) -> f64 {
-        match (from, to) {
+        let (from_tool, to_tool) = (
+            crate::manifest::fingerprint_tool(from),
+            crate::manifest::fingerprint_tool(to),
+        );
+        if from != to && from_tool == to_tool {
+            return NEUTRAL_TRANSITION;
+        }
+        match (from_tool, to_tool) {
             ("list_dir", "view_file") => 0.90,
             ("grep_search", "view_file") => 0.90,
             ("view_file", "view_file") => 0.85,
@@ -714,7 +731,7 @@ impl TransitionProbabilityDetector {
             ("run_command", "run_command") => 0.15,
             ("replace_file_content", "replace_file_content") => 0.30,
             (a, b) if a == b => 0.20,
-            _ => 0.50,
+            _ => NEUTRAL_TRANSITION,
         }
     }
 }
@@ -743,7 +760,7 @@ impl AnomalyDetector for TransitionProbabilityDetector {
         let full: Vec<&String> = if baseline.is_some() {
             ctx.tool_sequence.iter().collect()
         } else {
-            ctx.tool_sequence
+            loop_identity(ctx)
                 .iter()
                 .filter(|t| !super::actions::is_action(t))
                 .collect()
@@ -1588,8 +1605,8 @@ const DIVERSITY_WINDOW: usize = 10;
 /// Distinct tools required within that window.
 const DIVERSITY_MIN_DISTINCT: usize = 2;
 
-/// A long run drawing on a single tool. Distinct from a consecutive spin: the
-/// calls may be interleaved with nothing else, yet still make no progress.
+/// A long run of one call, tool and arguments alike. A tool name alone says nothing:
+/// an agent whose only tool is `bash` would collapse after any ten commands.
 pub struct ToolDiversityCollapseDetector {
     window: usize,
     min_distinct: usize,
@@ -1614,7 +1631,7 @@ impl AnomalyDetector for ToolDiversityCollapseDetector {
     }
 
     fn detect(&self, ctx: &RequestContext) -> Option<AnomalyFinding> {
-        let seq = &ctx.tool_sequence;
+        let seq = loop_identity(ctx);
         if seq.len() < self.window {
             return None;
         }
@@ -1626,8 +1643,9 @@ impl AnomalyDetector for ToolDiversityCollapseDetector {
         Some(AnomalyFinding::steer(
             AnomalyKind::TokenWaste,
             format!(
-                "No progress: the last {} tool calls used only '{}'",
-                self.window, tail[0]
+                "No progress: the last {} tool calls were the same call to '{}'",
+                self.window,
+                crate::manifest::fingerprint_tool(&tail[0])
             ),
             0.8,
         ))
@@ -3153,6 +3171,71 @@ mod tests {
         assert!(d.detect(&ctx_with_sequence(&seq)).is_none());
     }
 
+    /// Twelve different shell commands from an agent whose only tool is `bash`.
+    fn single_tool_work() -> Vec<(&'static str, serde_json::Value)> {
+        (0..12)
+            .map(|i| {
+                (
+                    "bash",
+                    serde_json::json!({ "command": format!("step {i}") }),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn diversity_collapse_compares_arguments_too() {
+        let d = ToolDiversityCollapseDetector::default();
+        assert!(d.detect(&ctx_with_calls(&single_tool_work())).is_none());
+
+        // Ten identical calls still are one, and the finding names the tool.
+        let stuck = vec![("bash", serde_json::json!({ "command": "pwd" })); 10];
+        let hit = d
+            .detect(&ctx_with_calls(&stuck))
+            .expect("ten identical calls collapse");
+        assert!(hit.reason.contains("'bash'"), "{}", hit.reason);
+    }
+
+    #[test]
+    fn transition_table_compares_arguments_too() {
+        let d = TransitionProbabilityDetector::default();
+        assert!(d.detect(&ctx_with_calls(&single_tool_work())).is_none());
+
+        // `run_command` is the table's lowest row: a different command is still a step.
+        let commands: Vec<_> = (0..5)
+            .map(|i| ("run_command", serde_json::json!({ "c": i })))
+            .collect();
+        assert!(d.detect(&ctx_with_calls(&commands)).is_none());
+
+        // A run of one tool among others, as a search-heavy agent makes.
+        let mut searches = vec![("get_customer", serde_json::json!({}))];
+        searches.extend((0..11).map(|i| ("KB_search", serde_json::json!({ "q": i }))));
+        assert!(d.detect(&ctx_with_calls(&searches)).is_none());
+
+        // Repeating the call itself still scores low.
+        let stuck = vec![("run_command", serde_json::json!({ "c": 1 })); 3];
+        assert!(d.detect(&ctx_with_calls(&stuck)).is_some());
+    }
+
+    /// Seen blocking 4 of 100 tasks in a governed SWE-bench run on 3.1.3: the
+    /// diversity check and the built-in transition table both counted one tool
+    /// name, so one fact read as two detectors agreeing, and every reask landed
+    /// on the same history until the session was blocked.
+    #[test]
+    fn a_single_tool_agent_is_not_corroborated_into_a_block() {
+        let reg = crate::plugins::anomaly::DetectorRegistry::with_defaults();
+        let mut ctx = ctx_with_calls(&single_tool_work());
+        assert!(reg.evaluate_all(&ctx).is_empty());
+
+        // The same work over a large context: growth is real, and alone.
+        ctx.estimated_input_tokens = CONTEXT_GROWTH_TOKENS;
+        let findings = reg.evaluate_all(&ctx);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert!(
+            crate::plugins::anomaly::DetectorRegistry::corroborated_finding(&findings).is_none()
+        );
+    }
+
     #[test]
     fn context_growth_needs_both_size_and_hops() {
         let d = ContextGrowthDetector::default();
@@ -3254,7 +3337,7 @@ mod tests {
         // reads as surprising instead of as 0.50.
         //
         // Note what this does NOT claim: a sequence of tools the corpus has never seen
-        // at all still falls back to the built-in table and will not fire. That is the
+        // at all scores neutral and will not fire. That is the
         // deliberate trade made in `an_unknown_predecessor_is_not_treated_as_surprising`
         // — refusing to condemn a newly adopted tool costs some detection on a wholly
         // novel vocabulary, and the false-positive direction is the worse one for a
@@ -3341,15 +3424,18 @@ mod tests {
         // predecessor once it has enough observations, so a `from` the model has never
         // heard of means "not enough evidence yet", not "never happens" — every tool a
         // team adopted since the last sweep would otherwise be flagged on sight.
-        // Falls back to the built-in table for those steps.
         let model = &[("Read View", 0.9_f64)];
-        let ctx = ctx_with_baseline(&["BrandNewTool", "AnotherNewTool", "ThirdNewTool"], model);
-        assert!(
-            TransitionProbabilityDetector::default()
-                .detect(&ctx)
-                .is_none(),
-            "tools absent from the corpus must not be condemned for being new"
-        );
+        for seq in [
+            &["BrandNewTool", "AnotherNewTool", "ThirdNewTool"],
+            &["BrandNewTool", "BrandNewTool", "BrandNewTool"],
+        ] {
+            assert!(
+                TransitionProbabilityDetector::default()
+                    .detect(&ctx_with_baseline(seq, model))
+                    .is_none(),
+                "tools absent from the corpus must not be condemned for being new"
+            );
+        }
     }
 
     #[test]
@@ -3363,8 +3449,8 @@ mod tests {
         // Same trailing behaviour, three different amounts of prior history, one verdict.
         // Every tool below is a KNOWN predecessor in the model — the trailing steps are
         // unseen *successions* of familiar tools, not an unfamiliar vocabulary. That
-        // distinction is deliberate: a wholly novel vocabulary falls back to the
-        // built-in table by design, per
+        // distinction is deliberate: a wholly novel vocabulary scores neutral by
+        // design, per
         // `an_unknown_predecessor_is_not_treated_as_surprising`.
         let model = &[
             ("Read View", 0.95_f64),
