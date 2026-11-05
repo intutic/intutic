@@ -85,6 +85,9 @@ beforeAll(async () => {
   snaps.outcome = await snapshotFor('outcome', [OUTCOME_SOP])
   snaps.scope = await snapshotFor('scope', [SCOPE_SOP])
   snaps.plan = await snapshotFor('plan', [PLAN_SOP])
+  snaps.commands = await snapshotFor('commands', [sop('local:commands.md', 'allow_commands: git status, npm test *', 'Read only')])
+  snaps.badEntry = await snapshotFor('bad-entry', [sop('local:bad.md', 'allow_commands: git status, ls $DIR', 'Read only')])
+  snaps.commandsShadow = await snapshotFor('commands-shadow', [sop('local:shadow.md', 'mode: shadow\nallow_commands: git status', 'Read only')])
   snaps.lanes = await snapshotFor('lanes', [LANE_SOP])
   for (const g of ALL) {
     const root = join(home, g.name)
@@ -399,8 +402,8 @@ describe('reversibility lanes', () => {
 
 describe('requires_before: action:run_tests[ok] at every gate', () => {
   it('registers the refusal codes the gates use', () => {
-    for (const code of ['PREREQUISITE_UNMET', 'OUT_OF_SCOPE', 'PLAN_NOT_APPROVED', 'OFF_PLAN']) expect(HOOK_REFUSAL_CODES).toContain(code)
-    expect(GATE_VERSION).toBe(23)
+    for (const code of ['PREREQUISITE_UNMET', 'OUT_OF_SCOPE', 'COMMAND_NOT_ALLOWED', 'PLAN_NOT_APPROVED', 'OFF_PLAN']) expect(HOOK_REFUSAL_CODES).toContain(code)
+    expect(GATE_VERSION).toBe(24)
   })
 
   for (const g of ALL) {
@@ -518,6 +521,34 @@ describe('scope_paths_mode: enforce at every gate', () => {
   }
 })
 
+describe('allow_commands: at every gate', () => {
+  for (const g of ALL) {
+    it(`${g.name}: lets listed commands run and refuses the rest, and what it cannot read`, async () => {
+      for (const command of ['git status', 'npm test -- --ci', 'git status && npm test']) {
+        const ok = await call(g, 'Bash', { command }, snaps.commands!)
+        expect(ok.refused, `${g.name} refused ${command}: ${ok.text.slice(0, 300)}`).toBe(false)
+      }
+      for (const command of ['git push', 'git status && git push', 'git status > f', 'git status $(rm -rf x)', 'PATH=/tmp git status']) {
+        const out = await call(g, 'Bash', { command }, snaps.commands!)
+        expect(out.refused, `${g.name} let ${command} through`).toBe(true)
+        if (g.name !== 'pi') expect(out.text).toMatch(/not on the allowed command list|COMMAND_NOT_ALLOWED/i)
+      }
+      const read = await call(g, 'Read', { file_path: 'src/a.ts' }, snaps.commands!)
+      expect(read.refused, 'only shell tools are checked').toBe(false)
+    }, 90_000)
+
+    it(`${g.name}: an entry it cannot read refuses every shell call`, async () => {
+      const bad = await call(g, 'Bash', { command: 'git status' }, snaps.badEntry!)
+      expect(bad.refused, `${g.name} let a call through under an unreadable entry`).toBe(true)
+    }, 60_000)
+
+    it(`${g.name}: mode: shadow refuses nothing`, async () => {
+      const shadow = await call(g, 'Bash', { command: 'git push' }, snaps.commandsShadow!)
+      expect(shadow.refused, shadow.text.slice(0, 300)).toBe(false)
+    }, 60_000)
+  }
+})
+
 describe('plan_approval: strict at every gate', () => {
   for (const g of ALL) {
     it(`${g.name}: refuses before the session's plan is approved, then holds the call to the plan's steps`, async () => {
@@ -630,6 +661,12 @@ describe('the 2.9.0 gate (body v21) on a format 3 snapshot', () => {
     expect(deploy.refused, deploy.stderr).toBe(true)
     expect(deploy.stderr).toContain('requires_outcome-fallback:1@')
     expect((await runOld('npm run build', snaps.outcome!)).refused).toBe(false)
+  })
+
+  it('refuses every shell call through allow_commands-fallback:', async () => {
+    const listed = await runOld('git status', snaps.commands!)
+    expect(listed.refused, listed.stderr).toBe(true)
+    expect(listed.stderr).toContain('allow_commands-fallback:1@')
   })
 
   it('refuses every call through plan_approval-fallback:', async () => {

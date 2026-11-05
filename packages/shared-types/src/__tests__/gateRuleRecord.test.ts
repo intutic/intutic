@@ -11,6 +11,7 @@ import { decodeSnapshotFormatRecord } from '../decideRecord.js'
 import { parseFrontMatterEnforcing } from '../guardrailRender.js'
 import { PHRASES_JS_SOURCE } from '../phrases.js'
 import { SCOPE_MATCH_JS_SOURCE } from '../scopeMatch.js'
+import { SHELL_PARSE_JS_SOURCE } from '../shellParse.js'
 import { TEST_OUTCOME_JS_SOURCE } from '../testOutcome.js'
 import * as rules from '../gateRuleRecord.js'
 
@@ -20,7 +21,7 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
 
 type Api = Pick<typeof rules, 'decodeGateRuleRecord' | 'gateRuleFallback' | 'evaluateGateRuleRecords' | 'gateRulePlanFromResponse'>
 const EMITTED = new Function(
-  `${PHRASES_JS_SOURCE}\n${TEST_OUTCOME_JS_SOURCE}\n${SCOPE_MATCH_JS_SOURCE}\n${rules.RULE_RECORD_JS_SOURCE}\nreturn { decodeGateRuleRecord, gateRuleFallback, evaluateGateRuleRecords, gateRulePlanFromResponse }`,
+  `${PHRASES_JS_SOURCE}\n${TEST_OUTCOME_JS_SOURCE}\n${SCOPE_MATCH_JS_SOURCE}\n${SHELL_PARSE_JS_SOURCE}\n${rules.RULE_RECORD_JS_SOURCE}\nreturn { decodeGateRuleRecord, gateRuleFallback, evaluateGateRuleRecords, gateRulePlanFromResponse }`,
 )() as Api
 
 describe.each([

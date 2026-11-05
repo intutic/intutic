@@ -101,7 +101,8 @@
     ["eval \"echo 'drop table t'\"", ["action:db_write", "action:destroy"]],
     ["alias echo='sh -c'\necho 'drop table t'", ["action:db_write", "action:destroy"]],
     ["git commit -m \"x\" && git push", ["action:deploy"]],
-    ["git -c core.hooksPath=/tmp/h commit -m 'drop table t'", ["action:db_write", "action:destroy"]]
+    ["git -c core.hooksPath=/tmp/h commit -m 'drop table t'", ["action:db_write", "action:destroy"]],
+    ["printf -v X 'drop table t'; psql -c \"$X\"", ["action:db_write", "action:destroy"]]
   ],
   "notHeld": [
     "git status",

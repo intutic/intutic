@@ -98,10 +98,13 @@ pub enum Code {
     /// A file-changing call outside `scope_paths` under
     /// `scope_paths_mode: enforce`.
     OutOfScope,
+    /// A shell command outside `allow_commands:`, or one that could not be
+    /// read as plain commands.
+    CommandNotAllowed,
 }
 
 impl Code {
-    pub const ALL: [Code; 8] = [
+    pub const ALL: [Code; 9] = [
         Code::CostGateExceeded,
         Code::ToolDenied,
         Code::SsoGroup,
@@ -110,6 +113,7 @@ impl Code {
         Code::OutputDlp,
         Code::PrerequisiteUnmet,
         Code::OutOfScope,
+        Code::CommandNotAllowed,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -122,6 +126,7 @@ impl Code {
             Code::OutputDlp => "OUTPUT_DLP",
             Code::PrerequisiteUnmet => "PREREQUISITE_UNMET",
             Code::OutOfScope => "OUT_OF_SCOPE",
+            Code::CommandNotAllowed => "COMMAND_NOT_ALLOWED",
         }
     }
 }
@@ -561,7 +566,7 @@ mod tests {
     fn the_new_codes_name_themselves() {
         assert_eq!(Code::PrerequisiteUnmet.as_str(), "PREREQUISITE_UNMET");
         assert_eq!(Code::OutOfScope.as_str(), "OUT_OF_SCOPE");
-        assert_eq!(Code::ALL.len(), 8);
+        assert_eq!(Code::ALL.len(), 9);
     }
 
     #[test]

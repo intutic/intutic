@@ -250,6 +250,9 @@ pub struct Sop {
     /// Prefix matches against the paths a request's tool calls actually named,
     /// so `packages/proxy` covers everything beneath it.
     pub scope_paths: Vec<String>,
+    /// `allow_commands:`, the shell commands allowed. The union of every
+    /// applicable SOP's; see `plugins::anomaly::shell_parse`.
+    pub allow_commands: Vec<String>,
     /// Actions that must not proceed until a human has looked.
     ///
     /// Entries are action tokens (`action:deploy`) or raw tool names. Unlike
@@ -378,6 +381,7 @@ struct FrontMatter {
     deny_tools: Vec<String>,
     plan_steps: Vec<String>,
     scope_paths: Vec<String>,
+    allow_commands: Vec<String>,
     review_before: Vec<String>,
     requires_before: Vec<(String, String, bool)>,
     forbid_after: Vec<(String, String, bool)>,
@@ -706,6 +710,7 @@ fn parse_front_matter(raw: &str) -> FrontMatter {
         // and a scope written `Packages/Proxy` must not silently match nothing on
         // a Linux CI runner. Comparison lowercases both sides.
         scope_paths: list("scope_paths:", false),
+        allow_commands: list("allow_commands:", false),
         // Action tokens (`action:deploy`) are lowercase by construction, but raw
         // tool names are accepted here too — see the detector — so case is kept
         // and the comparison ignores it.
@@ -1003,6 +1008,7 @@ pub(crate) fn parse_sop_content(
         && fm.allow_harnesses.is_empty()
         && fm.plan_steps.is_empty()
         && fm.scope_paths.is_empty()
+        && fm.allow_commands.is_empty()
         && fm.review_before.is_empty()
         && fm.requires_before.is_empty()
         && fm.forbid_after.is_empty()
@@ -1027,6 +1033,12 @@ pub(crate) fn parse_sop_content(
     // that were fine.
     for err in &fm.rule_errors {
         tracing::warn!(sop = %source, "Ignoring unparseable ordering rule: {err}");
+    }
+    // An unreadable entry refuses every shell call, so say why here too.
+    for entry in &fm.allow_commands {
+        if !crate::plugins::anomaly::shell_parse::is_allow_entry(entry) {
+            tracing::warn!(sop = %source, entry = %entry, "Unreadable allow_commands entry — every shell call is refused while it is in force");
+        }
     }
     // An unreadable hook rule is not ignored: it refuses every tool call
     // (`plugins::hook_rules`), so say why where an operator will look.
@@ -1069,6 +1081,7 @@ pub(crate) fn parse_sop_content(
         allow_harnesses: fm.allow_harnesses,
         plan_steps: fm.plan_steps,
         scope_paths: fm.scope_paths,
+        allow_commands: fm.allow_commands,
         review_before: fm.review_before,
         risk_tier: fm.risk_tier,
         requires_before: fm.requires_before,
@@ -1494,7 +1507,7 @@ mod enforceability_tests {
 /// to use and the four that would have worked were not among them. Parallel
 /// lists that disagree is the same defect class as the tool-name lists in
 /// `actions.rs` — one place, or they drift.
-const ENFORCING_FIELDS: &str = "deny_tools, allow_harnesses, plan_steps, scope_paths, \
+const ENFORCING_FIELDS: &str = "deny_tools, allow_harnesses, plan_steps, scope_paths, allow_commands, \
      review_before, requires_before, forbid_after, max_calls, forbid_with, sql_guard, sql_allow_dsns, \
      closed_lanes, plan_approval, node_kind, hook_rule or decide";
 
@@ -1516,6 +1529,7 @@ fn is_enforceable(sop: &Sop) -> bool {
         || !sop.allow_harnesses.is_empty()
         || !sop.plan_steps.is_empty()
         || !sop.scope_paths.is_empty()
+        || !sop.allow_commands.is_empty()
         || !sop.review_before.is_empty()
         || !sop.requires_before.is_empty()
         || !sop.forbid_after.is_empty()
@@ -2005,6 +2019,9 @@ pub struct GovernanceFields {
     pub denied_tool_sources: Vec<(String, String)>,
     pub plan_steps: Vec<String>,
     pub scope_paths: Vec<String>,
+    /// `allow_commands:`, the shell commands allowed. The union of every
+    /// applicable SOP's; see `plugins::anomaly::shell_parse`.
+    pub allow_commands: Vec<String>,
     pub review_before: Vec<String>,
     pub requires_before: Vec<(String, String, bool)>,
     pub forbid_after: Vec<(String, String, bool)>,
@@ -2125,6 +2142,14 @@ pub fn governance_fields_with_lanes(
         denied_tool_sources: collect_deny_sources(sops, role),
         plan_steps: collect_plan_steps(sops, role),
         scope_paths: collect_scope_paths(sops, role),
+        allow_commands: {
+            let mut out: Vec<String> = applicable()
+                .flat_map(|s| s.allow_commands.iter().cloned())
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        },
         review_before,
         requires_before: collect_requires_before(sops, role),
         forbid_after: collect_forbid_after(sops, role),
@@ -2919,6 +2944,7 @@ mod tests {
             allow_harnesses: Vec::new(),
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
+            allow_commands: Vec::new(),
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
@@ -3035,6 +3061,21 @@ mod tests {
         );
         assert_eq!(parsed.risk_tier, Some(RiskLevel::High));
         assert_eq!(parsed.body, "Do not delete production data.");
+    }
+
+    #[test]
+    fn allow_commands_are_a_union_across_the_sops_in_force() {
+        let mut a = sop("a", &["deployer"]);
+        a.allow_commands = vec!["git status".to_string(), "npm test *".to_string()];
+        let mut b = sop("b", &["deployer"]);
+        b.allow_commands = vec!["git diff".to_string(), "git status".to_string()];
+        let mut other = sop("other", &["reviewer"]);
+        other.allow_commands = vec!["ls".to_string()];
+        let gov = governance_fields_from(&[a, b, other], "deployer");
+        assert_eq!(
+            gov.allow_commands,
+            vec!["git diff", "git status", "npm test *"]
+        );
     }
 
     /// A declaration-only SOP (no prose, just a directive) must still parse —
@@ -3229,6 +3270,7 @@ mod tests {
                 allow_harnesses: vec![],
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
+                allow_commands: Vec::new(),
                 review_before: Vec::new(),
                 requires_before: Vec::new(),
                 forbid_after: Vec::new(),
@@ -3436,6 +3478,7 @@ mod render_determinism_tests {
             allow_harnesses: Vec::new(),
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
+            allow_commands: Vec::new(),
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
@@ -3793,6 +3836,7 @@ mod discovery_tests {
             allow_harnesses: fm.allow_harnesses,
             plan_steps: fm.plan_steps,
             scope_paths: fm.scope_paths,
+            allow_commands: fm.allow_commands,
             review_before: fm.review_before,
             requires_before: fm.requires_before,
             forbid_after: fm.forbid_after,
@@ -4406,6 +4450,7 @@ mod deny_tests {
             allow_harnesses: Vec::new(),
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
+            allow_commands: Vec::new(),
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
@@ -4503,6 +4548,7 @@ mod harness_policy_tests {
                 allow_harnesses: vec!["claude-code".into()],
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
+                allow_commands: Vec::new(),
                 review_before: Vec::new(),
                 requires_before: Vec::new(),
                 forbid_after: Vec::new(),
@@ -4525,6 +4571,7 @@ mod harness_policy_tests {
                 allow_harnesses: vec!["cursor".into()],
                 plan_steps: Vec::new(),
                 scope_paths: Vec::new(),
+                allow_commands: Vec::new(),
                 review_before: Vec::new(),
                 requires_before: Vec::new(),
                 forbid_after: Vec::new(),
@@ -4591,6 +4638,7 @@ mod plan_step_tests {
                 allow_harnesses: vec![],
                 plan_steps: vec!["Read".into(), "Edit".into(), "action:deploy".into()],
                 scope_paths: Vec::new(),
+                allow_commands: Vec::new(),
                 review_before: Vec::new(),
                 requires_before: Vec::new(),
                 forbid_after: Vec::new(),
@@ -4613,6 +4661,7 @@ mod plan_step_tests {
                 allow_harnesses: vec![],
                 plan_steps: vec!["Grep".into()],
                 scope_paths: Vec::new(),
+                allow_commands: Vec::new(),
                 review_before: Vec::new(),
                 requires_before: Vec::new(),
                 forbid_after: Vec::new(),
@@ -4648,6 +4697,7 @@ mod plan_step_tests {
             allow_harnesses: vec![],
             plan_steps: vec!["action:deploy".into()],
             scope_paths: Vec::new(),
+            allow_commands: Vec::new(),
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),
@@ -4870,6 +4920,7 @@ mod sop_status_snapshot_tests {
             allow_harnesses: Vec::new(),
             plan_steps: Vec::new(),
             scope_paths: Vec::new(),
+            allow_commands: Vec::new(),
             review_before: Vec::new(),
             requires_before: Vec::new(),
             forbid_after: Vec::new(),

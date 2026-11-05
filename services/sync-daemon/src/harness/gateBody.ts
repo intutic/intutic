@@ -93,6 +93,7 @@ import { SEQUENCE_PY_SOURCE } from '../lib/sequencePy.js'
 import {
   REFUSAL_DETAIL_JS_SOURCE,
   RULE_RECORD_JS_SOURCE,
+  SHELL_PARSE_JS_SOURCE,
   RULE_RECORD_TAG,
   RULE_SNAPSHOT_FORMAT,
   SCOPE_MATCH_JS_SOURCE,
@@ -103,6 +104,7 @@ import {
 import { TEST_OUTCOME_PY_SOURCE } from '../lib/testOutcomePy.js'
 import { SCOPE_MATCH_PY_SOURCE } from '../lib/scopeMatchPy.js'
 import { RULE_RECORD_PY_SOURCE } from '../lib/ruleRecordPy.js'
+import { SHELL_PARSE_PY_SOURCE } from '../lib/shellParsePy.js'
 import { REFUSAL_DETAIL_PY_SOURCE } from '../lib/refusalDetailPy.js'
 
 /**
@@ -365,7 +367,7 @@ import { REFUSAL_DETAIL_PY_SOURCE } from '../lib/refusalDetailPy.js'
  * fallback line's calls, and holds lane and revert holds through their
  * `phrase` rules.
  */
-export const GATE_VERSION = 23
+export const GATE_VERSION = 24
 
 /**
  * Whether each family of rendered gate evaluates each `@rule` kind. A family
@@ -374,9 +376,9 @@ export const GATE_VERSION = 23
  * no file targets, so it keeps every fallback line.
  */
 export const GATE_EVALUATES_RULE_RECORDS: Readonly<Record<'js' | 'bash' | 'n8n', Readonly<Record<GateRuleKind, boolean>>>> = {
-  js: { requires_outcome: true, scope_paths: true, plan_approval: true },
-  bash: { requires_outcome: true, scope_paths: true, plan_approval: true },
-  n8n: { requires_outcome: false, scope_paths: false, plan_approval: false },
+  js: { requires_outcome: true, scope_paths: true, plan_approval: true, allow_commands: true },
+  bash: { requires_outcome: true, scope_paths: true, plan_approval: true, allow_commands: true },
+  n8n: { requires_outcome: false, scope_paths: false, plan_approval: false, allow_commands: false },
 }
 
 /**
@@ -466,6 +468,8 @@ export const GATE_EVALUATES_DECIDE: Readonly<Record<'js' | 'bash' | 'n8n', boole
  *   or a harness whose results cannot be observed);
  * - `OUT_OF_SCOPE`: a file change outside `scope_paths` under
  *   `scope_paths_mode: enforce`;
+ * - `COMMAND_NOT_ALLOWED`: a shell command outside `allow_commands:`, or one
+ *   that could not be read as plain commands;
  * - `PLAN_NOT_APPROVED`, `OFF_PLAN`: `plan_approval:` and no approved plan
  *   for the session, or (`strict`) a tool that is not one of its steps.
  *
@@ -480,6 +484,7 @@ export const HOOK_REFUSAL_CODES = [
   'HELD',
   'PREREQUISITE_UNMET',
   'OUT_OF_SCOPE',
+  'COMMAND_NOT_ALLOWED',
   'OFF_PLAN',
   'PLAN_NOT_APPROVED',
   'SERVER_BLOCKED',
@@ -814,6 +819,15 @@ def intutic_trajectory_check(harness, tool, session, records_text, tool_input_js
                 if rollout == "enforce":
                     return line
                 shadow = shadow or line
+    allows = _intutic_records(records_text, "allow_commands")
+    for rollout in ("enforce", "shadow"):
+        group = [r for r in allows if r["rollout"] == rollout]
+        found = _command_finding(group, {"tool": str(tool), "input": ti})
+        if found:
+            line = _intutic_verdict(group[0], found["code"], found["ruleId"], found["reason"], found["scope"])
+            if rollout == "enforce":
+                return line
+            shadow = shadow or line
     plans = _intutic_records(records_text, "plan_approval")
     if plans and not is_plan_exempt_tool(str(tool)):
         for rollout in ("enforce", "shadow"):
@@ -869,6 +883,7 @@ ${MCP_REGISTRY_PY_SOURCE}
 ${TEST_OUTCOME_PY_SOURCE}
 
 ${SCOPE_MATCH_PY_SOURCE}
+${SHELL_PARSE_PY_SOURCE}
 
 # The lane phrases rule_record.py names (lanes.ts LANE_PHRASES).
 LANE_PHRASES = ${JSON.stringify(LANE_PHRASES)}
@@ -2488,7 +2503,7 @@ fi
 # off its steps (OFF_PLAN). After the holds, before the decide tier. A check
 # that cannot run refuses.
 case "$_intutic_rr_text" in
-  *$'\t'scope_paths$'\t'*|*$'\t'plan_approval$'\t'*)
+  *$'\t'scope_paths$'\t'*|*$'\t'plan_approval$'\t'*|*$'\t'allow_commands$'\t'*)
     _intutic_tr="$(${pyCall('intutic_trajectory_check', '*(sys.argv[1:4] + [sys.argv[4], sys.stdin.read(), sys.argv[5], sys.argv[6]])')} ${shq(opts.harness)} "\${TOOL:-}" "\${SESSION_ID:-}" "$_intutic_rr_text" "$PWD" "\${INTUTIC_WORKSPACE_ID:-}" <<< "\${TOOL_INPUT_JSON:-}" 2>/dev/null || printf 'block\tOUT_OF_SCOPE\tscope_paths\tthe scope and plan check could not run')"
     intutic_rule_verdict "$_intutic_tr"
     ;;
@@ -2643,13 +2658,14 @@ const JS_RULE_LIB = `// Rule records, test outcomes, scope matching and refusal 
 const intuticRuleLib = (function () {
 ${TEST_OUTCOME_JS_SOURCE}
 ${SCOPE_MATCH_JS_SOURCE}
+${SHELL_PARSE_JS_SOURCE}
 ${RULE_RECORD_JS_SOURCE}
 ${REFUSAL_DETAIL_JS_SOURCE}
   return { decode: decodeGateRuleRecord, exitCode: extractExitCode, outcome: decideTestOutcome,
     emptyState: emptyOutcomeState, parseState: parseOutcomeState, recordOutcome: recordTestOutcome,
     noteCall: noteCompletedCall, prerequisite: prerequisiteCase, unmetReason: prerequisiteUnmetReason,
     withinScope: isWithinScope, changeTargets: changeTargets, isFileWrite: isFileWriteCall,
-    planExempt: isPlanExemptTool, detail: refusalDetailForMode, retryLine: retryScopeLine };
+    planExempt: isPlanExemptTool, commandFinding: ruleCommandFinding, detail: refusalDetailForMode, retryLine: retryScopeLine };
 })();`
 
 /**
@@ -3082,6 +3098,7 @@ function intuticApprovedPlan(sessionId, workspaceId) {
 function intuticTrajectoryTier(snap, toolName, toolInput, sessionId, workspaceId) {
   var path = require('path');
   var shadow = null;
+  var commandVerdict = null;
   var scopes = snap.gateRecords.filter(function (r) { return r.kind === 'scope_paths'; });
   var targets = scopes.length > 0 ? intuticRuleLib.changeTargets(toolName, toolInput).map(function (t) { return t.target; }) : [];
   if (targets.length > 0) {
@@ -3107,6 +3124,14 @@ function intuticTrajectoryTier(snap, toolName, toolInput, sessionId, workspaceId
       if (!shadow) shadow = v;
     }
   }
+  var allows = snap.gateRecords.filter(function (r) { return r.kind === 'allow_commands'; });
+  ['enforce', 'shadow'].forEach(function (rollout) {
+    var group = allows.filter(function (r) { return r.rollout === rollout; });
+    var found = intuticRuleLib.commandFinding(group, { tool: String(toolName), input: toolInput });
+    if (found && !commandVerdict) commandVerdict = intuticRuleVerdict(group[0], found.code, found.ruleId, found.reason, found.scope);
+  });
+  if (commandVerdict && commandVerdict.verdict === 'block') return commandVerdict;
+  if (commandVerdict && !shadow) shadow = commandVerdict;
   var plans = snap.gateRecords.filter(function (r) { return r.kind === 'plan_approval'; });
   if (plans.length > 0 && !intuticRuleLib.planExempt(String(toolName))) {
     var prolls = ['enforce', 'shadow'];

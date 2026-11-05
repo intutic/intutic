@@ -76,7 +76,7 @@ function rulesLine(f: NonNullable<ReturnType<typeof gateRuleFallback>>): string 
 function snapshotFor(front: { requiresBefore?: Array<[string, string, boolean]>; scopePaths?: string[]; planApproval?: 'required' | 'strict' | null }, mode: 'shadow' | 'enforce' = 'enforce'): GateRuleRecord[] {
   const compiled = compileSopGateRecords(
     { sopId: SOP, sopTitle: 'Release gate' },
-    { roles: [], mode, requiresBefore: front.requiresBefore ?? [], scopePaths: front.scopePaths ?? [], scopePathsMode: front.scopePaths ? 'enforce' : 'advise', planApproval: front.planApproval ?? null },
+    { roles: [], mode, allowCommands: [], requiresBefore: front.requiresBefore ?? [], scopePaths: front.scopePaths ?? [], scopePathsMode: front.scopePaths ? 'enforce' : 'advise', planApproval: front.planApproval ?? null },
     sha256,
   )
   writeSnapshot(['@format\t3', ...compiled.records.map(encodeGateRuleRecord), ...compiled.fallbacks.map(rulesLine)])
@@ -244,7 +244,7 @@ describe('Tier R', () => {
   })
 
   it('drops scope and evidence in an OPAQUE workspace', async () => {
-    const compiled = compileSopGateRecords({ sopId: SOP, sopTitle: 'Scope' }, { roles: [], mode: 'enforce', requiresBefore: [], scopePaths: ['infra'], scopePathsMode: 'enforce', planApproval: null }, sha256)
+    const compiled = compileSopGateRecords({ sopId: SOP, sopTitle: 'Scope' }, { roles: [], mode: 'enforce', allowCommands: [], requiresBefore: [], scopePaths: ['infra'], scopePathsMode: 'enforce', planApproval: null }, sha256)
     writeSnapshot(['@format\t3', '@intervention_mode\tOPAQUE', ...compiled.records.map(encodeGateRuleRecord), ...compiled.fallbacks.map(rulesLine)])
     const gate = new Gate({ repoRoot: join(dir, 'repo'), workspaceId: WS, useHookGate: false, useSopRules: false }, client())
     const err = (await outcome(gate.guard('Write', { file_path: 'src/a.ts', content: 'x' }))) as IntuticGateRefusal

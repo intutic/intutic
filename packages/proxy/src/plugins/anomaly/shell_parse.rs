@@ -187,7 +187,9 @@ pub fn drop_carried_text(text: &str) -> String {
     let mut kept = 0;
     for pipeline in &pipelines {
         if let [only] = pipeline.as_slice() {
-            let carries = matches!(only.argv[0].as_str(), "echo" | "printf")
+            // `printf -v` keeps the text for whatever reads the variable.
+            let carries = only.argv[0] == "echo"
+                || (only.argv[0] == "printf" && only.argv.get(1).map(String::as_str) != Some("-v"))
                 || only
                     .argv
                     .starts_with(&["git".to_string(), "commit".to_string()]);
@@ -199,6 +201,63 @@ pub fn drop_carried_text(text: &str) -> String {
     }
     out.push_str(&text[kept..]);
     out
+}
+
+/// An `allow_commands:` entry as the words it allows and whether more may
+/// follow them, or `None` when it is not one plain command: `git status`, or
+/// `npm test *` for any further arguments. A word that could expand matches
+/// nothing exactly, so an entry may not hold one.
+fn allow_entry(entry: &str) -> Option<(Vec<String>, bool)> {
+    let open = entry.ends_with(" *");
+    let prefix = if open {
+        &entry[..entry.len() - 2]
+    } else {
+        entry
+    };
+    let mut pipelines = parse(prefix)?;
+    let [pipeline] = pipelines.as_mut_slice() else {
+        return None;
+    };
+    let [only] = pipeline.as_mut_slice() else {
+        return None;
+    };
+    let plain = only.literal
+        && !only
+            .argv
+            .iter()
+            .any(|w| w.contains(['$', '*', '?', '[', '~']));
+    plain.then(|| (std::mem::take(&mut only.argv), open))
+}
+
+/// Whether `entry` is one `allow_commands:` can use.
+pub fn is_allow_entry(entry: &str) -> bool {
+    allow_entry(entry).is_some()
+}
+
+/// The commands in `text` that `allow` does not allow, as written, in order.
+/// All of `text` when it did not parse, or when an entry cannot be read: an
+/// allow list that reaches no verdict allows nothing, the opposite of
+/// [`drop_carried_text`], which keeps its old behaviour on the same input.
+pub fn commands_outside_allow(text: &str, allow: &[String]) -> Vec<String> {
+    let entries: Option<Vec<_>> = allow.iter().map(|e| allow_entry(e)).collect();
+    let (Some(pipelines), Some(entries)) = (parse(text), entries) else {
+        return vec![text.to_string()];
+    };
+    pipelines
+        .iter()
+        .flatten()
+        .filter(|c| {
+            !entries.iter().any(|(argv, open)| {
+                let fits = if *open {
+                    c.argv.len() >= argv.len()
+                } else {
+                    c.literal && c.argv.len() == argv.len()
+                };
+                fits && c.argv.iter().zip(argv).all(|(a, b)| a == b)
+            })
+        })
+        .map(|c| text[c.start..c.end].to_string())
+        .collect()
 }
 
 #[cfg(test)]
@@ -230,6 +289,14 @@ mod tests {
                 case["parsed"],
                 "{text:?}"
             );
+        }
+        for case in doc["allow"].as_array().expect("allow") {
+            let text = case["text"].as_str().expect("text");
+            let allow: Vec<String> =
+                serde_json::from_value(case["allow"].clone()).expect("allow list");
+            let want: Vec<String> =
+                serde_json::from_value(case["outside"].clone()).expect("outside");
+            assert_eq!(commands_outside_allow(text, &allow), want, "{text:?}");
         }
     }
 }

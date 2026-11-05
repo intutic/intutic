@@ -135,6 +135,22 @@
     "mode": "required"
    },
    "line": "@rule\t-\tplan_approval\tshadow\teyJtb2RlIjoicmVxdWlyZWQiLCJyZWYiOiJzb3BfMDFIWlgjcGxhbl9hcHByb3ZhbDoxIiwic29wVGl0bGUiOiJQbGFucyBmaXJzdCIsInYiOjF9"
+  },
+  {
+   "name": "allow_commands",
+   "record": {
+    "v": 1,
+    "kind": "allow_commands",
+    "ref": "sop_01HZX#allow_commands:1",
+    "sopTitle": "Read only",
+    "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "commands": [
+     "git status",
+     "npm test *"
+    ]
+   },
+   "line": "@rule\tallow_commands-fallback:1@f748836cfb40\tallow_commands\tenforce\teyJjb21tYW5kcyI6WyJnaXQgc3RhdHVzIiwibnBtIHRlc3QgKiJdLCJyZWYiOiJzb3BfMDFIWlgjYWxsb3dfY29tbWFuZHM6MSIsInNvcFRpdGxlIjoiUmVhZCBvbmx5IiwidiI6MX0="
   }
  ],
  "served": [
@@ -387,6 +403,36 @@
      "mode": "required"
     }
    }
+  },
+  {
+   "sopId": "sop_01HZX",
+   "record": {
+    "v": 1,
+    "kind": "allow_commands",
+    "ref": "sop_01HZX#allow_commands:1",
+    "sopTitle": "Read only",
+    "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "commands": [
+     "git status",
+     "npm test *"
+    ]
+   },
+   "served": {
+    "sopId": "sop_01HZX",
+    "kind": "allow_commands",
+    "rollout": "enforce",
+    "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+    "payload": {
+     "v": 1,
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   }
   }
  ],
  "damaged": [
@@ -549,6 +595,26 @@
   {
    "name": "unknown plan mode",
    "line": "@rule\tplan_approval-fallback:1@f748836cfb40\tplan_approval\tenforce\teyJtb2RlIjoibG9vc2UiLCJyZWYiOiJzb3BfMDFIWlgjcGxhbl9hcHByb3ZhbDoxIiwic29wVGl0bGUiOiJQbGFucyBmaXJzdCIsInYiOjF9"
+  },
+  {
+   "name": "allow_commands with no entries",
+   "line": "@rule\tallow_commands-fallback:1@f748836cfb40\tallow_commands\tenforce\teyJjb21tYW5kcyI6W10sInJlZiI6InNvcF8wMUhaWCNhbGxvd19jb21tYW5kczoxIiwic29wVGl0bGUiOiJSZWFkIG9ubHkiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "an allow_commands entry that is two commands",
+   "line": "@rule\tallow_commands-fallback:1@f748836cfb40\tallow_commands\tenforce\teyJjb21tYW5kcyI6WyJhOyBiIl0sInJlZiI6InNvcF8wMUhaWCNhbGxvd19jb21tYW5kczoxIiwic29wVGl0bGUiOiJSZWFkIG9ubHkiLCJ2IjoxfQ=="
+  },
+  {
+   "name": "an allow_commands entry that could expand",
+   "line": "@rule\tallow_commands-fallback:1@f748836cfb40\tallow_commands\tenforce\teyJjb21tYW5kcyI6WyJscyAkWCJdLCJyZWYiOiJzb3BfMDFIWlgjYWxsb3dfY29tbWFuZHM6MSIsInNvcFRpdGxlIjoiUmVhZCBvbmx5IiwidiI6MX0="
+  },
+  {
+   "name": "an allow_commands entry with a tab",
+   "line": "@rule\tallow_commands-fallback:1@f748836cfb40\tallow_commands\tenforce\teyJjb21tYW5kcyI6WyJnaXRcdHN0YXR1cyJdLCJyZWYiOiJzb3BfMDFIWlgjYWxsb3dfY29tbWFuZHM6MSIsInNvcFRpdGxlIjoiUmVhZCBvbmx5IiwidiI6MX0="
+  },
+  {
+   "name": "too many allow_commands entries",
+   "line": "@rule\tallow_commands-fallback:1@f748836cfb40\tallow_commands\tenforce\teyJjb21tYW5kcyI6WyJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSIsImEiLCJhIiwiYSJdLCJyZWYiOiJzb3BfMDFIWlgjYWxsb3dfY29tbWFuZHM6MSIsInNvcFRpdGxlIjoiUmVhZCBvbmx5IiwidiI6MX0="
   }
  ],
  "fallbacks": [
@@ -702,6 +768,29 @@
     "adjacent": false
    },
    "fallback": null
+  },
+  {
+   "name": "allow_commands: every shell tool",
+   "record": {
+    "v": 1,
+    "kind": "allow_commands",
+    "ref": "sop_01HZX#allow_commands:1",
+    "sopTitle": "Read only",
+    "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+    "rollout": "enforce",
+    "commands": [
+     "git status",
+     "npm test *"
+    ]
+   },
+   "fallback": {
+    "id": "allow_commands-fallback:1@f748836cfb40",
+    "severity": "block",
+    "reason": "allow_commands (Read only): this gate cannot check a command against the list, so every shell call is refused; upgrade the Intutic gate",
+    "subject": "tool",
+    "source": " [^ ]*(bash|shell|run_command|runcommand|execute_command|run_shell_command|terminal|execute|exec) ",
+    "ignoreCase": true
+   }
   }
  ],
  "compile": [
@@ -860,6 +949,31 @@
    "front": "\nrequires_before: action:deploy -> action:run_tests[ok]\n",
    "records": [],
    "fallbackIds": []
+  },
+  {
+   "name": "allow_commands",
+   "entry": {
+    "sopId": "local:release.md",
+    "sopTitle": "Read only"
+   },
+   "front": "\nallow_commands: git status, npm test *\n",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "local:release.md#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@fff7007bb279",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "fallbackIds": [
+    "allow_commands-fallback:1@fff7007bb279"
+   ]
   }
  ],
  "evaluate": [
@@ -2490,6 +2604,438 @@
     "nowMs": 2000
    },
    "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "an allowed command",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git status"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "an allowed command with further arguments",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "npm test -- --ci"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "every command in the call must be allowed",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git status && git push"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "COMMAND_NOT_ALLOWED",
+    "ruleId": "allow_commands.Read only",
+    "reason": "Not on the allowed command list: git push (allowed: git status, npm test *)",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#allow_commands:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a command the parser cannot read is refused",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git status > f"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "COMMAND_NOT_ALLOWED",
+    "ruleId": "allow_commands.Read only",
+    "reason": "Not on the allowed command list: git status > f (allowed: git status, npm test *)",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#allow_commands:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a shell call with no command is refused",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {},
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "COMMAND_NOT_ALLOWED",
+    "ruleId": "allow_commands.Read only",
+    "reason": "Not on the allowed command list: (no command) (allowed: git status, npm test *)",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#allow_commands:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "another tool is not covered",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Read",
+    "input": {
+     "command": "anything"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "a namespaced shell tool is covered",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "mcp__sh__bash",
+    "input": {
+     "command": "git push"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "COMMAND_NOT_ALLOWED",
+    "ruleId": "allow_commands.Read only",
+    "reason": "Not on the allowed command list: git push (allowed: git status, npm test *)",
+    "scope": {
+     "tools": [
+      "mcp__sh__bash"
+     ]
+    },
+    "ref": "sop_01HZX#allow_commands:1"
+   },
+   "shadow": []
+  },
+  {
+   "name": "a shadow record reports and refuses nothing",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": null,
+     "rollout": "shadow",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git push"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": [
+    {
+     "code": "COMMAND_NOT_ALLOWED",
+     "ruleId": "allow_commands.Read only",
+     "reason": "Not on the allowed command list: git push (allowed: git status, npm test *)",
+     "scope": {
+      "tools": [
+       "Bash"
+      ]
+     },
+     "ref": "sop_01HZX#allow_commands:1"
+    }
+   ]
+  },
+  {
+   "name": "lists are a union",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    },
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZY#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git diff"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git diff"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": null,
+   "shadow": []
+  },
+  {
+   "name": "every command key is checked",
+   "records": [
+    {
+     "v": 1,
+     "kind": "allow_commands",
+     "ref": "sop_01HZX#allow_commands:1",
+     "sopTitle": "Read only",
+     "fallbackId": "allow_commands-fallback:1@f748836cfb40",
+     "rollout": "enforce",
+     "commands": [
+      "git status",
+      "npm test *"
+     ]
+    }
+   ],
+   "call": {
+    "tool": "Bash",
+    "input": {
+     "command": "git status",
+     "cmd": "rm -rf x"
+    },
+    "actions": [],
+    "cwd": "/repo",
+    "root": "/repo",
+    "sessionId": "s1",
+    "harness": "claude-code",
+    "outcomes": null,
+    "observable": true,
+    "plan": {
+     "status": "none"
+    },
+    "nowMs": 2000
+   },
+   "refusal": {
+    "code": "COMMAND_NOT_ALLOWED",
+    "ruleId": "allow_commands.Read only",
+    "reason": "Not on the allowed command list: rm -rf x (allowed: git status, npm test *)",
+    "scope": {
+     "tools": [
+      "Bash"
+     ]
+    },
+    "ref": "sop_01HZX#allow_commands:1"
+   },
    "shadow": []
   }
  ],
