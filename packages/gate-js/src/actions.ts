@@ -19,6 +19,7 @@
  */
 
 import { hasPhrase, phraseText, type PhraseText } from './phrases.js'
+import { dropCarriedText } from './shellParse.js'
 
 export const ACTION_PREFIX = 'action:'
 
@@ -260,12 +261,13 @@ export const INFRA_PATH_FRAGMENTS: readonly string[] = [
  * nested value — spacing changes which patterns can straddle a value
  * boundary.
  */
-export function flattenInput(value: unknown): string {
-  if (typeof value === 'string') return value.toLowerCase()
-  if (Array.isArray(value)) return value.map((v) => ' ' + flattenInput(v)).join('')
+export function flattenInput(value: unknown, leaf: (s: string) => string = (s) => s): string {
+  // `leaf` sees each string on its own: a quote in one value must not change how another is read.
+  if (typeof value === 'string') return leaf(value).toLowerCase()
+  if (Array.isArray(value)) return value.map((v) => ' ' + flattenInput(v, leaf)).join('')
   if (value !== null && typeof value === 'object') {
     return Object.values(value as Record<string, unknown>)
-      .map((v) => ' ' + flattenInput(v))
+      .map((v) => ' ' + flattenInput(v, leaf))
       .join('')
   }
   // Numbers, booleans and null/undefined contribute nothing.
@@ -379,12 +381,14 @@ export function removesOutsideTree(args: string): boolean {
  * sequence.
  */
 export function classify(toolName: string, toolInput: unknown): string[] {
-  const args = flattenInput(toolInput)
+  // What a command only carries is not what it does: a commit message saying `git push` pushes nothing.
+  const shell = toolIs(toolName, SHELL_TOOLS)
+  const args = shell ? flattenInput(toolInput, dropCarriedText) : flattenInput(toolInput)
   const actions: string[] = []
   // Cut into words once, for every phrase list below (see phrases.ts).
   const words = phraseText(args)
 
-  if (toolIs(toolName, SHELL_TOOLS)) {
+  if (shell) {
     // Tests first: `make test && git push` is both, and the ordering rule
     // needs the test to be seen as having happened before the deploy.
     if (matchesPhrase(words, TEST_PATTERNS)) actions.push('run_tests')

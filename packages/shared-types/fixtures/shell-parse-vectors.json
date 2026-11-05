@@ -1,0 +1,573 @@
+{
+  "$comment": "Shell commands and how every parser must read them: packages/proxy shell_parse.rs, @intutic/gate shellParse.ts, intutic-clawde gate/shell_parse.py. `parsed` is a list of pipelines, each a list of simple commands: argv after quote removal, and literal, false when a word still holds an expansion or glob, so argv is not exactly what runs. parsed is null when the text is not confidently understood: a redirect, subshell, group, substitution, heredoc, control word, unterminated quote or stray operator. Null is the answer that fails safe: every caller must keep its old behaviour on it.",
+  "cases": [
+    {
+      "text": "git status",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "git",
+              "status"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "git  commit\t-m x",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "git",
+              "commit",
+              "-m",
+              "x"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "git commit -m \"fix git push\"",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "git",
+              "commit",
+              "-m",
+              "fix git push"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo 'a b' \"c d\" e\\ f",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "a b",
+              "c d",
+              "e f"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo ''",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              ""
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "\"echo\" x",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "x"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "ec\\ho x",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "x"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo \"a\\\"b\\$c\\qd\"",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "a\"b$c\\qd"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo 'it'\"'\"'s'",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "it's"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "git \\\ncommit",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "git",
+              "commit"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "a; b",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "a"
+            ],
+            "literal": true
+          }
+        ],
+        [
+          {
+            "argv": [
+              "b"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "a && b || c",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "a"
+            ],
+            "literal": true
+          }
+        ],
+        [
+          {
+            "argv": [
+              "b"
+            ],
+            "literal": true
+          }
+        ],
+        [
+          {
+            "argv": [
+              "c"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "a & b",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "a"
+            ],
+            "literal": true
+          }
+        ],
+        [
+          {
+            "argv": [
+              "b"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "a\nb",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "a"
+            ],
+            "literal": true
+          }
+        ],
+        [
+          {
+            "argv": [
+              "b"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "a | b",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "a"
+            ],
+            "literal": true
+          },
+          {
+            "argv": [
+              "b"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "a |& b",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "a"
+            ],
+            "literal": true
+          },
+          {
+            "argv": [
+              "b"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "a |\n  b",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "a"
+            ],
+            "literal": true
+          },
+          {
+            "argv": [
+              "b"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo hi # a | b",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "hi"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "# only a comment",
+      "parsed": []
+    },
+    {
+      "text": "",
+      "parsed": []
+    },
+    {
+      "text": "echo a#b",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "a#b"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo $HOME",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "$HOME"
+            ],
+            "literal": false
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo \"$HOME\"",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "$HOME"
+            ],
+            "literal": false
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo '$HOME'",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "$HOME"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo \\$HOME",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "$HOME"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "ls *.py",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "ls",
+              "*.py"
+            ],
+            "literal": false
+          }
+        ]
+      ]
+    },
+    {
+      "text": "ls ~",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "ls",
+              "~"
+            ],
+            "literal": false
+          }
+        ]
+      ]
+    },
+    {
+      "text": "FOO=bar git push",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "FOO=bar",
+              "git",
+              "push"
+            ],
+            "literal": false
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo été",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "été"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo x > f",
+      "parsed": null
+    },
+    {
+      "text": "cat < f",
+      "parsed": null
+    },
+    {
+      "text": "cat <<EOF\nx\nEOF",
+      "parsed": null
+    },
+    {
+      "text": "a 2>&1",
+      "parsed": null
+    },
+    {
+      "text": "(a)",
+      "parsed": null
+    },
+    {
+      "text": "{ a; }",
+      "parsed": null
+    },
+    {
+      "text": "a $(b)",
+      "parsed": null
+    },
+    {
+      "text": "a `b`",
+      "parsed": null
+    },
+    {
+      "text": "a \"$(b)\"",
+      "parsed": null
+    },
+    {
+      "text": "a \"`b`\"",
+      "parsed": null
+    },
+    {
+      "text": "a <(b)",
+      "parsed": null
+    },
+    {
+      "text": "echo 'x",
+      "parsed": null
+    },
+    {
+      "text": "echo \"x",
+      "parsed": null
+    },
+    {
+      "text": "echo x\\",
+      "parsed": null
+    },
+    {
+      "text": "a |",
+      "parsed": null
+    },
+    {
+      "text": "| a",
+      "parsed": null
+    },
+    {
+      "text": "a ;; b",
+      "parsed": null
+    },
+    {
+      "text": "if a; then b; fi",
+      "parsed": null
+    },
+    {
+      "text": "for i in 1; do\n  echo x\ndone",
+      "parsed": null
+    },
+    {
+      "text": "while a; do b; done",
+      "parsed": null
+    },
+    {
+      "text": "case a in b) c;; esac",
+      "parsed": null
+    },
+    {
+      "text": "function f",
+      "parsed": null
+    },
+    {
+      "text": "alias a=b",
+      "parsed": null
+    },
+    {
+      "text": "coproc a",
+      "parsed": null
+    },
+    {
+      "text": "echo \"<>(){}\"",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "<>(){}"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    },
+    {
+      "text": "echo 'a | b; c'",
+      "parsed": [
+        [
+          {
+            "argv": [
+              "echo",
+              "a | b; c"
+            ],
+            "literal": true
+          }
+        ]
+      ]
+    }
+  ]
+}

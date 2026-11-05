@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 
 from .phrases import has_phrase, phrase_text
+from .shell_parse import drop_carried_text
 
 ACTION_PREFIX = "action:"
 
@@ -237,7 +238,7 @@ INFRA_PATH_FRAGMENTS = [
 ]
 
 
-def flatten_input(value) -> str:
+def flatten_input(value, leaf=lambda s: s) -> str:
     """Concatenate the string-ish values of a tool's arguments, lowercased.
 
     Which key holds the command varies by harness (`command`, `cmd`, `script`,
@@ -246,13 +247,15 @@ def flatten_input(value) -> str:
 
     Mirrors the Rust exactly, including the leading space before each nested
     value — spacing changes which patterns can straddle a value boundary.
+    `leaf` sees each string on its own: a quote in one value must not change
+    how another is read.
     """
     if isinstance(value, str):
-        return value.lower()
+        return leaf(value).lower()
     if isinstance(value, (list, tuple)):
-        return "".join(" " + flatten_input(v) for v in value)
+        return "".join(" " + flatten_input(v, leaf) for v in value)
     if isinstance(value, dict):
-        return "".join(" " + flatten_input(v) for v in value.values())
+        return "".join(" " + flatten_input(v, leaf) for v in value.values())
     # Numbers, bools and null contribute nothing, as in the Rust `_ => {}` arm.
     return ""
 
@@ -372,12 +375,15 @@ def classify(tool_name: str, tool_input) -> list[str]:
     Returns prefixed tokens (`action:deploy`, ...) in the order the Rust emits
     them. Order matters: the ordering detectors read position in the sequence.
     """
-    args = flatten_input(tool_input)
+    # What a command only carries is not what it does: a commit message saying
+    # `git push` pushes nothing.
+    shell = tool_is(tool_name, SHELL_TOOLS)
+    args = flatten_input(tool_input, drop_carried_text if shell else lambda s: s)
     actions: list[str] = []
     # Cut into words once, for every phrase list below.
     words = phrase_text(args)
 
-    if tool_is(tool_name, SHELL_TOOLS):
+    if shell:
         # Tests first: `make test && git push` is both, and the ordering rule
         # needs the test to be seen as having happened before the deploy.
         if matches_phrase(words, TEST_PATTERNS):

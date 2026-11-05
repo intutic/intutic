@@ -535,21 +535,27 @@ pub(crate) const FETCH_TOOLS: &[&str] =
 /// `file_path`, `path`, `url`), and a new harness will invent another. Reading
 /// every string value means an unknown key still classifies correctly.
 fn flatten_input(input: &serde_json::Value) -> String {
+    flatten_with(input, &str::to_string)
+}
+
+/// [`flatten_input`], with `leaf` applied to each string on its own: a quote in
+/// one value must not change how another is read.
+fn flatten_with(input: &serde_json::Value, leaf: &dyn Fn(&str) -> String) -> String {
     let mut out = String::new();
     match input {
         serde_json::Value::String(s) => {
-            out.push_str(&s.to_lowercase());
+            out.push_str(&leaf(s).to_lowercase());
         }
         serde_json::Value::Array(items) => {
             for item in items {
                 out.push(' ');
-                out.push_str(&flatten_input(item));
+                out.push_str(&flatten_with(item, leaf));
             }
         }
         serde_json::Value::Object(map) => {
             for value in map.values() {
                 out.push(' ');
-                out.push_str(&flatten_input(value));
+                out.push_str(&flatten_with(value, leaf));
             }
         }
         _ => {}
@@ -638,6 +644,9 @@ pub fn classify(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
     let mut actions: Vec<&'static str> = Vec::new();
 
     if tool_is(tool_name, SHELL_TOOLS) {
+        // What a command only carries is not what it does: a commit message
+        // saying `git push` pushes nothing.
+        let args = flatten_with(input, &super::shell_parse::drop_carried_text);
         // Tests first: `npm test && git push` is both, and the ordering rule
         // needs the test to be seen as having happened before the deploy.
         if matches_phrase(&args, &TEST_PHRASES, TEST_PATTERNS) {
