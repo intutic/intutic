@@ -99,6 +99,12 @@ def test_shared_vector_classifies_as_nothing(command):
     assert actions.classify("bash", {"command": command}) == []
 
 
+@pytestmark_parity
+@pytest.mark.parametrize("command,token", _vectors().get("falsePositives", []))
+def test_shared_vector_is_not_read_as(command, token):
+    assert token not in actions.classify("bash", {"command": command})
+
+
 def _adversarial():
     v = _vectors()
     return v.get("adversarial", [])

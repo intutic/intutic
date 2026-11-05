@@ -585,6 +585,45 @@ fn matches_any(haystack: &str, patterns: &[&str]) -> bool {
     patterns.iter().any(|p| haystack.contains(p))
 }
 
+/// Words after `update` in which its `set` may stand: `update t1 join t2 on
+/// t1.id = t2.id set` is eight.
+const SQL_UPDATE_WINDOW: usize = 8;
+
+/// A whole word `update` with a `set` soon after it. No phrase can say this, so
+/// it runs beside the needles, like [`is_outside_tree_rm_rf`]. Alone, `update `
+/// is any commit message or status report; script bodies stay in `args`, because
+/// a heredoc into a file may run in the same command.
+fn is_sql_update(args: &str) -> bool {
+    static GAP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let words: Vec<&str> = GAP
+        .get_or_init(|| regex::Regex::new(SQL_GAP).expect("static gap"))
+        .split(args)
+        .collect();
+    words.iter().enumerate().any(|(i, word)| {
+        let opens = word.strip_suffix("update").is_some_and(|rest| {
+            !rest
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        });
+        opens
+            && words[i + 1..]
+                .iter()
+                .take(SQL_UPDATE_WINDOW)
+                .any(|w| *w == "set" || w.starts_with("set("))
+    })
+}
+
+/// `db_write` from the needles, with `update ` held to its SQL shape.
+fn is_db_write(args: &str) -> bool {
+    DB_WRITE_PATTERNS
+        .iter()
+        .zip(DB_WRITE_PHRASES.get_or_init(|| phrases(DB_WRITE_PATTERNS)))
+        .any(|(pattern, phrase)| {
+            phrase.is_match(args) && (*pattern != "update " || is_sql_update(args))
+        })
+}
+
 pub(crate) fn tool_is(name: &str, group: &[&str]) -> bool {
     let lower = name.to_lowercase();
     group.iter().any(|t| lower == *t || lower.ends_with(t))
@@ -625,7 +664,8 @@ pub fn classify(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
         //
         // Causally the read happens before the send, so listing it first is also
         // simply the truthful expansion.
-        if matches_any(&args, SECRET_PATH_FRAGMENTS) {
+        // `.env` is a file; `os.environ` in a script reads no secret.
+        if matches_any(&args.replace(".environ", ""), SECRET_PATH_FRAGMENTS) {
             actions.push("secret_read");
         }
         if matches_any(&args, PII_PATH_FRAGMENTS) {
@@ -634,7 +674,7 @@ pub fn classify(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
         if matches_phrase(&args, &HTTP_POST_PHRASES, HTTP_POST_PATTERNS) {
             actions.push("http_post");
         }
-        if matches_phrase(&args, &DB_WRITE_PHRASES, DB_WRITE_PATTERNS) {
+        if is_db_write(&args) {
             actions.push("db_write");
         }
         // The tokens 3.0 added, after the eight above so every command
@@ -776,6 +816,17 @@ mod tests {
             assert!(
                 classify("Bash", &json!({ "command": cmd })).is_empty(),
                 "{cmd:?}"
+            );
+        }
+        for v in vectors["falsePositives"]
+            .as_array()
+            .expect("falsePositives")
+        {
+            let cmd = v[0].as_str().expect("command");
+            let token = v[1].as_str().expect("token");
+            assert!(
+                !classify("Bash", &json!({ "command": cmd })).contains(&token.to_string()),
+                "{cmd:?} is not {token}"
             );
         }
     }

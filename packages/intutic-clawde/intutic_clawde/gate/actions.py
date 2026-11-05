@@ -261,6 +261,40 @@ def matches_any(haystack: str, patterns: list[str]) -> bool:
     return any(p in haystack for p in patterns)
 
 
+# Words after `update` in which its `set` may stand: `update t1 join t2 on
+# t1.id = t2.id set` is eight.
+SQL_UPDATE_WINDOW = 8
+
+
+def is_sql_update(words) -> bool:
+    """A whole word `update` with a `set` soon after it.
+
+    No phrase can say this, so it runs beside the needles, like
+    removes_outside_tree. Alone, `update ` is any commit message or status
+    report; script bodies stay in the text, because a heredoc into a file may
+    run in the same command.
+    """
+    toks = words.toks
+    for i, tok in enumerate(toks):
+        if not tok.endswith("update"):
+            continue
+        before = tok[-7:-6]
+        if before == "_" or before.isascii() and before.isalnum():
+            continue
+        for later in toks[i + 1 : i + 1 + SQL_UPDATE_WINDOW]:
+            if later == "set" or later.startswith("set("):
+                return True
+    return False
+
+
+def is_db_write(words) -> bool:
+    """`db_write` from the needles, with `update ` held to its SQL shape."""
+    return any(
+        has_phrase(words, p) and (p != "update " or is_sql_update(words))
+        for p in DB_WRITE_PATTERNS
+    )
+
+
 def matches_phrase(words, patterns: list[str]) -> bool:
     """matches_any for a phrase list, whatever separates each phrase's words.
 
@@ -356,13 +390,14 @@ def classify(tool_name: str, tool_input) -> list[str]:
             actions.append("release")
         # Source before sink, so that (secret_read -> http_post) can still fire
         # on a single command that does both.
-        if matches_any(args, SECRET_PATH_FRAGMENTS):
+        # `.env` is a file; `os.environ` in a script reads no secret.
+        if matches_any(args.replace(".environ", ""), SECRET_PATH_FRAGMENTS):
             actions.append("secret_read")
         if matches_any(args, PII_PATH_FRAGMENTS):
             actions.append("pii_export")
         if matches_phrase(words, HTTP_POST_PATTERNS):
             actions.append("http_post")
-        if matches_phrase(words, DB_WRITE_PATTERNS):
+        if is_db_write(words):
             actions.append("db_write")
         # The newer tokens, after the eight, in this order in every
         # classifier: each is a lane (see TOKEN_CLASS), not an ordering step.

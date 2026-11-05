@@ -280,6 +280,33 @@ function matchesPhrase(words: PhraseText, patterns: readonly string[]): boolean 
   return patterns.some((p) => hasPhrase(words, p))
 }
 
+/** Words after `update` in which its `set` may stand: `update t1 join t2 on t1.id = t2.id set` is eight. */
+const SQL_UPDATE_WINDOW = 8
+
+/**
+ * A whole word `update` with a `set` soon after it. No phrase can say this, so
+ * it runs beside the needles, like {@link removesOutsideTree}. Alone, `update `
+ * is any commit message or status report; script bodies stay in the text,
+ * because a heredoc into a file may run in the same command.
+ */
+function isSqlUpdate(words: PhraseText): boolean {
+  const { toks } = words
+  for (let i = 0; i < toks.length; i++) {
+    const tok = toks[i]!
+    if (!tok.endsWith('update')) continue
+    const before = tok.charAt(tok.length - 7)
+    if ((before >= 'a' && before <= 'z') || (before >= '0' && before <= '9') || before === '_') continue
+    const end = Math.min(i + SQL_UPDATE_WINDOW, toks.length - 1)
+    for (let j = i + 1; j <= end; j++) if (toks[j] === 'set' || toks[j]!.startsWith('set(')) return true
+  }
+  return false
+}
+
+/** `db_write` from the needles, with `update ` held to its SQL shape. */
+function isDbWrite(words: PhraseText): boolean {
+  return DB_WRITE_PATTERNS.some((p) => hasPhrase(words, p) && (p !== 'update ' || isSqlUpdate(words)))
+}
+
 export function matchesAny(haystack: string, patterns: readonly string[]): boolean {
   return patterns.some((p) => haystack.includes(p))
 }
@@ -366,10 +393,11 @@ export function classify(toolName: string, toolInput: unknown): string[] {
     if (matchesPhrase(words, RELEASE_PATTERNS)) actions.push('release')
     // Source before sink, so that (secret_read -> http_post) can still fire
     // on a single command that does both.
-    if (matchesAny(args, SECRET_PATH_FRAGMENTS)) actions.push('secret_read')
+    // `.env` is a file; `os.environ` in a script reads no secret.
+    if (matchesAny(args.split('.environ').join(''), SECRET_PATH_FRAGMENTS)) actions.push('secret_read')
     if (matchesAny(args, PII_PATH_FRAGMENTS)) actions.push('pii_export')
     if (matchesPhrase(words, HTTP_POST_PATTERNS)) actions.push('http_post')
-    if (matchesPhrase(words, DB_WRITE_PATTERNS)) actions.push('db_write')
+    if (isDbWrite(words)) actions.push('db_write')
     // The newer tokens, after the eight, in this order in every
     // classifier: each is a lane (lanes.ts), not an ordering step.
     if (matchesPhrase(words, MIGRATE_PATTERNS)) actions.push('migrate')
