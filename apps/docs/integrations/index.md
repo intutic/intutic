@@ -178,7 +178,7 @@ What each one compiles into the policy snapshot every gate reads:
 |---|---|---|
 | Built-in protections, destructive-command and skill tiers | Yes | Yes |
 | `review_before:` tokens and `closed_lanes:` lane holds from `.intutic/sops/` | Refused outright: with no control plane, nothing could approve a hold | Held for approval |
-| Rule records from `.intutic/sops/` (qualified `requires_before:`, `scope_paths:` under `scope_paths_mode: enforce`, `plan_approval:`) | Yes; `plan_approval:` refuses every gated call that is not a read, since no plan can be approved | Yes |
+| Rule records from `.intutic/sops/` (qualified `requires_before:`, `scope_paths:` under `scope_paths_mode: enforce`, `allow_commands:`, `plan_approval:`) | Yes; `plan_approval:` refuses every gated call that is not a read, since no plan can be approved | Yes |
 | `decide:` rules | From `.intutic/sops/`, with the pins `intutic decide eval` wrote | From the control plane only |
 | Workspace policy (`BLOCK:` SOPs, guardrails, MCP allowlist and registry, group rules) | No | Yes |
 | Proxy routing for each harness (base URLs, proxy settings) | Only with `--route` | Yes |

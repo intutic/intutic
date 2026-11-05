@@ -96,6 +96,7 @@ import {
   compileSopGateRecords,
   encodeGateRuleRecord,
   fromServedGateRecord,
+  GATE_RULE_KINDS,
   gateRuleFallback,
   laneHoldPatterns as laneHoldPatternSpecs,
   laneHoldRuleId,
@@ -105,6 +106,7 @@ import {
   type GateRuleFallback,
   type GateRuleRecord,
   type ParsedFrontMatter,
+  type GateRuleKind,
   type ServedGateRecord,
 } from '@intutic/shared-types'
 import { toRulesLine, GATE_VERSION, RULES_COLUMNS } from '../harness/gateBody.js'
@@ -639,7 +641,7 @@ export function parseServedGateRecords(value: unknown): ServedGateRecord[] {
     if (typeof r !== 'object' || r === null) continue
     const x = r as Record<string, unknown>
     if (
-      (x.kind === 'requires_outcome' || x.kind === 'scope_paths' || x.kind === 'plan_approval') &&
+      GATE_RULE_KINDS.includes(x.kind as GateRuleKind) &&
       (x.rollout === 'shadow' || x.rollout === 'enforce') &&
       (x.fallbackId === null || typeof x.fallbackId === 'string') &&
       typeof x.payload === 'object' && x.payload !== null && !Array.isArray(x.payload)
@@ -647,7 +649,7 @@ export function parseServedGateRecords(value: unknown): ServedGateRecord[] {
       const payload = x.payload as ServedGateRecord['payload']
       const ref = typeof payload.ref === 'string' ? payload.ref : ''
       const sopId = typeof x.sopId === 'string' ? x.sopId : ref.slice(0, Math.max(0, ref.lastIndexOf('#')))
-      out.push({ sopId, kind: x.kind, rollout: x.rollout, fallbackId: x.fallbackId, payload })
+      out.push({ sopId, kind: x.kind as GateRuleKind, rollout: x.rollout, fallbackId: x.fallbackId, payload })
     }
   }
   return out

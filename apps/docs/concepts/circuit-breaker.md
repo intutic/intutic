@@ -114,14 +114,14 @@ The policy check then compares the workspace's token count and session count for
 
 ## 2. Loop breaker
 
-Detects when an agent is stuck calling the same tool over and over.
+Detects when an agent is stuck making the same call over and over.
 
-**Algorithm:** consecutive-run counting over the session's tool sequence
-1. Walk the tool sequence, counting the current run of identical consecutive calls
-2. A run of **5 or more** raises a finding, with confidence scaled by how far past the
-   threshold the run has gone
-3. An intervening different tool resets the run — a repeated tool that is making progress
-   between calls does not trip it
+**Algorithm:** consecutive-run counting at the end of the session's tool sequence
+1. A call is its tool and its arguments, so five different searches or shell commands are
+   five steps, not a run
+2. Count the run of identical calls that ends at the latest call. A run of **5 or more**
+   raises a finding, with confidence scaled by how far past the threshold the run has gone
+3. Any other call ends the run, and a run the agent has moved on from no longer counts
 
 ```rust
 // packages/proxy/src/plugins/anomaly/detectors.rs

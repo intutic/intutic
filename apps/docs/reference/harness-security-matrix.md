@@ -32,8 +32,8 @@ through the decisions API themselves; see [Holds](/reference/gate-sdk#holds).
 
 Since gate body v23 the tiers run in one order at every gate: refusals first
 (the built-in rules, the snapshot's block rules, a qualified `requires_before`,
-the MCP registry and allowlist), then holds, then `scope_paths` and
-`plan_approval`, then decide rules. A held call is held whatever a decide rule
+the MCP registry and allowlist), then holds, then `scope_paths`,
+`plan_approval` and `allow_commands`, then decide rules. A held call is held whatever a decide rule
 would say; only an approved bypass releases it.
 
 ### Refusal codes in a JSON decision {#hook-refusal-codes}
@@ -52,10 +52,10 @@ so its reason ends with the code instead, `(refusal code SERVER_BLOCKED)`. The
 harnesses that read the exit code get the refusal as text on stderr, with the
 rule id in brackets.
 
-A refusal by a `requires_before … [ok]`, `scope_paths` or `plan_approval` rule
+A refusal by a `requires_before … [ok]`, `scope_paths`, `plan_approval` or `allow_commands` rule
 also says where to retry: the JSON decision carries `scope` beside `code` and
 `ruleId` (`{"paths": [...]}` for `OUT_OF_SCOPE`, `{"tools": [...], "step": ...}`
-for `PREREQUISITE_UNMET`, `{"tools": [...]}` for a plan refusal; each list at
+for `PREREQUISITE_UNMET`, `{"tools": [...]}` for a plan or command refusal; each list at
 most 8 items, each string at most 256 characters), and an exit-code harness
 gets one more stderr line, `[Intutic] Retry scope: <paths, else tools>`. An
 OPAQUE workspace gets neither, as it gets no rule id.
@@ -119,8 +119,14 @@ through the rule's `requires_outcome-fallback:` line.
 
 ### Scope and plan at the hook gates {#scope-and-plan}
 
-Two SOP keys refuse at every hook gate since gate body v23 (SOPs with no
-`roles:` only: a hook gate knows no agent role):
+These SOP keys refuse at every hook gate, `allow_commands:` since gate body
+v24 and the others since v23 (SOPs with no `roles:` only: a hook gate knows no
+agent role):
+
+- **`allow_commands:`** — a shell call with a command that is not on the list,
+  or that the gate cannot read as plain commands, is refused
+  `COMMAND_NOT_ALLOWED`. See
+  [Allowed commands](/reference/sop-front-matter#allowed-commands).
 
 - **`scope_paths_mode: enforce`** — a file change (a write, edit, delete or
   move tool) whose target, made relative to the workspace root (the nearest

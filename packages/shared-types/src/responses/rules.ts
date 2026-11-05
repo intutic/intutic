@@ -5,6 +5,7 @@
  */
 import { z } from 'zod'
 import { ChangeClassification, ComplexityTier, RiskLevel, SopLifecycleState } from '../enums.js'
+import { GATE_RULE_KINDS, type GateRuleKind } from '../gateRuleRecord.js'
 import { PII_ACTIONS, PII_DETECTOR_IDS } from '../piiDetectors.js'
 import { DeletedResponse, IsoTimestamp, listEnvelope } from './common.js'
 import { ServedDecideRuleResponse } from './decide.js'
@@ -247,7 +248,7 @@ export type ServedHoldRuleResponse = z.infer<typeof ServedHoldRuleResponse>
 /** A `@rule` record a workspace SOP compiles to; the daemon encodes the line and its fallback. */
 export const ServedGateRecordResponse = z.object({
   sopId: z.string(),
-  kind: z.enum(['requires_outcome', 'scope_paths', 'plan_approval']),
+  kind: z.enum(GATE_RULE_KINDS as readonly [GateRuleKind, ...GateRuleKind[]]),
   rollout: z.enum(['shadow', 'enforce']),
   fallbackId: z.string().nullable().describe('`<kind>-fallback:<n>@<sha256(sopId)[:12]>`; null for a shadow record, which has no fallback line.'),
   payload: z.object({ v: z.literal(1), ref: z.string(), sopTitle: z.string() }).passthrough().describe('The record\'s canonical JSON payload: `{v, ref, sopTitle, …kind fields}`.'),
@@ -256,7 +257,7 @@ export type ServedGateRecordResponse = z.infer<typeof ServedGateRecordResponse>
 
 /** `GET /api/v1/policy/resolve`, with the 3.0 fields. */
 export const PolicyResolveGatesResponse = PolicyResolveResponse.extend({
-  gateRecords: z.array(ServedGateRecordResponse).describe('Qualified `requires_before`, enforced `scope_paths` and `plan_approval` of the enforced SOPs with no `roles:`.'),
+  gateRecords: z.array(ServedGateRecordResponse).describe('Qualified `requires_before`, enforced `scope_paths`, `plan_approval` and `allow_commands` of the enforced SOPs with no `roles:`.'),
   holdRules: z.array(ServedHoldRuleResponse).describe('Closed-lane holds (SOP `closed_lanes:` and the workspace `closedLanes`) and revert holds.'),
   revertHolds: z
     .array(z.object({ subject: z.string(), revertRate: z.number().nullable(), rejectionRate: z.number().nullable() }))
