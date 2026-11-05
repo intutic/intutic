@@ -12,7 +12,7 @@
 import { createRequire } from 'node:module'
 import { loadCredentials } from '../config/store.js'
 import { resolveControlPlaneUrl } from '../config/paths.js'
-import { createApiClient } from './api.js'
+import { createApiClient, type ApiClient } from './api.js'
 import { readEnforcementState } from './enforcementState.js'
 import { inventoryDeviceIdentity } from './inventory.js'
 
@@ -25,6 +25,8 @@ export interface DeviceReportResult {
 
 export interface ReportDeviceStateOptions {
   dev?: boolean
+  /** A client already signed in, as `connect --api-key` has without saved credentials. */
+  client?: Pick<ApiClient, 'post'>
 }
 
 /**
@@ -36,8 +38,8 @@ export interface ReportDeviceStateOptions {
  */
 export async function reportDeviceState(opts: ReportDeviceStateOptions = {}): Promise<DeviceReportResult> {
   try {
-    const creds = await loadCredentials()
-    if (!creds) return { reported: false, reason: 'not authenticated' }
+    const creds = opts.client ? null : await loadCredentials()
+    if (!opts.client && !creds) return { reported: false, reason: 'not authenticated' }
 
     const state = await readEnforcementState()
     if (!state) return { reported: false, reason: 'no local enforcement state recorded yet' }
@@ -58,7 +60,7 @@ export async function reportDeviceState(opts: ReportDeviceStateOptions = {}): Pr
       body.systemHooks = { installed: state.systemHooks.installed, path: state.systemHooks.path }
     }
 
-    const client = createApiClient(resolveControlPlaneUrl(opts.dev), creds.apiKey)
+    const client = opts.client ?? createApiClient(resolveControlPlaneUrl(opts.dev), creds!.apiKey)
     await client.post('/api/v1/devices/report', body)
     return { reported: true }
   } catch (err) {

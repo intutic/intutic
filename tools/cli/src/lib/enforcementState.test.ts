@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import {
   enforcementStatePath,
@@ -49,7 +49,7 @@ describe('writeEnforcementState / readEnforcementState', () => {
 
   it('reading a nonexistent file returns null rather than throwing', async () => {
     path = join(tmpdir(), `intutic-enforcement-state-${randomUUID()}.json`)
-    expect(await readEnforcementState(path)).toBeNull()
+    expect(await readEnforcementState(path, `${path}.user`)).toBeNull()
   })
 
   it('writing one leg does not blank out a previously-written leg', async () => {
@@ -60,7 +60,7 @@ describe('writeEnforcementState / readEnforcementState', () => {
       '1.7.0',
       path,
     )
-    const afterFirewall = await readEnforcementState(path)
+    const afterFirewall = await readEnforcementState(path, `${path}.user`)
     expect(afterFirewall?.firewall?.active).toBe(true)
     expect(afterFirewall?.caTrust).toBeUndefined()
 
@@ -69,7 +69,7 @@ describe('writeEnforcementState / readEnforcementState', () => {
       '1.7.0',
       path,
     )
-    const afterCaTrust = await readEnforcementState(path)
+    const afterCaTrust = await readEnforcementState(path, `${path}.user`)
     // The firewall leg from the first write must survive, untouched.
     expect(afterCaTrust?.firewall?.active).toBe(true)
     expect(afterCaTrust?.firewall?.backend).toBe('nftables')
@@ -105,7 +105,7 @@ describe('writeEnforcementState / readEnforcementState', () => {
       '1.7.0',
       path,
     )
-    const state = await readEnforcementState(path)
+    const state = await readEnforcementState(path, `${path}.user`)
     expect(state?.firewall?.active).toBe(false)
     expect(state?.firewall?.backend).toBeUndefined()
   })
@@ -126,5 +126,53 @@ describe('containmentExpected', () => {
   it('is true when the workspace enforces egress, or this machine applied enforce', () => {
     expect(containmentExpected('enforce', null)).toBe(true)
     expect(containmentExpected('off', state(true))).toBe(true)
+  })
+})
+
+describe('an unprivileged user', () => {
+  const root = join(tmpdir(), `intutic-enforcement-${randomUUID()}`)
+  const caTrust = { installed: true, scope: 'user' as const, reportedAt: '2026-11-05T00:00:00.000Z' }
+  const machine = join(root, 'machine', 'state.json')
+  const user = join(root, 'user', 'state.json')
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function denyMachineDir(): Promise<string> {
+    await mkdir(root, { recursive: true })
+    await mkdir(join(root, 'locked'), { mode: 0o500 })
+    return join(root, 'locked', 'sub', 'state.json')
+  }
+
+  it('records the CA-trust leg in the user file, and it can be read back', async () => {
+    const locked = await denyMachineDir()
+    await writeEnforcementState({ caTrust }, '1.0.0', locked, user)
+    expect((await readEnforcementState(locked, user))?.caTrust).toEqual(caTrust)
+  })
+
+  it('still fails on a leg that takes the privilege it lacks', async () => {
+    const locked = await denyMachineDir()
+    const firewall = { active: true, backend: 'pf', reportedAt: caTrust.reportedAt }
+    await expect(writeEnforcementState({ firewall }, '1.0.0', locked, user)).rejects.toMatchObject({ code: 'EACCES' })
+  })
+
+  it('never takes a firewall or hook claim from the user file', async () => {
+    const firewall = { active: true, backend: 'pf', reportedAt: caTrust.reportedAt }
+    await writeEnforcementState({ firewall, caTrust }, '1.0.0', user, `${user}.unused`)
+    const alone = await readEnforcementState(machine, user)
+    expect(alone?.firewall).toBeUndefined()
+    expect(alone?.caTrust).toEqual(caTrust)
+
+    await writeEnforcementState({ firewall: { ...firewall, active: false } }, '1.0.0', machine, `${machine}.unused`)
+    expect((await readEnforcementState(machine, user))?.firewall?.active).toBe(false)
+  })
+
+  it('keeps the newer CA-trust leg of the two files', async () => {
+    const older = { ...caTrust, installed: false, reportedAt: '2026-01-01T00:00:00.000Z' }
+    await writeEnforcementState({ caTrust: older }, '1.0.0', machine, `${machine}.unused`)
+    await mkdir(join(root, 'user'), { recursive: true })
+    await writeFile(user, JSON.stringify({ caTrust }))
+    expect((await readEnforcementState(machine, user))?.caTrust).toEqual(caTrust)
   })
 })
