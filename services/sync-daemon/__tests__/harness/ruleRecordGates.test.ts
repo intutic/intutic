@@ -23,6 +23,7 @@ import { writeApprovedPlans } from '../../src/lib/approvedPlans.js'
 import { createHash } from 'node:crypto'
 import {
   compileSopGateRecords as compileShared,
+  toServedGateRecord,
   decodeGateRuleRecord,
   encodeGateRuleRecord,
   decideTestOutcome,
@@ -272,6 +273,13 @@ describe('@rule records', () => {
     const c = compileGateRecords(policy({ interventionMode: 'SILENT_LOG' }), [OUTCOME_SOP, PLAN_SOP])
     expect(c.records.every((r) => r.rollout === 'shadow' && r.fallbackId === null)).toBe(true)
     expect(c.fallbacks).toEqual([])
+  })
+
+  it('keeps a served allow_commands record: dropping it would let every command through', () => {
+    const { records } = compileSopGateRecords(sop('sop_1', 'allow_commands: git status'))
+    const c = compileGateRecords(policy({ gateRecords: records.map((r) => toServedGateRecord(r, 'sop_1')) }))
+    expect(c.records.map((r) => r.kind)).toEqual(['allow_commands'])
+    expect(c.fallbacks.map((f) => f.id.split(':')[0])).toEqual(['allow_commands-fallback'])
   })
 
   it('fallback lines sit after the SSO-group rules and decide fallbacks, and name the gated call', () => {

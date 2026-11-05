@@ -667,6 +667,22 @@ This works because the proxy records a **change manifest** for every request —
 the files, URLs and commands its tool calls actually named, derived from the
 argument keys, not guessed. You can see it per request in the trace detail view.
 
+### What may it run?
+
+`allow_commands` bounds *which shell commands* the task may run:
+
+```markdown
+---
+allow_commands: git status, git diff *, npm test *
+---
+```
+
+Every command in a shell call must be on the list, and a call that cannot be read
+as plain commands is refused rather than let through. A refusal is
+`COMMAND_NOT_ALLOWED`. It checks shell tools only, so an allowed `python3 *` runs
+anything: see [Allowed commands](/reference/sop-front-matter#allowed-commands) for
+what to list and what it does not cover.
+
 ### Stop and ask me first <Badge type="tip" text="Cloud" /> {#stop-and-ask-me-first}
 
 `deny_tools` refuses something forever. `review_before` does something different:

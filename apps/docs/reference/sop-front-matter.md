@@ -390,10 +390,12 @@ be run by an allowed command, so `python3 *` allows anything: list the commands
 you would be happy to see run with any arguments, and pair this with
 `scope_paths:` and a sandbox.
 
-The proxy, the SDK gates and the hook gates enforce this. A gate older than
-version 24 cannot read the list, so it refuses every shell call and asks for an
-upgrade. A SOP with `roles:` reaches the proxy only, since a gate knows no agent
-role.
+The proxy, the SDK gates and the hook gates enforce this, from local SOPs and from
+SOPs a control plane serves. A hook gate older than version 24, or an SDK gate
+older than 3.1.4, cannot read the list, so it refuses every shell call and asks for
+an upgrade. A proxy, CLI or sync daemon older than 3.1.4 does not know the key, so
+it ignores it and nothing is enforced through that path: upgrade them first. A SOP
+with `roles:` reaches the proxy only, since a gate knows no agent role.
 
 ## Hook rules
 
@@ -577,6 +579,12 @@ What the five newer tokens match, in a shell command:
 | `action:payment` | Stripe charge, payment-intent, transfer, payout and refund calls (`api.stripe.com/v1/charges`, `stripe charges create`, …) and PayPal payments |
 
 `drop` and `truncate` are both `action:db_write` and `action:destroy`.
+
+These tokens come from phrases, so the text of a command counts, including a script
+in a heredoc. At the proxy and the SDK gates, the text that a lone `echo`, `printf` or
+`git commit` only carries does not: `git commit -m "fix git push"` is not a deploy.
+There too, `update` is `action:db_write` only with a `set` within eight words. The
+hook gates read the whole command and the plain word.
 
 A hold is released by the same approval as any `review_before:` hold. A decide
 rule's `allow` never releases one: holds are evaluated before decide rules, and

@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a trailing ` *` allows further arguments. Every command in a call must match, and what the
   shell parser cannot read is refused rather than let through, so a redirect or substitution is
   refused even when the command is listed. The proxy, the SDK gates and the hook gates enforce it,
-  as `COMMAND_NOT_ALLOWED`. Hook gates move to version 24; an older gate refuses every shell call
-  under such a SOP and asks for an upgrade.
+  as `COMMAND_NOT_ALLOWED`, from local SOPs and from SOPs a control plane serves. Hook gates move
+  to version 24; an older gate refuses every shell call under such a SOP and asks for an upgrade. A
+  proxy, CLI or sync daemon older than 3.1.4 does not know the key and ignores it.
 
 ### Fixed
 
@@ -52,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaving for the network stay. To keep this rule, declare it with `forbid_after:` and restate
   `action:pii_export -> action:http_post` and `action:secret_read -> action:http_post`: declaring
   any rule under that key replaces the floors.
+
+### Documentation
+
+- **The loop breaker page describes the detector as it has run since 3.1.2:** a call is its tool
+  and its arguments, and only the run ending at the latest call counts. `SECURITY.md` lists 3.1.x
+  as the supported line.
 
 ## [3.1.3] - 2026-11-04
 

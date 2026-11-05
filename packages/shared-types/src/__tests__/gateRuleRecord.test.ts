@@ -14,6 +14,7 @@ import { SCOPE_MATCH_JS_SOURCE } from '../scopeMatch.js'
 import { SHELL_PARSE_JS_SOURCE } from '../shellParse.js'
 import { TEST_OUTCOME_JS_SOURCE } from '../testOutcome.js'
 import * as rules from '../gateRuleRecord.js'
+import { ServedGateRecordResponse } from '../responses/rules.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the vectors are typed by use
 const V = JSON.parse(readFileSync(join(__dirname, '../../fixtures/rule-record-vectors.json'), 'utf-8')) as any
@@ -80,6 +81,13 @@ describe('the writer', () => {
       for (const r of got.records) expect(rules.decodeGateRuleRecord(rules.encodeGateRuleRecord(r)), c.name).toEqual(r)
       // Portable ERE, as the snapshot writer requires: no \s, no (?, no anchors.
       for (const f of got.fallbacks) expect(f.source.replace(/\[\^/g, '['), c.name).not.toMatch(/\\s|\(\?|\^|\$/)
+    }
+  })
+
+  it('policy resolve can serve every kind', () => {
+    for (const kind of rules.GATE_RULE_KINDS) {
+      const served = { sopId: 'sop', kind, rollout: 'enforce', fallbackId: null, payload: { v: 1, ref: 'sop#x:1', sopTitle: 'T' } }
+      expect(ServedGateRecordResponse.safeParse(served).success, kind).toBe(true)
     }
   })
 

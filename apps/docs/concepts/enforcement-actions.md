@@ -54,7 +54,7 @@ Tool call arrives at a gate SDK (@intutic/gate, intutic_clawde.gate)
 
 - **A0, A1, R and M** are deterministic checks on the snapshot's records: the SSO group policy
   (a member whose groups are unknown is refused a high-risk tool), the block and approval rules, the
-  `requires_before:`, `scope_paths_mode: enforce` and `plan_approval:` rule records, and the MCP
+  `requires_before:`, `scope_paths_mode: enforce`, `allow_commands:` and `plan_approval:` rule records, and the MCP
   server registry and allowlist. A1 and R fail closed, and a snapshot that fails its integrity
   check admits no MCP call.
 - **A2** checks the container images a deploy command names against the local allowlist, and fails
@@ -67,7 +67,7 @@ Tool call arrives at a gate SDK (@intutic/gate, intutic_clawde.gate)
 The harness hook gates (gate body v23) read the same snapshot and run its checks in one order in
 every harness: the deterministic refusals (the protected-path and shell-bypass floor, the snapshot's
 block rules, the `requires_before:` records, the MCP registry and allowlist), then holds, then the
-trajectory records (`scope_paths`, `plan_approval`), then decide. They never call the hook gate (see the note at the end
+trajectory records (`scope_paths`, `plan_approval`, `allow_commands`), then decide. They never call the hook gate (see the note at the end
 of this section).
 
 ### With a control plane: the hook gate
