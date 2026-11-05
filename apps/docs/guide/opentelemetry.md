@@ -18,7 +18,7 @@ Every long-running Intutic process — the Rust proxy, the control plane, and th
 
 ## What's instrumented
 
-The Node-based components (control plane, MCP daemon) use the standard `@opentelemetry/auto-instrumentations-node` package, which covers HTTP, Postgres, and Valkey/Redis calls automatically — filesystem instrumentation is disabled everywhere, since it's noisy and rarely useful for these workloads.
+The control plane uses the standard `@opentelemetry/auto-instrumentations-node` package, which covers HTTP, Postgres, and Valkey/Redis calls automatically, with filesystem instrumentation disabled, since it's noisy and rarely useful for this workload. The MCP daemon ships on every CLI install, so it registers only what it uses: HTTP, undici, Valkey/Redis and Node runtime metrics.
 
 The Rust proxy uses `tracing` + `tracing-opentelemetry`, with `AlwaysOn` sampling and a batch exporter.
 

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.5] - 2026-11-05
+
+### Fixed
+
+- **A smaller, quieter install.** The MCP daemon's OpenTelemetry setup pulled in every exporter, including gRPC, for a feature that is off by default. It now registers only what it uses: HTTP, undici, Valkey/Redis and Node runtime metrics, over OTLP/HTTP as before. `protobufjs` and its install-script warning are gone, and `npm install -g @intutic/cli` takes 176 packages and 95 MB, down from 351 and 158 MB. Instrumentations it dropped, such as `dns` and `net`, no longer produce spans.
+- **`intutic connect` reports device state as an ordinary user.** The write to the machine-wide state file failed with `EACCES` for anyone but a privileged install, on every sync, and that also stopped the report. CA trust now falls back to `~/.intutic/enforcement-state.json`, which never counts as a firewall or hook claim. `connect --api-key` also reports through its own signed-in client, so it no longer needs saved credentials.
+
 ## [3.1.4] - 2026-11-05
 
 ### Added

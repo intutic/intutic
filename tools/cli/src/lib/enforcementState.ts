@@ -20,7 +20,8 @@
  */
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { getIntuticDir } from '../config/paths.js'
 import { hostname } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -119,22 +120,36 @@ async function readState(path: string): Promise<EnforcementState | null> {
   }
 }
 
-/** Reads the local enforcement state file, if present. */
-export async function readEnforcementState(path: string = enforcementStatePath()): Promise<EnforcementState | null> {
-  return readState(path)
+/**
+ * Where `intutic connect` records its CA-trust leg: it runs as the real user,
+ * who cannot write the machine-wide file unless a privileged install made it so.
+ */
+export function userEnforcementStatePath(): string {
+  return join(getIntuticDir(), 'enforcement-state.json')
+}
+
+function newestLeg(a?: CaTrustLeg, b?: CaTrustLeg): CaTrustLeg | undefined {
+  if (!a || !b) return a ?? b
+  return b.reportedAt > a.reportedAt ? b : a
 }
 
 /**
- * Merge-writes one or more legs into the local enforcement state file.
- * Never overwrites a leg the caller didn't pass — a firewall-only write
- * (from `enforce apply`) must not blank out a previously-recorded
- * CA-trust leg (from `enterprise install`), and vice versa.
+ * Reads the local enforcement state, if any. The user file only ever adds the
+ * CA-trust leg: firewall and system hooks stand for privileged actions, so a
+ * file the user can write says nothing about them.
  */
-export async function writeEnforcementState(
-  legs: EnforcementStateLegs,
-  cliVersion: string,
+export async function readEnforcementState(
   path: string = enforcementStatePath(),
-): Promise<EnforcementState> {
+  userPath: string = userEnforcementStatePath(),
+): Promise<EnforcementState | null> {
+  const machine = await readState(path)
+  const user = await readState(userPath)
+  if (!user) return machine
+  if (!machine) return { ...user, firewall: undefined, systemHooks: undefined }
+  return { ...machine, caTrust: newestLeg(machine.caTrust, user.caTrust) }
+}
+
+async function mergeWrite(legs: EnforcementStateLegs, cliVersion: string, path: string): Promise<EnforcementState> {
   const existing = await readState(path)
   const fingerprint = existing?.fingerprint ?? (await computeFingerprint())
 
@@ -154,6 +169,30 @@ export async function writeEnforcementState(
   await rename(tmp, path)
 
   return next
+}
+
+/**
+ * Merge-writes one or more legs into the local enforcement state file.
+ * Never overwrites a leg the caller didn't pass — a firewall-only write
+ * (from `enforce apply`) must not blank out a previously-recorded
+ * CA-trust leg (from `enterprise install`), and vice versa.
+ *
+ * Without permission on the machine-wide file, a CA-trust-only write goes to
+ * the user file. Anything else still fails: it needs the privilege it lacks.
+ */
+export async function writeEnforcementState(
+  legs: EnforcementStateLegs,
+  cliVersion: string,
+  path: string = enforcementStatePath(),
+  userPath: string = userEnforcementStatePath(),
+): Promise<EnforcementState> {
+  try {
+    return await mergeWrite(legs, cliVersion, path)
+  } catch (err) {
+    const denied = ['EACCES', 'EPERM', 'EROFS'].includes((err as NodeJS.ErrnoException).code ?? '')
+    if (!denied || !legs.caTrust || legs.firewall || legs.systemHooks) throw err
+    return mergeWrite(legs, cliVersion, userPath)
+  }
 }
 
 /**

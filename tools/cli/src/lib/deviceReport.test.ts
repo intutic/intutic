@@ -43,6 +43,16 @@ describe('reportDeviceState', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('a signed-in client needs no saved credentials', async () => {
+    vi.mocked(loadCredentials).mockClear()
+    readEnforcementStateMock.mockResolvedValueOnce({ fingerprint: 'fp1', hostname: 'h', platform: 'darwin', cliVersion: '1' })
+    const post = vi.fn(async () => ({}))
+    const result = await reportDeviceState({ client: { post } as never })
+    expect(result).toEqual({ reported: true })
+    expect(post).toHaveBeenCalledWith('/api/v1/devices/report', expect.objectContaining({ fingerprint: 'fp1' }))
+    expect(loadCredentials).not.toHaveBeenCalled()
+  })
+
   it('no local state yet → reported: false, no network call', async () => {
     readEnforcementStateMock.mockResolvedValueOnce(null)
     const result = await reportDeviceState()
