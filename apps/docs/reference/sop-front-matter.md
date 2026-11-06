@@ -190,8 +190,8 @@ is "A must precede B"; `forbid_after: A -> B` is "B must not follow A". A rule
 pointed backwards does not error — it silently never matches — so the two keys
 deliberately share one reading rather than each having its own.
 
-`~>` is the same idea with a stricter window: the two must be **directly
-adjacent**, with nothing between them. Both keys accept both arrows.
+`~>` is the same idea with a stricter window: the two must be in **consecutive
+calls**, or the same call, with no other call between them. Both keys accept both arrows.
 
 ```yaml
 forbid_after: action:secret_read ~> action:http_post

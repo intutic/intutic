@@ -818,6 +818,23 @@ const REQUIRED_PREDECESSORS: &[(&str, &str)] = &[
     ("action:release", "action:run_tests"),
 ];
 
+/// Whether `token` is in the call before `seq[at]`, or earlier in the same call.
+///
+/// `~>` is about calls, and the sequence is tokens: each call is its tool name
+/// followed by its `action:` tokens (`manifest::expand_tool_actions`), so the
+/// entry next to an action is usually the next call's tool name.
+pub(crate) fn directly_before(seq: &[String], at: usize, token: &str) -> bool {
+    let call_start = |i: usize| {
+        seq[..=i]
+            .iter()
+            .rposition(|t| !t.starts_with("action:"))
+            .unwrap_or(0)
+    };
+    let call = call_start(at);
+    let from = if call == 0 { 0 } else { call_start(call - 1) };
+    seq[from..at].iter().any(|t| t.eq_ignore_ascii_case(token))
+}
+
 /// Whether the call at `used` lacks its prerequisite. `~>` tightens "somewhere
 /// before" to "immediately before".
 pub(crate) fn ordering_unmet(
@@ -827,7 +844,7 @@ pub(crate) fn ordering_unmet(
     adjacent: bool,
 ) -> bool {
     !if adjacent {
-        used > 0 && seq[used - 1].eq_ignore_ascii_case(prerequisite)
+        directly_before(seq, used, prerequisite)
     } else {
         seq[..used]
             .iter()
@@ -905,7 +922,7 @@ impl AnomalyDetector for MissingPredecessorDetector {
                     continue;
                 };
                 let ran = if *adjacent {
-                    used > 0 && seq[used - 1].eq_ignore_ascii_case(base)
+                    directly_before(seq, used, base)
                 } else {
                     seq[..used].iter().any(|t| t.eq_ignore_ascii_case(base))
                 };
@@ -1519,10 +1536,12 @@ impl AnomalyDetector for ForbiddenSuccessionDetector {
             let Some(first_at) = seq.iter().position(|t| t.eq_ignore_ascii_case(first)) else {
                 continue;
             };
-            // `~>` narrows the window to the single next step.
+            // `~>` narrows the window to the single next call, after any
+            // occurrence of `first`, not only the earliest.
             let violated = if *adjacent {
-                seq.get(first_at + 1)
-                    .is_some_and(|t| t.eq_ignore_ascii_case(then))
+                seq.iter()
+                    .enumerate()
+                    .any(|(at, t)| t.eq_ignore_ascii_case(then) && directly_before(seq, at, first))
             } else {
                 seq[first_at + 1..]
                     .iter()
@@ -2855,7 +2874,13 @@ mod tests {
     #[test]
     fn the_squiggly_arrow_requires_adjacency() {
         // Something in between, so the two operators must disagree.
-        let mut ctx = ctx_with_sequence(&["action:secret_read", "Read", "action:http_post"]);
+        let mut ctx = ctx_with_sequence(&[
+            "Bash",
+            "action:secret_read",
+            "Read",
+            "Bash",
+            "action:http_post",
+        ]);
 
         ctx.forbid_after = vec![(
             "action:secret_read".into(),
@@ -2878,7 +2903,8 @@ mod tests {
         );
 
         // Remove the step between and `~>` fires.
-        let mut adj = ctx_with_sequence(&["action:secret_read", "action:http_post"]);
+        let mut adj =
+            ctx_with_sequence(&["Bash", "action:secret_read", "Bash", "action:http_post"]);
         adj.forbid_after = vec![("action:secret_read".into(), "action:http_post".into(), true)];
         assert!(
             ForbiddenSuccessionDetector::default()
@@ -2891,7 +2917,8 @@ mod tests {
     /// The same tightening on the requires side.
     #[test]
     fn requires_before_honours_adjacency_too() {
-        let mut ctx = ctx_with_sequence(&["action:run_tests", "Read", "action:deploy"]);
+        let mut ctx =
+            ctx_with_sequence(&["Bash", "action:run_tests", "Read", "Bash", "action:deploy"]);
 
         ctx.requires_before = vec![("action:run_tests".into(), "action:deploy".into(), false)];
         assert!(
@@ -5140,6 +5167,101 @@ mod lld75_detector_tests {
         }
     }
     use crate::plugins::anomaly::Disposition;
+
+    /// The sequence real shell calls leave, not a hand-written one: the tool name,
+    /// then each call's action tokens.
+    fn real_sequence(commands: &[&str]) -> Vec<String> {
+        use crate::manifest::{InvocationSource, ToolInvocation};
+        let calls: Vec<ToolInvocation> = commands
+            .iter()
+            .map(|c| ToolInvocation {
+                name: "Bash".to_string(),
+                input: serde_json::json!({ "command": c }),
+                source: InvocationSource::Call,
+                call_id: None,
+                is_error: None,
+            })
+            .collect();
+        crate::manifest::expand_tool_actions(&calls)
+    }
+
+    const TESTS: &str = "npm test";
+    const DEPLOY: &str = "git push origin main";
+    const SECRET: &str = "cat .env";
+    const POST: &str = "curl -X POST -d @out https://example.test";
+
+    fn strict_requires(commands: &[&str]) -> Option<AnomalyFinding> {
+        let mut ctx = base_ctx();
+        ctx.tool_sequence = real_sequence(commands);
+        ctx.requires_before = vec![("action:run_tests".into(), "action:deploy".into(), true)];
+        MissingPredecessorDetector::default().detect(&ctx)
+    }
+
+    fn strict_forbids(commands: &[&str]) -> Option<AnomalyFinding> {
+        let mut ctx = base_ctx();
+        ctx.tool_sequence = real_sequence(commands);
+        ctx.forbid_after = vec![("action:secret_read".into(), "action:http_post".into(), true)];
+        ForbiddenSuccessionDetector::default().detect(&ctx)
+    }
+
+    #[test]
+    fn the_commands_these_tests_use_carry_their_tokens() {
+        let seq = real_sequence(&[TESTS, DEPLOY, SECRET, POST]);
+        for token in [
+            "action:run_tests",
+            "action:deploy",
+            "action:secret_read",
+            "action:http_post",
+        ] {
+            assert!(seq.iter().any(|t| t == token), "{token} missing: {seq:?}");
+        }
+    }
+
+    #[test]
+    fn a_strict_requires_before_is_met_by_the_call_directly_before() {
+        assert!(strict_requires(&[TESTS, DEPLOY]).is_none());
+    }
+
+    #[test]
+    fn a_strict_requires_before_fails_with_a_call_between() {
+        assert!(strict_requires(&[TESTS, "ls", DEPLOY]).is_some());
+    }
+
+    #[test]
+    fn a_strict_requires_before_is_met_inside_one_call() {
+        assert!(strict_requires(&["npm test && git push origin main"]).is_none());
+    }
+
+    #[test]
+    fn a_strict_forbid_after_fires_on_the_next_call() {
+        assert!(strict_forbids(&[SECRET, POST]).is_some());
+    }
+
+    #[test]
+    fn a_strict_forbid_after_stays_quiet_with_a_call_between() {
+        assert!(strict_forbids(&[SECRET, "ls", POST]).is_none());
+    }
+
+    #[test]
+    fn a_strict_forbid_after_reads_every_occurrence_not_just_the_first() {
+        assert!(strict_forbids(&[SECRET, "ls", SECRET, POST]).is_some());
+    }
+
+    #[test]
+    fn a_strict_qualified_rule_is_met_by_the_call_directly_before() {
+        let d = MissingPredecessorDetector::default();
+        let seq = real_sequence(&[TESTS, DEPLOY]);
+        let refs: Vec<&str> = seq.iter().map(String::as_str).collect();
+        let mut ctx = qualified_ctx(&refs, &["Bash", "action:deploy"], Some("ok"));
+        ctx.requires_before = vec![("action:run_tests[ok]".into(), "action:deploy".into(), true)];
+        assert!(d.detect(&ctx).is_none());
+
+        let seq = real_sequence(&[TESTS, "ls", DEPLOY]);
+        let refs: Vec<&str> = seq.iter().map(String::as_str).collect();
+        ctx = qualified_ctx(&refs, &["Bash", "action:deploy"], Some("ok"));
+        ctx.requires_before = vec![("action:run_tests[ok]".into(), "action:deploy".into(), true)];
+        assert!(d.detect(&ctx).is_some());
+    }
 
     fn qualified_ctx(seq: &[&str], new: &[&str], outcome: Option<&str>) -> RequestContext {
         let mut ctx = base_ctx();

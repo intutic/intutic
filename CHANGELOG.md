@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A plain `requires_before:` rule now holds the call back.** The proxy withheld a call before it ran only for `[ok]` rules. A plain rule let the call run and then ended the session on the next request, so the action happened anyway. The response gate now refuses the call with `PREREQUISITE_UNMET`, and the agent can do the first step and try again. The built-in deploy, publish and release floors still act after the call.
 
+### Fixed
+
+- **`~>` rules between `action:` tokens.** The proxy compared neighbouring entries in a list where each call is its tool name followed by its actions, so the entry next to an action was usually the next call's tool name. `forbid_after: action:secret_read ~> action:http_post` never fired, and `requires_before: action:run_tests ~> action:deploy`, plain or `[ok]`, ended the session even when the order was right. `~>` now compares whole calls, and `forbid_after` checks every occurrence of the first action, not only the earliest. A strict rule that never fired before can now end sessions, so review any you declared.
+
 ## [3.2.0] - 2026-11-06
 
 ### Changed

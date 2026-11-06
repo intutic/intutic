@@ -2563,6 +2563,25 @@ mod lld75_arg_gate_tests {
     }
 
     #[test]
+    fn an_adjacent_action_rule_is_met_by_the_call_directly_before() {
+        let push = openai(&[("Bash", json!({"command": "git push origin main"}))]);
+        let met = ordered(
+            &["Bash", "action:run_tests"],
+            "action:run_tests",
+            "action:deploy",
+            true,
+        );
+        assert!(gate_response_args(&cfg(), Some(&push), &met).is_none());
+        let unmet = ordered(
+            &["Bash", "action:run_tests", "Bash"],
+            "action:run_tests",
+            "action:deploy",
+            true,
+        );
+        assert!(gate_response_args(&cfg(), Some(&push), &unmet).is_some());
+    }
+
+    #[test]
     fn plain_rules_and_qualified_rules_do_not_overlap() {
         let rules = vec![
             ("log_verification".to_string(), "read".to_string(), false),
