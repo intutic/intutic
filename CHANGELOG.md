@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A plain `requires_before:` rule now holds the call back.** The proxy withheld a call before it ran only for `[ok]` rules. A plain rule let the call run and then ended the session on the next request, so the action happened anyway. The response gate now refuses the call with `PREREQUISITE_UNMET`, and the agent can do the first step and try again. The built-in deploy, publish and release floors still act after the call.
+- **Declared `requires_before:` and `forbid_after:` rules now hold the call back.** The proxy withheld a call before it ran only for `[ok]` rules. A plain rule let the call run and then ended the session on the next request, so the action happened anyway. The response gate now refuses the call, with `PREREQUISITE_UNMET` or `TOOL_DENIED`, and the session carries on. The built-in floors, used when no rule of that kind is declared, still act after the call.
+
+### Added
+
+- **Tool output that talks to the agent is marked as data.** The proxy had five patterns for jailbreak phrases, and they saw nothing in text that addresses an agent from inside a document or a web page. Tool results that do are now forwarded with a notice in front, telling the model the text came from the tool and is not an instruction. Nothing is refused, so a false match costs a few tokens.
+- **`response_gate.continue_after_refusal`.** A refusal on a non-streaming response can now ask the model to carry on without the call, up to twice per request, instead of ending the agent's turn. Off by default, because each continuation is another billed call.
 
 ### Fixed
 

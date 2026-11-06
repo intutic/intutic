@@ -435,6 +435,7 @@ Intutic's options live under `intutic_settings`:
 | `memory.vaults` | string[] | none | Vault directories to search; a vault found above the working directory is searched as well |
 | `response_gate.enabled` | boolean | `true` | Refuse a tool call in the model's response that the role's deny list forbids, before the client can run it |
 | `response_gate.fail_closed` | boolean | `true` | When a deny list applies and the response will not parse, refuse it rather than forward it unchecked |
+| `response_gate.continue_after_refusal` | boolean | `false` | After refusing a call on a non-streaming response, ask the model to carry on without it, up to twice per request, instead of ending the agent's turn. Each continuation is another billed call. Streams, the Responses API and Gemini still end the turn |
 | `response_injection_snippet.enabled` | boolean | `true` | Keep a short, DLP-scrubbed excerpt around a prompt-injection pattern found in a response, so a finding can be reviewed |
 | `response_injection_snippet.window_bytes` | number | `200` | The excerpt's width, capped by the proxy |
 

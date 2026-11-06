@@ -835,6 +835,16 @@ pub(crate) fn directly_before(seq: &[String], at: usize, token: &str) -> bool {
     seq[from..at].iter().any(|t| t.eq_ignore_ascii_case(token))
 }
 
+/// Whether the token at `at` breaks a `forbid_after: first -> then` rule.
+/// `~>` narrows the window to the next call, after any occurrence of `first`.
+pub(crate) fn succession_at(seq: &[String], at: usize, first: &str, adjacent: bool) -> bool {
+    if adjacent {
+        directly_before(seq, at, first)
+    } else {
+        seq[..at].iter().any(|t| t.eq_ignore_ascii_case(first))
+    }
+}
+
 /// Whether the call at `used` lacks its prerequisite. `~>` tightens "somewhere
 /// before" to "immediately before".
 pub(crate) fn ordering_unmet(
@@ -1533,20 +1543,9 @@ impl AnomalyDetector for ForbiddenSuccessionDetector {
 
         for (first, then, adjacent) in rules {
             // Case-insensitive, matching every other declaration-driven detector.
-            let Some(first_at) = seq.iter().position(|t| t.eq_ignore_ascii_case(first)) else {
-                continue;
-            };
-            // `~>` narrows the window to the single next call, after any
-            // occurrence of `first`, not only the earliest.
-            let violated = if *adjacent {
-                seq.iter()
-                    .enumerate()
-                    .any(|(at, t)| t.eq_ignore_ascii_case(then) && directly_before(seq, at, first))
-            } else {
-                seq[first_at + 1..]
-                    .iter()
-                    .any(|t| t.eq_ignore_ascii_case(then))
-            };
+            let violated = seq.iter().enumerate().any(|(at, t)| {
+                t.eq_ignore_ascii_case(then) && succession_at(seq, at, first, *adjacent)
+            });
             if !violated {
                 continue;
             }

@@ -180,10 +180,10 @@ forbid_after: action:pii_export -> action:db_write
 ---
 ```
 
-The proxy withholds a call that breaks a declared `requires_before:` rule before
-it runs, refuses it with `PREREQUISITE_UNMET`, and the agent can do the first step
-and try again. `forbid_after:` and the built-in floors below act on the next
-request, once the call has run.
+The proxy withholds a call that breaks a declared rule before it runs, and the
+session carries on: `requires_before:` refuses with `PREREQUISITE_UNMET`, so the
+agent can do the first step and try again, and `forbid_after:` with `TOOL_DENIED`.
+The built-in floors below act on the next request, once the call has run.
 
 **Both arrows read left-to-right as sequence order.** `requires_before: A -> B`
 is "A must precede B"; `forbid_after: A -> B` is "B must not follow A". A rule
