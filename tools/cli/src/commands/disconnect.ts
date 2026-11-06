@@ -125,12 +125,12 @@ export async function planCaTrust(plan: DisconnectPlan): Promise<void> {
     if (!listed.toUpperCase().includes(sha1.toUpperCase())) return
     plan.change(keychain, 'remove the Intutic CA certificate connect trusted', async () => {
       try {
-        execFileSync('security', ['remove-trusted-cert', '-d', certPath], { stdio: 'ignore', timeout: SECURITY_PROMPT_MS })
+        execFileSync('security', ['remove-trusted-cert', '-d', certPath], { stdio: ['ignore', 'ignore', 'pipe'], timeout: SECURITY_PROMPT_MS })
       } catch (err) {
-        // A timeout is a prompt no one saw, over SSH: the trust setting outlives the certificate.
-        // Any other failure means no admin trust setting is left for it.
-        if ((err as NodeJS.ErrnoException).code === 'ETIMEDOUT') {
-          log.warn(`Could not remove the CA's trust setting without a password prompt. Run: sudo security remove-trusted-cert -d ${certPath}`)
+        if (caStaysTrusted(err)) {
+          // The certificate stays too: without it, a second disconnect would find nothing to undo.
+          log.warn(`The Intutic CA is still trusted. Run intutic disconnect again at this Mac and enter your password, or run: sudo security remove-trusted-cert -d ${certPath}`)
+          return
         }
       }
       execFileSync('security', ['delete-certificate', '-Z', sha1, keychain], { stdio: 'ignore', timeout: SECURITY_PROMPT_MS })
@@ -181,6 +181,14 @@ function planConfig(plan: DisconnectPlan, config: IntuticConfig | null, harness:
       disconnectedHarnesses: [...new Set([...(config.disconnectedHarnesses ?? []), id])],
     })
   })
+}
+
+/**
+ * Whether a failed `security remove-trusted-cert` left the CA trusted: a cancelled
+ * prompt or a timeout did. Only "could not be found" means there was nothing to remove.
+ */
+export function caStaysTrusted(err: unknown): boolean {
+  return !String((err as { stderr?: unknown }).stderr ?? '').includes('could not be found')
 }
 
 /** Long enough to type a password at the keychain prompt; with no screen to show it on, `security` waits forever. */

@@ -67,29 +67,81 @@ check 'installCaTrust: the login keychain path resolves' 0 node --input-type=mod
   process.exit(existsSync(k) ? 0 : 1)"
 
 fingerprint=$(openssl x509 -in "$CA" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)
+in_keychain_cmd=(bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'")
 check 'disconnect: lists the CA in its plan'  0 bash -c "node '$CLI' disconnect --dry-run | grep -qi 'CA certificate'"
-# With no screen, removing a trust setting waits on a prompt, even under sudo. The
-# certificate must still go, and the user must be told what is left. The first 120 s
-# is disconnect's own limit.
+# A prompt no one answers. The first 120 s is disconnect's own limit.
 LIMIT=150
-check 'disconnect with no screen: gives up, and exits 0' 0 node "$CLI" disconnect
+check 'no one answers: disconnect gives up, and exits 0' 0 node "$CLI" disconnect
 LIMIT=60
-grep -q 'sudo security remove-trusted-cert' "$W/out" && echo 'ok    disconnect names the command to run' || { echo 'FAIL  disconnect did not name the command'; sed 's/^/      /' "$W/out"; failed=1; }
-check 'with no screen: the certificate is gone' 1 bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'"
+grep -q 'sudo security remove-trusted-cert' "$W/out" && echo 'ok    disconnect names the command to run' || { echo 'FAIL  disconnect did not name the command'; failed=1; }
+check 'no one answers: the CA is still trusted' 0 security verify-cert -c "$CA"
+check 'no one answers: the certificate stays for a second run' 0 "${in_keychain_cmd[@]}"
+pkill -x SecurityAgent 2>/dev/null; sleep 1
 
-# What a person's password does, where this macOS allows a script to stand in for it.
-# This machine is thrown away; never do this on one you keep. Newer macOS refuses it, and
-# then the removal with a prompt is not covered here: it needs a person at a screen.
-if ! sudo security authorizationdb write com.apple.trust-settings.admin allow >/dev/null 2>&1; then
-  echo "skip  full removal: this macOS will not allow trust changes without a password prompt"
-  exit $failed
-fi
-check 'the command disconnect named'     0 sudo security remove-trusted-cert -d "$CA"
-check 'put it back'                      0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
-check 'trusted again'                    0 security verify-cert -c "$CA"
-check 'disconnect: runs'                 0 node "$CLI" disconnect
-check 'after disconnect: the certificate is gone'  1 bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'"
+# The real prompt, answered as a person would. This machine is thrown away; the admin
+# account and its password exist for this script alone.
+ADMIN=catest
+PW=$(openssl rand -hex 12)
+echo "::add-mask::$PW"
+sudo sysadminctl -addUser "$ADMIN" -password "$PW" -admin >/dev/null 2>&1
+ui() { perl -e 'alarm 25; exec @ARGV' osascript "$@" 2>&1 | cut -c1-200; }
+prompt_up() {
+  for _ in $(seq 1 40); do
+    [ "$(ui -e 'tell application "System Events" to if exists process "SecurityAgent" then return count of windows of process "SecurityAgent"')" -ge 1 ] 2>/dev/null && return 0
+    sleep 0.5
+  done
+  echo '      no prompt appeared'; return 1
+}
+type_password() {
+  prompt_up && ui - "$ADMIN" "$1" <<'OSA'
+on run argv
+  tell application "System Events" to tell process "SecurityAgent"
+    set frontmost to true
+    delay 0.3
+    key code 48 using shift down
+    delay 0.2
+    keystroke "a" using command down
+    keystroke item 1 of argv
+    key code 48
+    delay 0.2
+    keystroke item 2 of argv
+    delay 0.2
+    keystroke return
+  end tell
+end run
+OSA
+}
+click_cancel() { prompt_up && ui -e 'tell application "System Events" to tell process "SecurityAgent" to click button "Cancel" of window 1' >/dev/null; }
+at_prompt() { # at_prompt <name> <expected exit> <answer function and args, as one string> <command...>
+  local name=$1 want=$2 answer=$3; shift 3
+  echo "run   $name"
+  local started=$SECONDS
+  perl -e 'alarm shift; exec @ARGV' 100 "$@" >"$W/out" 2>&1 </dev/null &
+  local job=$!
+  eval "$answer"
+  wait $job; local got=$?
+  [ "$got" -ne 0 ] && got=1
+  if [ "$got" = "$want" ]; then echo "ok    $name ($((SECONDS - started)) s)"; else echo "FAIL  $name (wanted $want, got $got, $((SECONDS - started)) s)"; sed 's/^/      /' "$W/out"; failed=1; fi
+}
+no_warning() { if grep -q 'still trusted' "$W/out"; then echo "FAIL  $1: said the CA is still trusted"; sed 's/^/      /' "$W/out"; failed=1; else echo "ok    $1"; fi; }
+warned() { if grep -q 'still trusted' "$W/out"; then echo "ok    $1"; else echo "FAIL  $1: said nothing"; sed 's/^/      /' "$W/out"; failed=1; fi; }
+
+at_prompt 'Cancel at the prompt: disconnect exits 0' 0 click_cancel node "$CLI" disconnect
+warned 'Cancel at the prompt: disconnect says the CA is still trusted'
+check 'Cancel at the prompt: the CA is still trusted' 0 security verify-cert -c "$CA"
+check 'Cancel at the prompt: the certificate stays for a second run' 0 "${in_keychain_cmd[@]}"
+
+at_prompt 'a wrong password, then the right one: disconnect exits 0' 0 "type_password notthepassword; sleep 3; type_password $PW" node "$CLI" disconnect
+no_warning 'the right password: no warning'
 check 'after disconnect: the CA is not trusted'    1 security verify-cert -c "$CA"
+check 'after disconnect: the certificate is gone'  1 "${in_keychain_cmd[@]}"
+check 'after disconnect: a leaf it signed is refused' 1 "${SSL[@]}"
 check 'after disconnect: a Node client is refused' 1 "${TLS[@]}"
+check 'a second disconnect finds nothing to do'    0 bash -c "! node '$CLI' disconnect --dry-run | grep -qi 'CA certificate'"
+
+# The command disconnect names, for someone who would rather run it.
+check 'put it back' 0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
+at_prompt 'the command disconnect named' 0 "type_password $PW" sudo security remove-trusted-cert -d "$CA"
+check 'after the command: the CA is not trusted' 1 security verify-cert -c "$CA"
 
 exit $failed
