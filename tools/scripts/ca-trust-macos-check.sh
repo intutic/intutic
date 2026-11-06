@@ -31,7 +31,8 @@ KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 # The CA a proxy really generates, not an imitation: Apple's verifier is particular about extensions.
 curl -fsSL -o "$W/proxy" https://github.com/intutic/intutic/releases/download/v3.1.5/intutic-proxy-darwin-arm64
 chmod +x "$W/proxy"
-env -i PATH="$PATH" HOME="$HOME" INTUTIC_STANDALONE=1 PORT=4941 INTUTIC_PROXY_BIND=127.0.0.1 ANTHROPIC_API_KEY=unused "$W/proxy" >"$W/proxy.log" 2>&1 &
+# Away from the repo: its config.yaml names a control plane, which this build refuses.
+(cd "$W" && exec env -i PATH="$PATH" HOME="$HOME" INTUTIC_STANDALONE=1 PORT=4941 INTUTIC_PROXY_BIND=127.0.0.1 ANTHROPIC_API_KEY=unused "$W/proxy") >"$W/proxy.log" 2>&1 &
 proxy=$!
 for _ in $(seq 1 60); do [ -s "$CA" ] && [ -s "$HOME/.intutic/ca.key" ] && break; sleep 0.5; done
 kill $proxy 2>/dev/null
