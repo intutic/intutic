@@ -507,7 +507,11 @@ jobs:
   # thrown away afterwards, and the script refuses to run anywhere else.
   ca-trust-macos:
     name: CA trust on a real macOS keychain
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     if: github.repository == 'intutic/intutic'
     steps:

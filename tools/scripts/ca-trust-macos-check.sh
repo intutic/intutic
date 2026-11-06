@@ -70,8 +70,13 @@ LIMIT=60
 grep -q 'sudo security remove-trusted-cert' "$W/out" && echo 'ok    disconnect names the command to run' || { echo 'FAIL  disconnect did not name the command'; sed 's/^/      /' "$W/out"; failed=1; }
 check 'with no screen: the certificate is gone' 1 bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'"
 
-# What a person's password does. This machine is thrown away; never do this on one you keep.
-check 'runner only: allow trust changes' 0 sudo security authorizationdb write com.apple.trust-settings.admin allow
+# What a person's password does, where this macOS allows a script to stand in for it.
+# This machine is thrown away; never do this on one you keep. Newer macOS refuses it, and
+# then the removal with a prompt is not covered here: it needs a person at a screen.
+if ! sudo security authorizationdb write com.apple.trust-settings.admin allow >/dev/null 2>&1; then
+  echo "skip  full removal: this macOS will not allow trust changes without a password prompt"
+  exit $failed
+fi
 check 'the command disconnect named'     0 sudo security remove-trusted-cert -d "$CA"
 check 'put it back'                      0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
 check 'trusted again'                    0 security verify-cert -c "$CA"
