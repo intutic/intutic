@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A plain `requires_before:` rule now holds the call back.** The proxy withheld a call before it ran only for `[ok]` rules. A plain rule let the call run and then ended the session on the next request, so the action happened anyway. The response gate now refuses the call with `PREREQUISITE_UNMET`, and the agent can do the first step and try again. The built-in deploy, publish and release floors still act after the call.
+
 ## [3.2.0] - 2026-11-06
 
 ### Changed

@@ -5348,7 +5348,15 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .map(|s| crate::refusal::tool_rule_id("allow_commands", &s.title))
                 .unwrap_or_else(|| "allow_commands".to_string()),
         }
-    }));
+    }))
+    .with_ordering(
+        crate::plugins::anomaly::outcome::plain_rules(&gov.requires_before),
+        if gov.requires_before.is_empty() {
+            Vec::new()
+        } else {
+            tool_sequence.clone()
+        },
+    );
     // Hook-rule guardrails, enforcing and shadow together: each rule carries
     // its SOP's mode. Enforced on the response's tool calls below, and on the
     // calls of the turn this request reports on. A rule scoped to workspace

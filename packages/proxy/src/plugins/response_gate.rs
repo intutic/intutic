@@ -139,8 +139,7 @@ pub enum DenialReason {
     /// it could not decide (the gateway has no ask), or the engine could not
     /// answer for an enforcing rule.
     Decide(crate::decide::gateway::ToolCallRefusal),
-    /// A call a qualified `requires_before:` rule gates while its
-    /// prerequisite is unmet.
+    /// A call a `requires_before:` rule gates while its prerequisite is unmet.
     Prerequisite(PrerequisiteDenial),
     /// A file-changing call outside `scope_paths` under
     /// `scope_paths_mode: enforce`.
@@ -169,7 +168,7 @@ pub enum DenialReason {
     Unparseable,
 }
 
-/// A qualified prerequisite the response gate found unmet.
+/// A prerequisite the response gate found unmet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrerequisiteDenial {
     /// The tool call withheld.
@@ -728,6 +727,15 @@ pub struct ArgGates {
     /// The session's recorded outcomes; `None` when they could not be read,
     /// which leaves every qualified rule unmet.
     pub outcomes: Option<Vec<(String, crate::plugins::anomaly::outcome::OutcomeEntry)>>,
+    /// Plain `requires_before:` rules: `(prerequisite, gated, adjacent)`
+    /// (`plugins::anomaly::outcome::plain_rules`).
+    pub ordering: Vec<(String, String, bool)>,
+    /// The session's calls so far, then this response's released ones.
+    ///
+    /// shortcut: the stored window keeps 60 entries, so a prerequisite that aged
+    /// out is refused as never run and the agent has to repeat it; upgrade if real
+    /// sessions hit this, with a per-session set of the prerequisites seen.
+    pub sequence: Vec<String>,
     /// The enforced scope and the rule id it is refused under.
     pub scope: Option<ScopeGate>,
     /// The allowed commands and the rule id they are refused under.
@@ -786,6 +794,8 @@ impl ArgGates {
         Self {
             prerequisites,
             outcomes,
+            ordering: Vec::new(),
+            sequence: Vec::new(),
             scope,
             commands: None,
             node_kind,
@@ -800,9 +810,21 @@ impl ArgGates {
         self
     }
 
+    /// With the plain ordering rules in force, and the session's calls so far.
+    pub fn with_ordering(
+        mut self,
+        ordering: Vec<(String, String, bool)>,
+        sequence: Vec<String>,
+    ) -> Self {
+        self.ordering = ordering;
+        self.sequence = sequence;
+        self
+    }
+
     /// Nothing declared: the gate has nothing to check.
     pub fn is_empty(&self) -> bool {
         self.prerequisites.is_empty()
+            && self.ordering.is_empty()
             && self.scope.is_none()
             && self.commands.is_none()
             && self.node_kind.as_ref().is_none_or(|k| k.limits.is_none())
@@ -814,15 +836,13 @@ impl ArgGates {
         use crate::plugins::anomaly::actions::{
             tool_is, EDITOR_TOOLS, FETCH_TOOLS, READ_TOOLS, SHELL_TOOLS,
         };
-        if !self.prerequisites.is_empty()
+        let mut gated = self.prerequisites.iter().chain(&self.ordering).peekable();
+        if gated.peek().is_some()
             && (tool_is(tool, SHELL_TOOLS)
                 || tool_is(tool, FETCH_TOOLS)
                 || tool_is(tool, READ_TOOLS)
                 || tool_is(tool, EDITOR_TOOLS)
-                || self
-                    .prerequisites
-                    .iter()
-                    .any(|(_, gated, _)| gated.eq_ignore_ascii_case(tool)))
+                || gated.any(|(_, gated, _)| gated.eq_ignore_ascii_case(tool)))
         {
             return true;
         }
@@ -849,6 +869,7 @@ impl ArgGates {
         use crate::manifest::{DELETE_TOOLS, EDIT_TOOLS, MOVE_TOOLS, WRITE_TOOLS};
         use crate::plugins::anomaly::actions::tool_is;
         self.called = true;
+        self.sequence.push(tool.to_string());
         if tool_is(tool, WRITE_TOOLS)
             || tool_is(tool, EDIT_TOOLS)
             || tool_is(tool, DELETE_TOOLS)
@@ -879,9 +900,33 @@ impl ArgGates {
             call_id: None,
             is_error: None,
         };
+        let tokens = crate::manifest::expand_tool_actions(std::slice::from_ref(&call));
+        for (first, gated, adjacent) in &self.ordering {
+            if !tokens.iter().any(|t| t.eq_ignore_ascii_case(gated)) {
+                continue;
+            }
+            let seq: Vec<String> = self.sequence.iter().chain(&tokens).cloned().collect();
+            // The first use is the one the rule judges, as in the detector.
+            let used = seq
+                .iter()
+                .position(|t| t.eq_ignore_ascii_case(gated))
+                .unwrap_or(0);
+            if crate::plugins::anomaly::detectors::ordering_unmet(&seq, used, first, *adjacent) {
+                let arrow = if *adjacent { "~>" } else { "->" };
+                return Some(DenialReason::Prerequisite(PrerequisiteDenial {
+                    tool: tool.to_string(),
+                    gated: gated.clone(),
+                    rule: format!("requires_before.{first}{arrow}{gated}"),
+                    reason: if *adjacent {
+                        format!("{gated} must come directly after {first}")
+                    } else {
+                        format!("{gated} needs {first} first; none ran in this session")
+                    },
+                    prerequisite: first.clone(),
+                }));
+            }
+        }
         if !self.prerequisites.is_empty() {
-            let mut tokens = crate::plugins::anomaly::actions::classify(tool, args);
-            tokens.push(tool.to_string());
             use crate::plugins::anomaly::outcome::{
                 prerequisite_unmet, prerequisite_unmet_reason, Case,
             };
@@ -961,6 +1006,7 @@ impl ArgGates {
             self.wrote = true;
         }
         self.called = true;
+        self.sequence.extend(tokens);
         None
     }
 }
@@ -2436,6 +2482,144 @@ mod lld75_arg_gate_tests {
             "data: {}",
             json!({"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
         )
+    }
+
+    fn ordered(history: &[&str], first: &str, gated: &str, adjacent: bool) -> ArgGates {
+        ArgGates::default().with_ordering(
+            vec![(first.into(), gated.into(), adjacent)],
+            history.iter().map(|t| t.to_string()).collect(),
+        )
+    }
+
+    #[test]
+    fn a_plain_rule_withholds_the_call_before_it_runs() {
+        let read = openai(&[("get_accounts", json!({"user_id": "u1"}))]);
+        let gates = ordered(&["get_user"], "log_verification", "get_accounts", false);
+        let d = gate_response_args(&cfg(), Some(&read), &gates).expect("refused");
+        let r = d.refusal();
+        assert_eq!(r.code, Code::PrerequisiteUnmet);
+        assert_eq!(r.rule, "requires_before.log_verification->get_accounts");
+        assert_eq!(r.scope.as_ref().unwrap().tools, vec!["get_accounts"]);
+        assert!(
+            d.agent_message()
+                .contains("get_accounts needs log_verification first"),
+            "{}",
+            d.agent_message()
+        );
+    }
+
+    #[test]
+    fn a_plain_rule_is_met_by_history_or_an_earlier_call_in_the_response() {
+        let read = ("get_accounts", json!({"user_id": "u1"}));
+        let log = ("log_verification", json!({"user_id": "u1"}));
+        let gates = ordered(
+            &["log_verification"],
+            "log_verification",
+            "get_accounts",
+            false,
+        );
+        assert!(
+            gate_response_args(&cfg(), Some(&openai(std::slice::from_ref(&read))), &gates)
+                .is_none()
+        );
+
+        let gates = ordered(&[], "log_verification", "get_accounts", false);
+        let both = openai(&[log.clone(), read.clone()]);
+        assert!(gate_response_args(&cfg(), Some(&both), &gates).is_none());
+        // The other way round, the read comes first and is refused.
+        let both = openai(&[read, log]);
+        assert!(gate_response_args(&cfg(), Some(&both), &gates).is_some());
+        // An unrelated call never asks.
+        let other = openai(&[("get_time", json!({}))]);
+        assert!(gate_response_args(&cfg(), Some(&other), &gates).is_none());
+    }
+
+    #[test]
+    fn a_plain_rule_reads_action_tokens_from_the_arguments() {
+        let gates = ordered(&[], "action:run_tests", "action:deploy", false);
+        let push = openai(&[("Bash", json!({"command": "git push origin main"}))]);
+        let d = gate_response_args(&cfg(), Some(&push), &gates).expect("refused");
+        assert_eq!(
+            d.refusal().rule,
+            "requires_before.action:run_tests->action:deploy"
+        );
+        let tested = ordered(
+            &["Bash", "action:run_tests"],
+            "action:run_tests",
+            "action:deploy",
+            false,
+        );
+        assert!(gate_response_args(&cfg(), Some(&push), &tested).is_none());
+    }
+
+    #[test]
+    fn an_adjacent_plain_rule_needs_the_call_directly_before() {
+        let sign = openai(&[("release", json!({}))]);
+        let met = ordered(&["sign"], "sign", "release", true);
+        assert!(gate_response_args(&cfg(), Some(&sign), &met).is_none());
+        let unmet = ordered(&["sign", "ls"], "sign", "release", true);
+        let d = gate_response_args(&cfg(), Some(&sign), &unmet).expect("refused");
+        assert_eq!(d.refusal().rule, "requires_before.sign~>release");
+    }
+
+    #[test]
+    fn plain_rules_and_qualified_rules_do_not_overlap() {
+        let rules = vec![
+            ("log_verification".to_string(), "read".to_string(), false),
+            (
+                "action:run_tests[ok]".to_string(),
+                "action:deploy".to_string(),
+                false,
+            ),
+        ];
+        assert_eq!(
+            crate::plugins::anomaly::outcome::plain_rules(&rules),
+            vec![("log_verification".to_string(), "read".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn the_stream_withholds_a_plain_gated_call_and_counts_an_unheld_prerequisite() {
+        let tool_start = |i: u64, name: &str| {
+            chunk(
+                json!({"tool_calls": [{"index": i, "id": format!("c{i}"), "type": "function",
+                "function": {"name": name, "arguments": "{}"}}]}),
+                Value::Null,
+            )
+        };
+        let run = |lines: Vec<String>| {
+            let mut hold = StreamHold::new(Vec::new()).with_arg_gates(ordered(
+                &[],
+                "log_verification",
+                "get_accounts",
+                false,
+            ));
+            let (mut emitted, mut refused) = (Vec::new(), None);
+            for l in lines {
+                let mut step = hold.push(l);
+                emitted.append(&mut step.emit);
+                refused = refused.or(step.refuse_gate.take());
+            }
+            (emitted, refused)
+        };
+        let end = chunk(json!({}), json!("tool_calls"));
+        let (emitted, refused) = run(vec![tool_start(0, "get_accounts"), end.clone()]);
+        assert!(refused.is_some());
+        assert!(
+            emitted.iter().all(|l| !l.contains("get_accounts")),
+            "{emitted:?}"
+        );
+
+        let (emitted, refused) = run(vec![
+            tool_start(0, "log_verification"),
+            tool_start(1, "get_accounts"),
+            end,
+        ]);
+        assert!(refused.is_none(), "{refused:?}");
+        assert!(
+            emitted.iter().any(|l| l.contains("get_accounts")),
+            "{emitted:?}"
+        );
     }
 
     #[test]

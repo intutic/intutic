@@ -92,8 +92,9 @@ pub enum Code {
     ResponseUnparseable,
     /// Output DLP found content it could not redact without breaking the body.
     OutputDlp,
-    /// A qualified `requires_before:` prerequisite is not met: no passing
-    /// run, a failed or unreadable one, or one made stale by a later write.
+    /// A `requires_before:` prerequisite is not met: for a plain rule, it has
+    /// not run; for `[ok]`, no passing run, a failed or unreadable one, or one
+    /// made stale by a later write.
     PrerequisiteUnmet,
     /// A file-changing call outside `scope_paths` under
     /// `scope_paths_mode: enforce`.

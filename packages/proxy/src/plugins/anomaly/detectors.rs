@@ -818,6 +818,23 @@ const REQUIRED_PREDECESSORS: &[(&str, &str)] = &[
     ("action:release", "action:run_tests"),
 ];
 
+/// Whether the call at `used` lacks its prerequisite. `~>` tightens "somewhere
+/// before" to "immediately before".
+pub(crate) fn ordering_unmet(
+    seq: &[String],
+    used: usize,
+    prerequisite: &str,
+    adjacent: bool,
+) -> bool {
+    !if adjacent {
+        used > 0 && seq[used - 1].eq_ignore_ascii_case(prerequisite)
+    } else {
+        seq[..used]
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(prerequisite))
+    }
+}
+
 pub struct MissingPredecessorDetector {
     rules: &'static [(&'static str, &'static str)],
 }
@@ -942,15 +959,7 @@ impl AnomalyDetector for MissingPredecessorDetector {
             let Some(used) = seq.iter().position(|t| t.eq_ignore_ascii_case(tool)) else {
                 continue;
             };
-            // `~>` tightens "somewhere before" to "immediately before".
-            let satisfied = if *adjacent {
-                used > 0 && seq[used - 1].eq_ignore_ascii_case(prerequisite)
-            } else {
-                seq[..used]
-                    .iter()
-                    .any(|t| t.eq_ignore_ascii_case(prerequisite))
-            };
-            if satisfied {
+            if !ordering_unmet(seq, used, prerequisite, *adjacent) {
                 continue;
             }
             return Some(

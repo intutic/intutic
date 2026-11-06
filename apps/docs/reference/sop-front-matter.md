@@ -180,6 +180,11 @@ forbid_after: action:pii_export -> action:db_write
 ---
 ```
 
+The proxy withholds a call that breaks a declared `requires_before:` rule before
+it runs, refuses it with `PREREQUISITE_UNMET`, and the agent can do the first step
+and try again. `forbid_after:` and the built-in floors below act on the next
+request, once the call has run.
+
 **Both arrows read left-to-right as sequence order.** `requires_before: A -> B`
 is "A must precede B"; `forbid_after: A -> B` is "B must not follow A". A rule
 pointed backwards does not error — it silently never matches — so the two keys
