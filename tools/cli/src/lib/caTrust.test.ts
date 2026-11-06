@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { caTrustCommandFor } from './caTrust.js'
 
@@ -12,7 +13,8 @@ describe('caTrustCommandFor', () => {
   it('macOS user scope trusts into the login keychain', () => {
     const cmds = caTrustCommandFor('darwin', 'user', '/tmp/ca.crt')
     expect(cmds).toHaveLength(1)
-    expect(cmds![0].args).toContain('~/Library/Keychains/login.keychain-db')
+    // A full path: this runs with no shell, so a `~` would stay a literal `~`.
+    expect(cmds![0].args).toContain(`${homedir()}/Library/Keychains/login.keychain-db`)
   })
 
   it('macOS system and user scopes target different keychains', () => {

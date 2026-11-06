@@ -70,7 +70,7 @@
     "@intutic/id": "workspace:*",
     "@intutic/logger": "workspace:*",
     "@opentelemetry/api": "^1.10.0",
-    "@opentelemetry/core": "^3.0.0",
+    "@opentelemetry/core": "^3.1.0",
     "@intutic/sync-daemon": "workspace:*",
     "@clack/prompts": "^1.7.0",
     "chokidar": "^5.0.0",
