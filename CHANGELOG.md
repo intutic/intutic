@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-11-06
+
+### Changed
+
+- **Node.js 22.15 or later.** `@intutic/cli`, the sync daemon and the MCP daemon no longer run on Node 20, which reached end of life in April 2026. The SDK packages keep their wider range.
+- **OpenTelemetry 3.** The MCP daemon moved from `sdk-trace-base` and `sdk-trace-node`, both deprecated, to `sdk-trace`, so an install prints no deprecation warning for them.
+
+### Fixed
+
+- **`intutic sops push` carries a SOP's enforcing keys.** `allow_commands:`, `deny_tools:` and the other keys stayed in the file, so a pushed SOP enforced nothing on the control plane. They now travel in `markdown_content`, in a fence, and a judge reads the body only. A file holding keys the server never received counts as changed, so its next push sends them, as a new DRAFT if the SOP is approved. `sops pull` keeps one fence, where a SOP made through the API used to land in a second one that the proxy did not read.
+- **`intutic status` on an image with no `ps`.** It said the daemon was stopped while it ran, and the daemon printed a shell error on every poll. `status`, `doctor`, `disconnect` and the daemon's agent detection now read `/proc` on Linux when `ps` is missing.
+- **`intutic connect` on an image with no `which`.** Minimal Fedora images said no CA tool was available, with `update-ca-trust` installed, so the CA was never trusted.
+
 ## [3.1.5] - 2026-11-05
 
 ### Fixed

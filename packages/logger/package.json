@@ -1,6 +1,6 @@
 {
   "name": "@intutic/logger",
-  "version": "3.1.5",
+  "version": "3.2.0",
   "description": "Structured logging with trace context for Intutic packages",
   "license": "MIT",
   "repository": {
@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "pino": "^9.0.0",
-    "@opentelemetry/api": "^1.9.0"
+    "@opentelemetry/api": "^1.10.0"
   },
   "devDependencies": {
     "typescript": "^5.5",

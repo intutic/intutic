@@ -1,13 +1,14 @@
 /**
  * Active process detection — detect running AI agent processes.
  *
- * Uses native platform commands (`ps` on macOS/Linux, `tasklist` on Windows)
- * to find running agent processes. No external dependencies.
+ * Uses native platform commands (`ps` on macOS/Linux, `tasklist` on Windows),
+ * and `/proc` on a Linux image with no `ps`, to find running agent processes.
  *
  * @module
  */
 
 import { execSync } from 'node:child_process'
+import { readProcTable } from '@intutic/sync-daemon/lib/processTable'
 
 /** A detected running agent process. */
 export interface ActiveProcess {
@@ -197,18 +198,18 @@ export function parseProcessOutput(output: string, platform: string): Array<{ pi
   return results
 }
 
-function getRawProcessList(): Array<{ pid: number; command: string }> {
+/** Every running process. Empty only when neither the platform's command nor `/proc` can answer. */
+export function getRawProcessList(): Array<{ pid: number; command: string }> {
   const isWindows = process.platform === 'win32'
+  const command = isWindows ? 'tasklist /FO CSV /NH' : 'ps -ax -o pid,args'
 
   try {
-    const output = isWindows
-      ? execSync('tasklist /FO CSV /NH', { encoding: 'utf-8', timeout: 5000 })
-      : execSync('ps -ax -o pid,args', { encoding: 'utf-8', timeout: 5000 })
+    const output = execSync(command, { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
 
     return parseProcessOutput(output, process.platform)
   } catch {
     // Command failed (e.g. timeout, or no ps/tasklist available)
-    return []
+    return process.platform === 'linux' ? readProcTable() : []
   }
 }
 

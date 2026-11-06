@@ -34,6 +34,7 @@ import type { IntuticConfig } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { reportDisconnect } from '../lib/deviceReport.js'
 import { linuxConnectCaRemoval, removeLinuxConnectCaTrust } from '../lib/caTrust.js'
+import { getRawProcessList } from '../lib/process.js'
 import { clearCredentials, loadConfig, loadCredentials, saveConfig } from '../config/store.js'
 import { getCredentialsPath, getIntuticDir } from '../config/paths.js'
 import { getServicePaths, uninstallDaemon, uninstallMcpDaemon, uninstallProxyService, type ServiceTarget } from './install-daemon.js'
@@ -181,18 +182,9 @@ function planConfig(plan: DisconnectPlan, config: IntuticConfig | null, harness:
 /** PIDs of `intutic connect` processes other than this one. */
 function runningConnects(): number[] {
   if (process.platform === 'win32') return []
-  let out: string
-  try {
-    out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
-  } catch {
-    return []
-  }
-  return out
-    .split('\n')
-    .map((line) => /^\s*(\d+)\s+(.*)$/.exec(line))
-    .filter((m): m is RegExpExecArray => m !== null)
-    .filter(([, pid, command]) => Number(pid) !== process.pid && /(?:^|[\\/\s])intutic(?:\.js|\.cjs|\.mjs)?\s+connect\b|cli\.js\s+connect\b/.test(command!))
-    .map(([, pid]) => Number(pid))
+  return getRawProcessList()
+    .filter(({ pid, command }) => pid !== process.pid && /(?:^|[\\/\s])intutic(?:\.js|\.cjs|\.mjs)?\s+connect\b|cli\.js\s+connect\b/.test(command))
+    .map(({ pid }) => pid)
 }
 
 function show(p: string): string {

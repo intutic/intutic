@@ -121,7 +121,8 @@ export function caTrustCommandFor(
 
 async function commandExists(cmd: string): Promise<boolean> {
   try {
-    await execFileAsync('which', [cmd])
+    // `command -v`, a shell builtin: minimal images, Fedora's among them, have no `which`.
+    await execFileAsync('sh', ['-c', 'command -v "$0"', cmd])
     return true
   } catch {
     return false

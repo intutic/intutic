@@ -17,7 +17,9 @@
  * modules, to allow monkey-patching.
  */
 
-import { metrics } from '@opentelemetry/api'
+import { context, metrics, propagation, trace } from '@opentelemetry/api'
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks'
+import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http'
 import { registerInstrumentations } from '@opentelemetry/instrumentation'
@@ -27,8 +29,7 @@ import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runti
 import { UndiciInstrumentation } from '@opentelemetry/instrumentation-undici'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics'
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base'
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
+import { BatchSpanProcessor, TracerProvider } from '@opentelemetry/sdk-trace'
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions'
 import { createLogger } from '@intutic/logger'
 
@@ -46,13 +47,17 @@ if (endpoint) {
   // Not `NodeSDK` or `auto-instrumentations-node`: both depend on every exporter
   // including gRPC, which puts protobufjs and its install script on every
   // `npm install -g @intutic/cli`, for a feature that is off by default.
-  // shortcut: sdk-trace-base and sdk-trace-node are deprecated for sdk-trace 3,
-  // which needs Node >= 22.15; move to it when the CLI's engines drop Node 20.
-  const tracerProvider = new NodeTracerProvider({
+  const tracerProvider = new TracerProvider({
     resource,
-    spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: `${base}/v1/traces` }))],
+    spanProcessors: [new BatchSpanProcessor({ exporter: new OTLPTraceExporter({ url: `${base}/v1/traces` }) })],
   })
-  tracerProvider.register()
+  // sdk-trace 3 has no `register()`: a provider alone gives spans with no parents
+  // and nothing on outgoing requests.
+  trace.setGlobalTracerProvider(tracerProvider)
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager())
+  propagation.setGlobalPropagator(
+    new CompositePropagator({ propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()] }),
+  )
   const meterProvider = new MeterProvider({
     resource,
     readers: [new PeriodicExportingMetricReader({ exporter: new OTLPMetricExporter({ url: `${base}/v1/metrics` }) })],
