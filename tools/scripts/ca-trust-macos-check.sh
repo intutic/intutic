@@ -28,11 +28,17 @@ check() { # check <name> <expected exit: 0 or 1> <command...>
 mkdir -p "$HOME/.intutic"
 CA="$HOME/.intutic/ca.crt"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
-openssl req -x509 -newkey rsa:2048 -nodes -keyout "$W/ca.key" -out "$CA" -days 2 -subj /CN=intutic-ci-check-ca \
-  -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign 2>/dev/null
+# The CA a proxy really generates, not an imitation: Apple's verifier is particular about extensions.
+curl -fsSL -o "$W/proxy" https://github.com/intutic/intutic/releases/download/v3.1.5/intutic-proxy-darwin-arm64
+chmod +x "$W/proxy"
+env -i PATH="$PATH" HOME="$HOME" INTUTIC_STANDALONE=1 PORT=4941 INTUTIC_PROXY_BIND=127.0.0.1 ANTHROPIC_API_KEY=unused "$W/proxy" >"$W/proxy.log" 2>&1 &
+proxy=$!
+for _ in $(seq 1 60); do [ -s "$CA" ] && [ -s "$HOME/.intutic/ca.key" ] && break; sleep 0.5; done
+kill $proxy 2>/dev/null
+[ -s "$CA" ] || { echo 'FAIL  the proxy wrote no CA'; cat "$W/proxy.log"; exit 1; }
 openssl req -newkey rsa:2048 -nodes -keyout "$W/leaf.key" -out "$W/leaf.csr" -subj /CN=localhost 2>/dev/null
 printf 'subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\n' >"$W/ext"
-openssl x509 -req -in "$W/leaf.csr" -CA "$CA" -CAkey "$W/ca.key" -CAcreateserial -out "$W/leaf.crt" -days 2 -extfile "$W/ext" 2>/dev/null
+openssl x509 -req -in "$W/leaf.csr" -CA "$CA" -CAkey "$HOME/.intutic/ca.key" -CAcreateserial -out "$W/leaf.crt" -days 2 -extfile "$W/ext" 2>/dev/null
 
 SSL=(security verify-cert -c "$W/leaf.crt" -p ssl -s localhost)
 TLS=(node --use-system-ca -e "fetch('https://localhost:8443/').then(r=>process.exit(r.ok?0:1),e=>{console.error(e.cause??e);process.exit(1)})")
