@@ -125,11 +125,11 @@ export async function planCaTrust(plan: DisconnectPlan): Promise<void> {
     if (!listed.toUpperCase().includes(sha1.toUpperCase())) return
     plan.change(keychain, 'remove the Intutic CA certificate connect trusted', async () => {
       try {
-        execFileSync('security', ['remove-trusted-cert', '-d', certPath], { stdio: 'ignore' })
+        execFileSync('security', ['remove-trusted-cert', '-d', certPath], { stdio: 'ignore', timeout: SECURITY_PROMPT_MS })
       } catch {
         // No admin trust setting left for it: the certificate removal below is what matters.
       }
-      execFileSync('security', ['delete-certificate', '-Z', sha1, keychain], { stdio: 'ignore' })
+      execFileSync('security', ['delete-certificate', '-Z', sha1, keychain], { stdio: 'ignore', timeout: SECURITY_PROMPT_MS })
     })
   } else if (process.platform === 'win32') {
     plan.note(
@@ -178,6 +178,9 @@ function planConfig(plan: DisconnectPlan, config: IntuticConfig | null, harness:
     })
   })
 }
+
+/** Long enough to type a password at the keychain prompt; with no screen to show it on, `security` waits forever. */
+const SECURITY_PROMPT_MS = 120_000
 
 /** PIDs of `intutic connect` processes other than this one. */
 function runningConnects(): number[] {

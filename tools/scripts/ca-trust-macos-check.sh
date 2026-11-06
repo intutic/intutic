@@ -17,8 +17,9 @@ check() { # check <name> <expected exit: 0 or 1> <command...>
   local name=$1 want=$2; shift 2
   echo "run   $name"
   # A hung keychain prompt has no one to answer it on a runner: 60 s, then it counts as a failure.
+  local started=$SECONDS
   perl -e 'alarm 60; exec @ARGV' "$@" >"$W/out" 2>&1 </dev/null; local got=$?
-  [ "$got" -eq 142 ] && echo "      timed out after 60 s"
+  [ $((SECONDS - started)) -ge 59 ] && echo "      timed out after 60 s"
   [ "$got" -ne 0 ] && got=1
   if [ "$got" = "$want" ]; then echo "ok    $name"; else echo "FAIL  $name (wanted $want, got $got)"; sed 's/^/      /' "$W/out"; failed=1; fi
 }
@@ -59,7 +60,12 @@ check 'installCaTrust: the login keychain path resolves' 0 node --input-type=mod
 
 fingerprint=$(openssl x509 -in "$CA" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)
 check 'disconnect: lists the CA in its plan'  0 bash -c "node '$CLI' disconnect --dry-run | grep -qi 'CA certificate'"
-check 'disconnect: runs'                      0 sudo -E env "HOME=$HOME" "PATH=$PATH" node "$CLI" disconnect
+# Which step of the removal needs what, one at a time.
+check 'remove trust, as the user'  0 security remove-trusted-cert -d "$CA"
+check 'remove trust, under sudo'   0 sudo security remove-trusted-cert -d "$CA"
+check 'delete the cert, as the user' 0 security delete-certificate -Z "$fingerprint" "$KEYCHAIN"
+check 'put it back for disconnect' 0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
+check 'disconnect: runs'           0 sudo -E env "HOME=$HOME" "PATH=$PATH" node "$CLI" disconnect
 check 'after disconnect: the certificate is gone'  1 bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'"
 check 'after disconnect: the CA is not trusted'    1 security verify-cert -c "$CA"
 check 'after disconnect: a Node client is refused' 1 "${TLS[@]}"
