@@ -13,13 +13,14 @@ fi
 CLI="$PWD/tools/cli/dist/cli.js"
 W=$(mktemp -d)
 failed=0
+LIMIT=60
 check() { # check <name> <expected exit: 0 or 1> <command...>
   local name=$1 want=$2; shift 2
   echo "run   $name"
-  # A hung keychain prompt has no one to answer it on a runner: 60 s, then it counts as a failure.
+  # A hung keychain prompt has no one to answer it on a runner: past LIMIT it counts as a failure.
   local started=$SECONDS
-  perl -e 'alarm 60; exec @ARGV' "$@" >"$W/out" 2>&1 </dev/null; local got=$?
-  [ $((SECONDS - started)) -ge 59 ] && echo "      timed out after 60 s"
+  perl -e 'alarm shift; exec @ARGV' "$LIMIT" "$@" >"$W/out" 2>&1 </dev/null; local got=$?
+  [ $((SECONDS - started)) -ge $((LIMIT - 1)) ] && echo "      timed out after $LIMIT s"
   [ "$got" -ne 0 ] && got=1
   if [ "$got" = "$want" ]; then echo "ok    $name"; else echo "FAIL  $name (wanted $want, got $got)"; sed 's/^/      /' "$W/out"; failed=1; fi
 }
@@ -60,12 +61,21 @@ check 'installCaTrust: the login keychain path resolves' 0 node --input-type=mod
 
 fingerprint=$(openssl x509 -in "$CA" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)
 check 'disconnect: lists the CA in its plan'  0 bash -c "node '$CLI' disconnect --dry-run | grep -qi 'CA certificate'"
-# Which step of the removal needs what, one at a time.
-check 'remove trust, as the user'  0 security remove-trusted-cert -d "$CA"
-check 'remove trust, under sudo'   0 sudo security remove-trusted-cert -d "$CA"
-check 'delete the cert, as the user' 0 security delete-certificate -Z "$fingerprint" "$KEYCHAIN"
-check 'put it back for disconnect' 0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
-check 'disconnect: runs'           0 sudo -E env "HOME=$HOME" "PATH=$PATH" node "$CLI" disconnect
+# With no screen, removing a trust setting waits on a prompt, even under sudo. The
+# certificate must still go, and the user must be told what is left. The first 120 s
+# is disconnect's own limit.
+LIMIT=150
+check 'disconnect with no screen: gives up, and exits 0' 0 node "$CLI" disconnect
+LIMIT=60
+grep -q 'sudo security remove-trusted-cert' "$W/out" && echo 'ok    disconnect names the command to run' || { echo 'FAIL  disconnect did not name the command'; sed 's/^/      /' "$W/out"; failed=1; }
+check 'with no screen: the certificate is gone' 1 bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'"
+
+# What a person's password does. This machine is thrown away; never do this on one you keep.
+check 'runner only: allow trust changes' 0 sudo security authorizationdb write com.apple.trust-settings.admin allow
+check 'the command disconnect named'     0 sudo security remove-trusted-cert -d "$CA"
+check 'put it back'                      0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
+check 'trusted again'                    0 security verify-cert -c "$CA"
+check 'disconnect: runs'                 0 node "$CLI" disconnect
 check 'after disconnect: the certificate is gone'  1 bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'"
 check 'after disconnect: the CA is not trusted'    1 security verify-cert -c "$CA"
 check 'after disconnect: a Node client is refused' 1 "${TLS[@]}"

@@ -126,8 +126,12 @@ export async function planCaTrust(plan: DisconnectPlan): Promise<void> {
     plan.change(keychain, 'remove the Intutic CA certificate connect trusted', async () => {
       try {
         execFileSync('security', ['remove-trusted-cert', '-d', certPath], { stdio: 'ignore', timeout: SECURITY_PROMPT_MS })
-      } catch {
-        // No admin trust setting left for it: the certificate removal below is what matters.
+      } catch (err) {
+        // A timeout is a prompt no one saw, over SSH: the trust setting outlives the certificate.
+        // Any other failure means no admin trust setting is left for it.
+        if ((err as NodeJS.ErrnoException).code === 'ETIMEDOUT') {
+          log.warn(`Could not remove the CA's trust setting without a password prompt. Run: sudo security remove-trusted-cert -d ${certPath}`)
+        }
       }
       execFileSync('security', ['delete-certificate', '-Z', sha1, keychain], { stdio: 'ignore', timeout: SECURITY_PROMPT_MS })
     })
