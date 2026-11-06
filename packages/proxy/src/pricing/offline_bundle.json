@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/ab07b7207e37e52f1ac8126817d101c90f5d01a0/model_prices_and_context_window.json",
-    "generated_at": "2026-10-29",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/3f13c1ca34874c3bfa021e6fc14ac950c56d97b5/model_prices_and_context_window.json",
+    "generated_at": "2026-11-06",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -721,14 +721,14 @@
       "cache_read_cost_per_1k": 0.000015
     },
     "mistral/mistral-large-4": {
-      "input_cost_per_1k": 0.00136,
-      "output_cost_per_1k": 0.00418,
-      "cache_read_cost_per_1k": 0.00014
+      "input_cost_per_1k": 0.0007,
+      "output_cost_per_1k": 0.0021,
+      "cache_read_cost_per_1k": 0.00007
     },
     "mistral/mistral-large-4-0": {
-      "input_cost_per_1k": 0.00136,
-      "output_cost_per_1k": 0.00418,
-      "cache_read_cost_per_1k": 0.00014
+      "input_cost_per_1k": 0.0007,
+      "output_cost_per_1k": 0.0021,
+      "cache_read_cost_per_1k": 0.00007
     },
     "mistral/mistral-large-latest": {
       "input_cost_per_1k": 0.0005,
@@ -1041,6 +1041,10 @@
       "input_cost_per_1k": 0.002,
       "output_cost_per_1k": 0.01,
       "cache_read_cost_per_1k": 0.0001
+    },
+    "gemini/gemini-omni-1.2-flash": {
+      "input_cost_per_1k": 0.0015,
+      "output_cost_per_1k": 0.009
     },
     "claude-3-7-sonnet-20250219": {
       "input_cost_per_1k": 0.003,
