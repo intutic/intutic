@@ -69,15 +69,6 @@ check 'installCaTrust: the login keychain path resolves' 0 node --input-type=mod
 fingerprint=$(openssl x509 -in "$CA" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)
 in_keychain_cmd=(bash -c "security find-certificate -a -Z '$KEYCHAIN' | grep -qi '$fingerprint'")
 check 'disconnect: lists the CA in its plan'  0 bash -c "node '$CLI' disconnect --dry-run | grep -qi 'CA certificate'"
-# A prompt no one answers. The first 120 s is disconnect's own limit.
-LIMIT=150
-check 'no one answers: disconnect gives up, and exits 0' 0 node "$CLI" disconnect
-LIMIT=60
-grep -q 'sudo security remove-trusted-cert' "$W/out" && echo 'ok    disconnect names the command to run' || { echo 'FAIL  disconnect did not name the command'; failed=1; }
-check 'no one answers: the CA is still trusted' 0 security verify-cert -c "$CA"
-check 'no one answers: the certificate stays for a second run' 0 "${in_keychain_cmd[@]}"
-pkill -x SecurityAgent 2>/dev/null; sleep 1
-
 # The real prompt, answered as a person would. This machine is thrown away; the admin
 # account and its password exist for this script alone.
 ADMIN=catest
@@ -143,5 +134,16 @@ check 'a second disconnect finds nothing to do'    0 bash -c "! node '$CLI' disc
 check 'put it back' 0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
 at_prompt 'the command disconnect named' 0 "type_password $PW" sudo security remove-trusted-cert -d "$CA"
 check 'after the command: the CA is not trusted' 1 security verify-cert -c "$CA"
+
+# Last: a request no one answers stays queued after its process dies, and the next
+# prompt on screen would be that one.
+check 'put it back again' 0 sudo security add-trusted-cert -d -r trustRoot -k "$KEYCHAIN" "$CA"
+# The first 120 s is disconnect's own limit.
+LIMIT=150
+check 'no one answers: disconnect gives up, and exits 0' 0 node "$CLI" disconnect
+LIMIT=60
+grep -q 'sudo security remove-trusted-cert' "$W/out" && echo 'ok    disconnect names the command to run' || { echo 'FAIL  disconnect did not name the command'; failed=1; }
+check 'no one answers: the CA is still trusted' 0 security verify-cert -c "$CA"
+check 'no one answers: the certificate stays for a second run' 0 "${in_keychain_cmd[@]}"
 
 exit $failed
