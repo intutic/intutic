@@ -68,6 +68,7 @@ list is a trial or a degraded preview of a paid feature:
 | [Decide rules](/guide/decide) | `decide:` lines in local SOPs, asked of your own self-hosted engine and pinned by `intutic decide eval`; enforced by the hook gates, the gate SDKs and the proxy | plus rules served from the control plane with their pins, and its shadow stamps |
 | [Decision traffic](/guide/decision-traffic) | the proxy governs decision-model calls: DLP, pinned model versions, abstention and human-review headers, the local decision-traffic log, its own daily cap | plus workspace and virtual-key budgets |
 | Qualified `requires_before`, `scope_paths_mode: enforce`, `allow_commands:` | enforced by the hook gates, the gate SDKs and the proxy | the same |
+| Plain `requires_before:` and `forbid_after:` | the proxy refuses the call before it runs; the hook gates, the gate SDKs and the MCP proxy do not evaluate them | the same |
 | `plan_approval:` | no plan can be approved, so every call but a read is refused (`PLAN_NOT_APPROVED`) | enforced against the session's approved plan |
 | `review_before:` and `closed_lanes:` holds | refused, not held: approval needs a control plane | held until a person approves the call |
 
