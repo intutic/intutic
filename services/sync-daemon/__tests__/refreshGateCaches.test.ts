@@ -49,9 +49,11 @@ describe('refreshGateCaches', () => {
     vi.stubGlobal('fetch', controlPlane([{ id: 'sop.first', toolPattern: 'Bash', action: 'block', reason: 'first rule' }]))
     const first = await refreshGateCaches(opts)
     expect(first.snapshot).toBe(true)
-    const rulesFile = join(DEFAULT_SNAPSHOT_DIR, 'policy-snapshot.rules')
-    expect(existsSync(rulesFile) || existsSync(join(home, '.intutic', 'hooks', 'policy-snapshot.rules'))).toBe(true)
-    const path = existsSync(rulesFile) ? rulesFile : join(home, '.intutic', 'hooks', 'policy-snapshot.rules')
+    // DEFAULT_SNAPSHOT_DIR is fixed at import, so it follows the HOME that
+    // isolateHome.ts set, never this test's own; it must not be the real one.
+    expect(DEFAULT_SNAPSHOT_DIR.startsWith(process.env.INTUTIC_TEST_REAL_HOME!)).toBe(false)
+    const path = join(DEFAULT_SNAPSHOT_DIR, 'policy-snapshot.rules')
+    expect(existsSync(path)).toBe(true)
     expect(readFileSync(path, 'utf8')).toContain('sop.first')
 
     vi.stubGlobal('fetch', controlPlane([{ id: 'sop.second', toolPattern: 'Bash', action: 'block', reason: 'second rule' }]))
