@@ -94,11 +94,13 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 200 | `TOOL_DENIED` | `kill` | The model called a tool an SOP denies to this agent role; the call was withheld |
 | 200 | `SSO_GROUP` | `kill` | The model called a tool the workspace's SSO group policy does not clear for this member; the call was withheld |
 | 200 | `SQL_GUARD` | `kill` | The model called a shell tool to run destructive SQL against a database the SQL allowlist does not admit; the call was withheld |
-| 200 | `PREREQUISITE_UNMET` | `kill` | The model called a tool a qualified `requires_before` gates (`action:run_tests[ok] -> …`) and its prerequisite is not met: no test run in the session, the last one failed, its result could not be read, or files changed after it; the call was withheld |
+| 200 | `PREREQUISITE_UNMET` | `kill` | The model called a tool a `requires_before` gates and its prerequisite is not met: for `A -> B`, A has not run in the session; for `action:run_tests[ok] -> …`, no test run, the last one failed, its result could not be read, or files changed after it. The call was withheld and the session carries on: do the first step, then retry |
 | 200 | `OUT_OF_SCOPE` | `kill` | The model called a file-changing tool on a path outside `scope_paths` under `scope_paths_mode: enforce`; the call was withheld |
 | 200 | `COMMAND_NOT_ALLOWED` | `kill` | The model called a shell tool with a command outside `allow_commands`, or one that could not be read as plain commands; the call was withheld |
 | 200 | `RESPONSE_UNPARSEABLE` | `kill` | The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed |
 | 200 | `OUTPUT_DLP` | `kill` | The model's response held sensitive content that could not be redacted safely, so it was withheld |
+
+`verdict` says what happened to this request, not to the session: `kill` refuses this request or tool call, and for codes such as `PREREQUISITE_UNMET`, `OUT_OF_SCOPE` and `COMMAND_NOT_ALLOWED` the session carries on. Decide what to do next from `code` and the refusal's `scope`, the way a gRPC client treats `FAILED_PRECONDITION`: fix the state it names, then retry.
 
 `ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code`, `status`, `ruleId` (`rule_id`), `retryAfterSeconds` (`retry_after_seconds`) and the proxy's reason as its message. `retryAfterSeconds` is set when the proxy sent `Retry-After` — on `RATE_LIMITED` and `BUDGET_EXCEEDED` — and is how long to wait before the same request can succeed; `chat()` does not wait and retry on its own. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
 

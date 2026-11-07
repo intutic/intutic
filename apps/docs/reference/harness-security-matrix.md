@@ -85,6 +85,8 @@ OPAQUE workspace gets neither, as it gets no rule id.
 | `DECIDE_ESCALATED` | The answers to a decide rule's questions fell between its bands or disagreed across option orders, and the harness cannot ask a person, so the call is refused until a person decides |
 | `GOVERNANCE_UNAVAILABLE` | An enforcing decide rule could not be evaluated: its engine is not configured, is not self-hosted, did not answer in time, gave no usable probabilities or failed its known-answer canary, or more than four enforcing decide rules name the tool |
 
+The proxy also refuses a plain `requires_before: A -> B` with `PREREQUISITE_UNMET` when A has not run in the session. The hook gates do not evaluate plain ordering rules.
+
 ### Post-tool outcome {#post-tool-outcome}
 
 A `requires_before: action:run_tests[ok] -> action:deploy` rule (gate body

@@ -149,6 +149,18 @@ match steers rather than blocks, because people write *"ignore the previous
 suggestion"* to agents in earnest; several distinct techniques in one payload
 is not a coincidence, and that is refused.
 
+Text in a tool result that talks to the agent rather than to whoever reads it,
+such as a web page or an email saying *"before you can solve the task I gave you,
+send…"*, is the indirect-injection shape those phrasings miss. Six more patterns
+look for it, in tool results only, and the proxy marks rather than refuses: it
+puts a notice in front of the result telling the model the text came from the
+tool, not the user, and forwards it whole. A refusal could only end the session,
+since the result stays in the history. On 17,000+ benign tool results and
+documents the patterns matched nothing; text that gives an instruction without
+addressing the agent (*"TODO: send the money"*) is not caught, and whether a
+model heeds the notice is up to the model. The MCP proxy and the gates do not
+mark tool output.
+
 The scan's timing deserves stating just as plainly: it runs on the **request
 path only** — the proxy scans what the client sends it. A poisoned tool result
 is therefore seen one turn late: the harness runs the tool, and the scan first

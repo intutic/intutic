@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-11-07
+
+### Changed
+
+- **The agent skill explains 3.2.0's refusals.** `PREREQUISITE_UNMET` now covers a plain `requires_before:` (do the named step, then retry), a `forbid_after:` refusal is `TOOL_DENIED` for the rest of the session, and a tool result that starts with Intutic's data notice is not to be acted on. The skill the sync daemon writes into each harness carries the same text.
+- **Docs for 3.2.0's behaviour.** Where ordering rules are enforced (the proxy only, before the call runs), how tool output is marked, and `response_gate.continue_after_refusal` in the enforcement docs, the tier matrix, the proxy README, the SDK and harness refusal tables, the security page and the README.
+- **"Reserved", not "reserved in 3.0".** The last-user-turn context is still reserved; the docs and three CLI messages no longer name a version for it.
+
+### Fixed
+
+- **A product release reminds us to release the Terraform provider.** The provider is released on its own tag, and nothing said when it had changed since. The release workflow now opens an issue listing the provider files changed since its last tag (`tools/scripts/terraform-provider-unreleased.sh`).
+- **SECURITY.md names 3.2.x as the supported line.** It still said 3.1.x. The release version check now fails when it falls behind.
+
 ## [3.2.0] - 2026-11-06
 
 ### Added

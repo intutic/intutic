@@ -376,7 +376,7 @@ function stateFor(rule: DecideRule, sopTitle: string, ruleText: string, c: Asked
 /** Says, once, that a `lastUserTurn` a state or labels file carries is not sent. */
 function warnUnsentTurn(count: number, json: boolean | undefined): void {
   if (count === 0) return
-  const message = `${count === 1 ? 'The call carries' : `${count} calls carry`} a lastUserTurn, which is not sent: context: ["last_user_turn"] is reserved in 3.0, and no gate supplies the user's last turn.`
+  const message = `${count === 1 ? 'The call carries' : `${count} calls carry`} a lastUserTurn, which is not sent: context: ["last_user_turn"] is reserved, and no gate supplies the user's last turn.`
   if (json) process.stderr.write(message + '\n')
   else log.warn(message)
 }
@@ -1319,7 +1319,7 @@ function decideLimitChecks(rules: ReadonlyArray<{ ref: string; rule: DecideRule 
     out.push({
       name: 'Decide Context',
       passed: true,
-      detail: `${context.join(', ')} declare(s) context: ["last_user_turn"], which is reserved and not supplied in 3.0: they are asked without the user's last turn`,
+      detail: `${context.join(', ')} declare(s) context: ["last_user_turn"], which is reserved and not supplied yet: they are asked without the user's last turn`,
       remediation: 'No gate passes the last turn yet; `decide test` and `decide eval` ask without it too, so the eval measures what a gate asks.',
     })
   }
