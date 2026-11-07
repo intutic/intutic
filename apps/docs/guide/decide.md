@@ -292,7 +292,7 @@ A rule whose escalations should never wait on a person sets `"escalate": "refuse
 | Question wording | 8 to 300 characters, one line |
 | State sent to the model | 16,384 bytes. A larger state is never cut: the rule is unknown and escalates |
 | SOP text in the state | its first 4,096 bytes |
-| `context: ["last_user_turn"]` | Reserved, and not supplied in 3.0. A rule may declare it (it is part of the rule's hash), but no gate passes the user's last turn, so the state carries none, and `decide test` and `decide eval` send none either, even when the state or labels file has a `lastUserTurn`, so the eval measures what a gate asks. `intutic decide lint`, `intutic gates install` and `intutic doctor` say so for each rule that declares it. When a gate supplies it, it will be cut to 2,000 characters |
+| `context: ["last_user_turn"]` | Reserved, and not supplied yet. A rule may declare it (it is part of the rule's hash), but no gate passes the user's last turn, so the state carries none, and `decide test` and `decide eval` send none either, even when the state or labels file has a `lastUserTurn`, so the eval measures what a gate asks. `intutic decide lint`, `intutic gates install` and `intutic doctor` say so for each rule that declares it. When a gate supplies it, it will be cut to 2,000 characters |
 
 **Time.** Every gate has a decide budget, the time left after its harness's hook timeout, the deterministic tiers' worst case and a 500 ms margin:
 

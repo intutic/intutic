@@ -182,7 +182,7 @@ export function decideRuleNotes(rule: { id: string; on: string; context?: readon
   const out: string[] = []
   if ((rule.context ?? []).includes('last_user_turn')) {
     out.push(
-      `decide rule ${rule.id} declares context: ["last_user_turn"], which is reserved and not supplied in 3.0: ` +
+      `decide rule ${rule.id} declares context: ["last_user_turn"], which is reserved and not supplied yet: ` +
         'no gate passes the user\'s last turn, so the rule is asked without it (in `decide test` and `decide eval` too)',
     )
   }

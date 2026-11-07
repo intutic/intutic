@@ -69,7 +69,7 @@ The loop, plan and graph rules add five more:
 
 | Code | Meaning | Where |
 | :--- | :--- | :--- |
-| `PREREQUISITE_UNMET` | A qualified `requires_before`: the latest test run in the session did not pass, none ran, a later file change made the pass stale, or the harness cannot report test outcomes | gateway, gates and hooks |
+| `PREREQUISITE_UNMET` | A qualified `requires_before`: the latest test run in the session did not pass, none ran, a later file change made the pass stale, or the harness cannot report test outcomes. Since 3.2.0 the gateway also uses it for a plain `requires_before: A -> B`, refused before the call runs | gateway, gates and hooks |
 | `OUT_OF_SCOPE` | A file change outside an enforced `scope_paths` | gateway, gates and hooks |
 | `OFF_PLAN` | Under `plan_approval: strict`, the tool is not a step of the session's approved plan | gates and hooks |
 | `PLAN_NOT_APPROVED` | `plan_approval:` requires an approved plan, and the session has none | gates and hooks |

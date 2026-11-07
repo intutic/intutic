@@ -54,6 +54,14 @@ if (existsSync(helm)) {
   }
 }
 
+// SECURITY.md names the supported release line, and GitHub shows it on the
+// Security tab. It was left a minor release behind after 3.1 and after 3.2.
+if (existsSync(join(root, 'SECURITY.md'))) {
+  const line = `${want.split('.').slice(0, 2).join('.')}.x`
+  const named = read('SECURITY.md').match(/`(\d+\.\d+\.x)` \(Latest\)/)?.[1]
+  found.push([`SECURITY.md supported line (wants ${line})`, named === line ? want : named])
+}
+
 const wrong = found.filter(([, v]) => v !== want)
 if (wrong.length > 0) {
   console.error(`[FAIL] release versions: ${wrong.length} of ${found.length} manifest(s) are not at ${want} (tools/cli/package.json):`)

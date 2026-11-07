@@ -570,7 +570,7 @@ describe('decide lint', () => {
     expect(r.code).toBe(0)
     expect(r.out).not.toContain('not enforced')
     expect(r.out).toContain('✓ .intutic/sops/data.md:3  local:data.md#no-leaks  shadow (on: response: judged at the gateway)')
-    expect(r.out).toContain('.intutic/sops/data.md:4: decide rule with-turn declares context: ["last_user_turn"], which is reserved and not supplied in 3.0')
+    expect(r.out).toContain('.intutic/sops/data.md:4: decide rule with-turn declares context: ["last_user_turn"], which is reserved and not supplied yet')
     const json = JSON.parse((await run(() => runDecideLint({ workspace: ws, json: true }))).out)
     expect(json.notes.map((n: { ref: string; line: number }) => [n.ref, n.line])).toEqual([['local:data.md#with-turn', 4]])
     expect(json.problems).toEqual([])
@@ -591,7 +591,7 @@ describe('context: ["last_user_turn"] is not sent by decide test or decide eval'
     expect(r.code).toBe(0)
     expect(sent(m).some((b) => b.includes('QUESTION: '))).toBe(true)
     expect(sent(m).some((b) => b.includes(TURN))).toBe(false)
-    expect(r.out).toContain('a lastUserTurn, which is not sent: context: ["last_user_turn"] is reserved in 3.0')
+    expect(r.out).toContain('a lastUserTurn, which is not sent: context: ["last_user_turn"] is reserved')
   })
 
   it('eval asks every case without its lastUserTurn, as a gate asks', async () => {
@@ -919,7 +919,7 @@ describe('doctor and the 3.0 limits', () => {
     expect(by['Decide Response Rules']).toBeUndefined()
     expect(checks.some((c) => c.detail.includes('not enforced'))).toBe(false)
     expect(by['Decide Context']).toMatchObject({ passed: true })
-    expect(by['Decide Context']!.detail).toContain('local:data.md#with-turn declare(s) context: ["last_user_turn"], which is reserved and not supplied in 3.0')
+    expect(by['Decide Context']!.detail).toContain('local:data.md#with-turn declare(s) context: ["last_user_turn"], which is reserved and not supplied yet')
   })
 
   it('says nothing about limits a snapshot without such rules does not have', async () => {

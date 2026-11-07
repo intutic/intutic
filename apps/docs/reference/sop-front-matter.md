@@ -465,7 +465,7 @@ decide: {"id":"prod-data-export","on":"tool_call","tools":["Bash"],"questions":{
 | `band` | no | `{"yes_at": …, "no_below": …}`: `yes_at` above 0.5 and below 1, `no_below` above 0 and below `yes_at`. Default `{"yes_at": 0.85, "no_below": 0.15}` |
 | `escalate` | no | What an unknown `when` does: `ask` (default), `review` (asks as `ask` does; a workspace that uploads its decide log also queues the call for a person's ruling) or `refuse` |
 | `rollout` | no | `shadow` (default) or `enforce`. The author's ceiling: the rule enforces only once a pre-registered `intutic decide eval` has pinned a model for it |
-| `context` | no, `on: tool_call` only | `["last_user_turn"]` or `[]`. Reserved in 3.0: no gate supplies the last user turn, so the rule is asked without it |
+| `context` | no, `on: tool_call` only | `["last_user_turn"]` or `[]`. Reserved: no gate supplies the last user turn, so the rule is asked without it |
 
 Any other field makes the line unreadable, `mode` included: a rule's rollout is
 `rollout`. A SOP's own `mode: shadow` runs its decide rules as shadow, whatever

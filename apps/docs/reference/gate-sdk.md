@@ -156,7 +156,7 @@ A refused call throws `IntuticGateRefusal`. Its message starts with `[Intutic Go
 | `SSO_GROUP` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
 | `SNAPSHOT` | A block rule in the policy snapshot matched |
 | `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
-| `PREREQUISITE_UNMET` | A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, or there is no session id ([Rule records](#rule-records)) |
+| `PREREQUISITE_UNMET` | A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, or there is no session id ([Rule records](#rule-records)). The proxy also refuses a plain `requires_before: A -> B` with this code when A has not run; the gates do not evaluate plain ordering rules |
 | `OUT_OF_SCOPE` | The call writes, edits, deletes or moves a file outside `scope_paths` under `scope_paths_mode: enforce`, or outside the workspace |
 | `COMMAND_NOT_ALLOWED` | The call runs a shell command outside `allow_commands:`, or one that could not be read as plain commands. |
 | `OFF_PLAN` | `plan_approval: strict` is set and the tool is not a step of the session's approved plan |

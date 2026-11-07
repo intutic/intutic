@@ -281,6 +281,7 @@ The request is intercepted and modified before reaching the LLM. The most common
 
 **When it happens:**
 - DLP scanner detects API keys, passwords, or PII in the prompt → redacts before forwarding
+- A tool result talks to the agent as if it were instructions → a notice is put in front of it, and the result is forwarded whole ([prompt injection](/guide/graph-guardrails))
 - PCAS downgrades a model selection (e.g., routes to a cheaper model)
 
 A [custom WASM or Rego rule](/guide/wasm-rules) cannot return HIJACK or ENHANCE. Its verdicts are allow, block and reask, plus hold for a Rego rule: a rule never receives the request body, so it has nothing to rewrite, and no way to supply guidance to inject. A rule result the proxy cannot enforce refuses the call as [a rule that reached no verdict](/guide/wasm-rules#when-a-rule-reaches-no-verdict), never allows it.
@@ -319,6 +320,13 @@ The request is blocked entirely. The agent receives an error response explaining
 - A `BLOCK:` SOP matches the tool name
 - SSO group policy denies the caller
 - A repeat anomaly finding has been promoted to enforcement
+
+A tool call the response gate withholds (a `deny_tools` name, an enforcing hook-rule guardrail, or
+a declared `requires_before:` or `forbid_after:` rule) never reaches the client, and the session
+carries on. The refusal comes back as the assistant's turn, which ends an agent loop that only
+continues on tool calls. With [`response_gate.continue_after_refusal`](/reference/configuration)
+the proxy instead asks the model to carry on without the call, on a non-streaming request, up to
+twice per request; each round is another billed call.
 
 Note what is **not** on this list. SSL enforcement runs at the gate but is shadowed — it records
 what it would have done and the call proceeds. Loop detection ships on `REASK`. Both are held
