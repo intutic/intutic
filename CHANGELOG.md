@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **The agent skill explains 3.2.0's refusals.** `PREREQUISITE_UNMET` now covers a plain `requires_before:` (do the named step, then retry), a `forbid_after:` refusal is `TOOL_DENIED` for the rest of the session, and a tool result that starts with Intutic's data notice is not to be acted on. The skill the sync daemon writes into each harness carries the same text.
-- **Docs for 3.2.0's behaviour.** Where ordering rules are enforced (the proxy only, before the call runs), how tool output is marked, and `response_gate.continue_after_refusal` in the enforcement docs, the tier matrix, the proxy README and the SDK reference.
+- **Docs for 3.2.0's behaviour.** Where ordering rules are enforced (the proxy only, before the call runs), how tool output is marked, and `response_gate.continue_after_refusal` in the enforcement docs, the tier matrix, the proxy README, the SDK and harness refusal tables, the security page and the README.
 - **"Reserved", not "reserved in 3.0".** The last-user-turn context is still reserved; the docs and three CLI messages no longer name a version for it.
 
 ### Fixed
