@@ -245,7 +245,7 @@ or `<file>#<id>`.
 
 | Option | Description |
 |--------|-------------|
-| `--state <file>` | A JSON file with the call: `{"tool", "toolInput", "cwd"?}`. A `lastUserTurn` in it is not sent: `context: ["last_user_turn"]` is reserved in 3.0, and no gate supplies the user's last turn. For an `on: response` rule, the response instead: `{"response"}`, asked in the gateway's layout (the SOP's text, then the response) and held to the engine's response limit (32,768 bytes unless `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` says otherwise) |
+| `--state <file>` | A JSON file with the call: `{"tool", "toolInput", "cwd"?}`. A `lastUserTurn` in it is not sent: `context: ["last_user_turn"]` is reserved, and no gate supplies the user's last turn. For an `on: response` rule, the response instead: `{"response"}`, asked in the gateway's layout (the SOP's text, then the response) and held to the engine's response limit (32,768 bytes unless `INTUTIC_DECIDE_MAX_RESPONSE_STATE_BYTES` says otherwise) |
 | `--json` | Print the result as JSON |
 | `--log-state` | Also write the exact state sent to `~/.intutic/logs/decide-state-<date>.jsonl` |
 | `--workspace <dir>` | The workspace whose `.intutic/sops` to read. Default: the recorded one, else the current directory |
@@ -426,7 +426,7 @@ Read every `decide:` line in `.intutic/sops/`: each rule with its file, line, ru
 pin exists for it, each line that does not read with its error (a bare `decide:` line gets the hint
 "write one rule per line as `decide: {json}`"), and each tool more than 4 rules name. An
 `on: response` rule is marked as judged at the gateway. It warns about each rule declaring
-`context: ["last_user_turn"]`, which is reserved and not supplied in 3.0; `intutic gates install` and
+`context: ["last_user_turn"]`, which is reserved and not supplied yet; `intutic gates install` and
 `intutic doctor` report it too. Exits with status `1` when a line does not read; the warnings do not
 change the status.
 

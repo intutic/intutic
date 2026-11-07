@@ -220,7 +220,7 @@ describe('intutic gates install', () => {
     expect(r.code).toBe(0)
     expect(r.out).not.toContain('not enforced')
     expect(r.out).not.toContain('decide rule no-leaks')
-    expect(r.out).toContain('.intutic/sops/data.md:3: decide rule with-turn declares context: ["last_user_turn"], which is reserved and not supplied in 3.0')
+    expect(r.out).toContain('.intutic/sops/data.md:3: decide rule with-turn declares context: ["last_user_turn"], which is reserved and not supplied yet')
     // The response rule is in no record; the tool-call rule is compiled as before.
     const records = (await fs.readFile(snapshotRules, 'utf-8')).split('\n').filter((l) => l.startsWith('@decide\t'))
     expect(records).toHaveLength(1)
