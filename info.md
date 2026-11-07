@@ -12,7 +12,7 @@ This document provides internal repository structure details, package directory 
 | **Developer CLI** | [`tools/cli/`](tools/cli/) | CLI tool (`@intutic/cli`) to initialize workspaces (`intutic init`), run connection daemons, audit files, and execute benchmark suites. |
 | **Sync Daemon** | [`services/sync-daemon/`](services/sync-daemon/) | Local background reconciliation loop that syncs central guidelines and updates workspace rules (`.claude/rules/intutic-governance.md`, `.cursor/rules/intutic-governance.mdc`). |
 | **Developer Portal** | [`apps/docs/`](apps/docs/) | VitePress-based static documentation site served at `docs.intutic.ai`. |
-| **VSCode Extension** | [`packages/vscode-extension/`](packages/vscode-extension/) | VSCode integration editor adapter. |
+| **VSCode Extension** | [`packages/vscode-extension/`](packages/vscode-extension/) | VSCode integration editor adapter. Unreleased: build it from source. |
 | **AssemblyScript WASM SDK** | [`packages/wasm-sdk/`](packages/wasm-sdk/) | SDK used to build high-performance custom filters compiled to WebAssembly. |
 | **MCP Governance Server** | [`packages/mcp-proxy/`](packages/mcp-proxy/) | Model Context Protocol server (`@intutic/mcp-governance-proxy`) providing rule checks and tool interception hooks to MCP clients. |
 
@@ -30,7 +30,7 @@ This document provides internal repository structure details, package directory 
 - [`apps/docs/`](apps/docs/): Static VitePress documentation.
 - [`packages/shared-types/`](packages/shared-types/): TypeScript interfaces and typings.
 - [`packages/theme/`](packages/theme/): Central design system tokens and variables.
-- [`packages/vscode-extension/`](packages/vscode-extension/): VSCode editor integration.
+- [`packages/vscode-extension/`](packages/vscode-extension/): VSCode editor integration (unreleased, not on any marketplace).
 - [`packages/logger/`](packages/logger/): Pino-based console logging helper.
 - [`packages/id/`](packages/id/): Prefixed ID (`newId`, nanoid-based) and ISO timestamp (`newIso`) generators.
 - [`tools/benchmarks/`](tools/benchmarks/): Context-compression benchmark (`compression_benchmark.go`) and its results; proxy latency benchmarks are Criterion benches in `packages/proxy/benches/`.
