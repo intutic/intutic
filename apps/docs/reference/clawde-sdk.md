@@ -100,6 +100,8 @@ A response that comes back carries `verdict: 'allow'`: the proxy let the request
 | 200 | `RESPONSE_UNPARSEABLE` | `kill` | The model's response did not parse while a tool policy was in force, so it was withheld; retrying may succeed |
 | 200 | `OUTPUT_DLP` | `kill` | The model's response held sensitive content that could not be redacted safely, so it was withheld |
 
+`verdict` says what happened to this request, not to the session: `kill` refuses this request or tool call, and for codes such as `PREREQUISITE_UNMET`, `OUT_OF_SCOPE` and `COMMAND_NOT_ALLOWED` the session carries on. Decide what to do next from `code` and the refusal's `scope`, the way a gRPC client treats `FAILED_PRECONDITION`: fix the state it names, then retry.
+
 `ClawdeBlockedError` extends `ClawdeVerdictError` and carries `verdict`, `code`, `status`, `ruleId` (`rule_id`), `retryAfterSeconds` (`retry_after_seconds`) and the proxy's reason as its message. `retryAfterSeconds` is set when the proxy sent `Retry-After` — on `RATE_LIMITED` and `BUDGET_EXCEEDED` — and is how long to wait before the same request can succeed; `chat()` does not wait and retry on its own. The circuit breaker's budget check throws a plain `ClawdeVerdictError`.
 
 **Refusals sent as an error.** A status other than 200 comes with a JSON body, `{"error": {"type": "<code>", "message": "<reason>"}}`. `chat()` matches the status and the code together, so a provider's own 429 or a 403 for a key used against the wrong workspace is not mistaken for a refusal. These carry no `ruleId`.
