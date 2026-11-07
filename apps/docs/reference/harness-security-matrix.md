@@ -66,7 +66,7 @@ OPAQUE workspace gets neither, as it gets no rule id.
 | `SNAPSHOT` | A block rule in the policy snapshot matched: an SOP, a skill-content rule, or a destructive-command rule promoted to block (the tier ships flagging, not blocking) |
 | `SSO_GROUP` | The workspace's SSO group policy does not clear this tool for the member, or the member's groups are unknown |
 | `HELD` | A hold rule matched: the call is held for a person's approval, and `holdId` names the hold |
-| `PREREQUISITE_UNMET` | A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, the harness reports no tool results, or there is no session id. The proxy also refuses a plain `requires_before: A -> B` with this code when A has not run; the hook gates do not evaluate plain ordering rules |
+| `PREREQUISITE_UNMET` | A qualified `requires_before` (`action:run_tests[ok] -> …`) gates the call and is not met: no test run in the session, the last one failed, its result could not be read, files changed after it, the harness reports no tool results, or there is no session id |
 | `OUT_OF_SCOPE` | A file-changing call targets a path outside `scope_paths` under `scope_paths_mode: enforce`, or outside the workspace |
 | `COMMAND_NOT_ALLOWED` | A shell command is outside `allow_commands`, or could not be read as plain commands |
 | `OFF_PLAN` | `plan_approval: strict` is set and the tool is not a step of the session's approved plan |
@@ -84,6 +84,8 @@ OPAQUE workspace gets neither, as it gets no rule id.
 | `DECIDE_REFUSED` | The rule asked its questions of the self-hosted decide engine and the answers made its `when` true |
 | `DECIDE_ESCALATED` | The answers to a decide rule's questions fell between its bands or disagreed across option orders, and the harness cannot ask a person, so the call is refused until a person decides |
 | `GOVERNANCE_UNAVAILABLE` | An enforcing decide rule could not be evaluated: its engine is not configured, is not self-hosted, did not answer in time, gave no usable probabilities or failed its known-answer canary, or more than four enforcing decide rules name the tool |
+
+The proxy also refuses a plain `requires_before: A -> B` with `PREREQUISITE_UNMET` when A has not run in the session. The hook gates do not evaluate plain ordering rules.
 
 ### Post-tool outcome {#post-tool-outcome}
 
