@@ -410,6 +410,41 @@ jobs:
           path: dist-cli/*
           overwrite: true
 
+  # The Terraform provider is released on its own tag, and nothing else says
+  # when it has changed since. A product release opens an issue when it has.
+  terraform-provider-reminder:
+    if: github.repository == 'intutic/intutic'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Provider changes since its last release
+        run: |
+          out="$(tools/scripts/terraform-provider-unreleased.sh)"
+          last="$(echo "$out" | head -1)"
+          changed="$(echo "$out" | tail -n +2)"
+          if [ -z "$changed" ]; then
+            echo "The provider is unchanged since $last."
+            exit 0
+          fi
+          title="Terraform provider has unreleased changes since $last"
+          body="$(printf 'Intutic %s shipped, and these provider files changed since %s:\n\n%s\n\nRelease the provider: bump its CHANGELOG and push a terraform-provider-v* tag.' \
+            "$GITHUB_REF_NAME" "$last" "$(echo "$changed" | awk '{print "- " $0}')")"
+          n="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$n" ]; then
+            gh issue comment "$n" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
+          echo "::warning::$title"
+
   github-release:
     name: Create GitHub Release & Upload Assets
     # Deliberately does NOT depend on publish-npm — the dependency runs the
