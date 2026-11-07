@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { caTrustCommandFor } from './caTrust.js'
 
@@ -12,7 +13,8 @@ describe('caTrustCommandFor', () => {
   it('macOS user scope trusts into the login keychain', () => {
     const cmds = caTrustCommandFor('darwin', 'user', '/tmp/ca.crt')
     expect(cmds).toHaveLength(1)
-    expect(cmds![0].args).toContain('~/Library/Keychains/login.keychain-db')
+    // A full path: this runs with no shell, so a `~` would stay a literal `~`.
+    expect(cmds![0].args).toContain(`${homedir()}/Library/Keychains/login.keychain-db`)
   })
 
   it('macOS system and user scopes target different keychains', () => {
@@ -71,7 +73,7 @@ describe('installCaTrust', () => {
     vi.doMock('node:child_process', () => ({
       execFile: (cmd: string, args: string[], cb: (err: Error | null, res?: unknown) => void) => {
         execFileMock(cmd, args)
-        if (cmd === 'which' && args[0] === 'update-ca-certificates') return cb(null, { stdout: '/usr/sbin/update-ca-certificates' })
+        if (cmd === 'sh' && args[2] === 'update-ca-certificates') return cb(null, { stdout: '/usr/sbin/update-ca-certificates' })
         cb(null, { stdout: '' })
       },
     }))
@@ -90,16 +92,16 @@ describe('installCaTrust', () => {
 
     const calledCmds = execFileMock.mock.calls.map((c) => c[0])
     expect(calledCmds).toContain('update-ca-certificates')
-    // The rebuild command must run, and must run after the which-probe.
-    expect(calledCmds.indexOf('update-ca-certificates')).toBeGreaterThan(calledCmds.indexOf('which'))
+    // The rebuild command must run, and must run after the probe.
+    expect(calledCmds.indexOf('update-ca-certificates')).toBeGreaterThan(calledCmds.indexOf('sh'))
   })
 
   it('Linux: falls back to update-ca-trust when update-ca-certificates is absent', async () => {
     vi.doMock('node:child_process', () => ({
       execFile: (cmd: string, args: string[], cb: (err: Error | null, res?: unknown) => void) => {
         execFileMock(cmd, args)
-        if (cmd === 'which' && args[0] === 'update-ca-certificates') return cb(new Error('not found'))
-        if (cmd === 'which' && args[0] === 'update-ca-trust') return cb(null, { stdout: '/usr/bin/update-ca-trust' })
+        if (cmd === 'sh' && args[2] === 'update-ca-certificates') return cb(new Error('not found'))
+        if (cmd === 'sh' && args[2] === 'update-ca-trust') return cb(null, { stdout: '/usr/bin/update-ca-trust' })
         cb(null, { stdout: '' })
       },
     }))
@@ -139,7 +141,7 @@ describe('installCaTrust', () => {
   it('surfaces a failed underlying command as installed:false rather than throwing', async () => {
     vi.doMock('node:child_process', () => ({
       execFile: (cmd: string, args: string[], cb: (err: Error | null) => void) => {
-        if (cmd === 'which') return cb(null)
+        if (cmd === 'sh') return cb(null)
         cb(new Error('Operation not permitted'))
       },
     }))
@@ -169,7 +171,7 @@ describe('ensureLinuxCaTrust', () => {
     vi.doMock('node:child_process', () => ({
       execFile: (cmd: string, args: string[], cb: (err: Error | null, res?: unknown) => void) => {
         execFileMock(cmd, args)
-        if (cmd === 'which') return opts.tools.includes(args[0]) ? cb(null, { stdout: `/usr/sbin/${args[0]}` }) : cb(new Error('not found'))
+        if (cmd === 'sh') return opts.tools.includes(args[2]) ? cb(null, { stdout: `/usr/sbin/${args[2]}` }) : cb(new Error('not found'))
         cb(null, { stdout: '' })
       },
     }))

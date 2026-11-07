@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-11-06
+
+### Added
+
+- **Tool output that talks to the agent is marked as data.** The proxy had five patterns for jailbreak phrases, and they saw nothing in text that addresses an agent from inside a document or a web page. Tool results that do are now forwarded with a notice in front, telling the model the text came from the tool and is not an instruction. Nothing is refused, so a false match costs a few tokens.
+- **`response_gate.continue_after_refusal`.** A refusal on a non-streaming response can now ask the model to carry on without the call, up to twice per request, instead of ending the agent's turn. Off by default, because each continuation is another billed call.
+
+### Changed
+
+- **Declared `requires_before:` and `forbid_after:` rules now hold the call back.** The proxy withheld a call before it ran only for `[ok]` rules. A plain rule let the call run and then ended the session on the next request, so the action happened anyway. The response gate now refuses the call, with `PREREQUISITE_UNMET` or `TOOL_DENIED`, and the session carries on. The built-in floors, used when no rule of that kind is declared, still act after the call.
+- **Node.js 22.15 or later.** `@intutic/cli`, the sync daemon and the MCP daemon no longer run on Node 20, which reached end of life in April 2026. The SDK packages keep their wider range.
+- **OpenTelemetry 3.** The MCP daemon moved from `sdk-trace-base` and `sdk-trace-node`, both deprecated, to `sdk-trace`, so an install prints no deprecation warning for them.
+
+### Fixed
+
+- **`~>` rules between `action:` tokens.** The proxy compared neighbouring entries in a list where each call is its tool name followed by its actions, so the entry next to an action was usually the next call's tool name. `forbid_after: action:secret_read ~> action:http_post` never fired, and `requires_before: action:run_tests ~> action:deploy`, plain or `[ok]`, ended the session even when the order was right. `~>` now compares whole calls, and `forbid_after` checks every occurrence of the first action, not only the earliest. A strict rule that never fired before can now end sessions, so review any you declared.
+- **`intutic sops push` carries a SOP's enforcing keys.** `allow_commands:`, `deny_tools:` and the other keys stayed in the file, so a pushed SOP enforced nothing on the control plane. They now travel in `markdown_content`, in a fence, and a judge reads the body only. A file holding keys the server never received counts as changed, so its next push sends them, as a new DRAFT if the SOP is approved. `sops pull` keeps one fence, where a SOP made through the API used to land in a second one that the proxy did not read.
+- **`intutic status` on an image with no `ps`.** It said the daemon was stopped while it ran, and the daemon printed a shell error on every poll. `status`, `doctor`, `disconnect` and the daemon's agent detection now read `/proc` on Linux when `ps` is missing.
+- **`intutic disconnect` on a Mac.** A keychain prompt with no screen to show it on waited forever, and a prompt someone cancelled looked like success while the CA stayed trusted. It now gives up after two minutes or at the cancel, says the CA is still trusted, and keeps the certificate so a second `disconnect` can finish.
+- **`intutic connect` on an image with no `which`.** Minimal Fedora images said no CA tool was available, with `update-ca-trust` installed, so the CA was never trusted.
+
 ## [3.1.5] - 2026-11-05
 
 ### Fixed

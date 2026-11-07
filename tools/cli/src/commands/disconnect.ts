@@ -34,6 +34,7 @@ import type { IntuticConfig } from '@intutic/shared-types'
 import { log } from '../lib/logger.js'
 import { reportDisconnect } from '../lib/deviceReport.js'
 import { linuxConnectCaRemoval, removeLinuxConnectCaTrust } from '../lib/caTrust.js'
+import { getRawProcessList } from '../lib/process.js'
 import { clearCredentials, loadConfig, loadCredentials, saveConfig } from '../config/store.js'
 import { getCredentialsPath, getIntuticDir } from '../config/paths.js'
 import { getServicePaths, uninstallDaemon, uninstallMcpDaemon, uninstallProxyService, type ServiceTarget } from './install-daemon.js'
@@ -124,11 +125,15 @@ export async function planCaTrust(plan: DisconnectPlan): Promise<void> {
     if (!listed.toUpperCase().includes(sha1.toUpperCase())) return
     plan.change(keychain, 'remove the Intutic CA certificate connect trusted', async () => {
       try {
-        execFileSync('security', ['remove-trusted-cert', '-d', certPath], { stdio: 'ignore' })
-      } catch {
-        // No admin trust setting left for it: the certificate removal below is what matters.
+        execFileSync('security', ['remove-trusted-cert', '-d', certPath], { stdio: ['ignore', 'ignore', 'pipe'], timeout: SECURITY_PROMPT_MS })
+      } catch (err) {
+        if (caStaysTrusted(err)) {
+          // The certificate stays too: without it, a second disconnect would find nothing to undo.
+          log.warn(`The Intutic CA is still trusted. Run intutic disconnect again at this Mac and enter your password, or run: sudo security remove-trusted-cert -d ${certPath}`)
+          return
+        }
       }
-      execFileSync('security', ['delete-certificate', '-Z', sha1, keychain], { stdio: 'ignore' })
+      execFileSync('security', ['delete-certificate', '-Z', sha1, keychain], { stdio: 'ignore', timeout: SECURITY_PROMPT_MS })
     })
   } else if (process.platform === 'win32') {
     plan.note(
@@ -178,21 +183,23 @@ function planConfig(plan: DisconnectPlan, config: IntuticConfig | null, harness:
   })
 }
 
+/**
+ * Whether a failed `security remove-trusted-cert` left the CA trusted: a cancelled
+ * prompt or a timeout did. Only "could not be found" means there was nothing to remove.
+ */
+export function caStaysTrusted(err: unknown): boolean {
+  return !String((err as { stderr?: unknown }).stderr ?? '').includes('could not be found')
+}
+
+/** Long enough to type a password at the keychain prompt; with no screen to show it on, `security` waits forever. */
+const SECURITY_PROMPT_MS = 120_000
+
 /** PIDs of `intutic connect` processes other than this one. */
 function runningConnects(): number[] {
   if (process.platform === 'win32') return []
-  let out: string
-  try {
-    out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
-  } catch {
-    return []
-  }
-  return out
-    .split('\n')
-    .map((line) => /^\s*(\d+)\s+(.*)$/.exec(line))
-    .filter((m): m is RegExpExecArray => m !== null)
-    .filter(([, pid, command]) => Number(pid) !== process.pid && /(?:^|[\\/\s])intutic(?:\.js|\.cjs|\.mjs)?\s+connect\b|cli\.js\s+connect\b/.test(command!))
-    .map(([, pid]) => Number(pid))
+  return getRawProcessList()
+    .filter(({ pid, command }) => pid !== process.pid && /(?:^|[\\/\s])intutic(?:\.js|\.cjs|\.mjs)?\s+connect\b|cli\.js\s+connect\b/.test(command))
+    .map(({ pid }) => pid)
 }
 
 function show(p: string): string {

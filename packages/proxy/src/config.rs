@@ -175,6 +175,12 @@ pub struct ResponseGateConfig {
     /// cannot honour this without ending every stream rather than a suspect one.
     #[serde(default = "default_true")]
     pub fail_closed: bool,
+
+    /// After refusing a call on a non-streaming response, ask the model to carry
+    /// on without it, instead of answering with the refusal and ending the
+    /// agent's turn. Off by default: each continuation is another billed call.
+    #[serde(default)]
+    pub continue_after_refusal: bool,
 }
 
 impl Default for ResponseGateConfig {
@@ -182,6 +188,7 @@ impl Default for ResponseGateConfig {
         Self {
             enabled: true,
             fail_closed: true,
+            continue_after_refusal: false,
         }
     }
 }

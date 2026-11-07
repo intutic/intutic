@@ -41,7 +41,7 @@ import {
   writeDecisionsTargets,
 } from '@intutic/sync-daemon'
 import { getAdapter } from '../harness/detector.js'
-import { runDisconnect } from './disconnect.js'
+import { caStaysTrusted, runDisconnect } from './disconnect.js'
 
 const PROXY = 'http://localhost:4000'
 const LEGACY_DECISIONS = '<!-- INTUTIC:DECISIONS_LOG:START -->\n## Recent Governed Decisions\n\n- old entry\n<!-- INTUTIC:DECISIONS_LOG:END -->'
@@ -691,6 +691,23 @@ describe('intutic disconnect restores what connect changed', () => {
 })
 
 // ─── The command ─────────────────────────────────────────────────────────────
+
+describe('removing the CA trust setting on macOS', () => {
+  // The words are `security`'s own, read from a real prompt on macOS 15 and 26.
+  it('reads a cancelled prompt as the CA still trusted', () => {
+    const stderr = Buffer.from('SecTrustSettingsRemoveTrustSettings: The authorization was canceled by the user.\n')
+    expect(caStaysTrusted({ status: 1, stderr })).toBe(true)
+  })
+
+  it('reads a timeout, which has no stderr, as the CA still trusted', () => {
+    expect(caStaysTrusted({ code: 'ETIMEDOUT', stderr: Buffer.alloc(0) })).toBe(true)
+  })
+
+  it('reads nothing to remove as nothing left behind', () => {
+    const stderr = Buffer.from('SecTrustSettingsRemoveTrustSettings: The specified item could not be found in the keychain.\n')
+    expect(caStaysTrusted({ status: 1, stderr })).toBe(false)
+  })
+})
 
 describe('intutic disconnect, the command', () => {
   const bin = join(fake.base, 'bin')

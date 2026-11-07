@@ -679,6 +679,16 @@ pub fn qualified_rules(requires_before: &[(String, String, bool)]) -> Vec<(Strin
         .collect()
 }
 
+/// The plain rules among `requires_before`: `(prerequisite, gated, adjacent)`
+/// for every rule with no qualifier on its left side.
+pub fn plain_rules(requires_before: &[(String, String, bool)]) -> Vec<(String, String, bool)> {
+    requires_before
+        .iter()
+        .filter(|(before, _, _)| split_qualifier(before).1.is_none())
+        .cloned()
+        .collect()
+}
+
 /// 3.0's shared vector files, for the unit tests that hold this crate to
 /// them. A missing file fails the test: the vectors are the contract.
 #[cfg(test)]

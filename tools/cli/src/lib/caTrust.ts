@@ -21,6 +21,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import { access, copyFile, readFile, unlink } from 'node:fs/promises'
 
@@ -89,7 +90,7 @@ export function caTrustCommandFor(
   caCertPath: string,
 ): CaTrustCommand[] | null {
   if (platform === 'darwin') {
-    const keychain = scope === 'system' ? '/Library/Keychains/System.keychain' : '~/Library/Keychains/login.keychain-db'
+    const keychain = scope === 'system' ? '/Library/Keychains/System.keychain' : `${homedir()}/Library/Keychains/login.keychain-db`
     return [{
       step: `Trust the CA cert in the macOS ${scope === 'system' ? 'System' : 'login'} keychain`,
       cmd: 'security',
@@ -121,7 +122,8 @@ export function caTrustCommandFor(
 
 async function commandExists(cmd: string): Promise<boolean> {
   try {
-    await execFileAsync('which', [cmd])
+    // `command -v`, a shell builtin: minimal images, Fedora's among them, have no `which`.
+    await execFileAsync('sh', ['-c', 'command -v "$0"', cmd])
     return true
   } catch {
     return false

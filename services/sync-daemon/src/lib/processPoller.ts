@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process'
+import { readProcTable } from './processTable.js'
 
 const PROCESS_SIGNATURES: Array<{
   name: string
@@ -237,10 +238,13 @@ export function hasTmuxParentedAgent(tree: readonly ProcessTreeEntry[]): boolean
  * best-effort telemetry, not a governance decision that needs to fail
  * closed.
  */
+// A shell's "ps: not found" on the daemon's stderr, once per poll, says nothing the caller can act on.
+const QUIET: ['ignore', 'pipe', 'ignore'] = ['ignore', 'pipe', 'ignore']
+
 export function detectTmuxParentedAgents(): boolean {
   if (process.platform === 'win32') return false // tmux does not exist on Windows
   try {
-    const rawOutput = execSync('ps -ax -o pid,ppid,comm', { encoding: 'utf-8', timeout: 3000 })
+    const rawOutput = execSync('ps -ax -o pid,ppid,comm', { encoding: 'utf-8', timeout: 3000, stdio: QUIET })
     return hasTmuxParentedAgent(parseProcessTreeOutput(rawOutput))
   } catch {
     return false
@@ -253,13 +257,14 @@ export function getActiveAgentProcesses(): string[] {
 
   try {
     rawOutput = isWindows
-      ? execSync('tasklist /FO CSV /NH', { encoding: 'utf-8', timeout: 3000 })
-      : execSync('ps -ax -o args', { encoding: 'utf-8', timeout: 3000 })
+      ? execSync('tasklist /FO CSV /NH', { encoding: 'utf-8', timeout: 3000, stdio: QUIET })
+      : execSync('ps -ax -o args', { encoding: 'utf-8', timeout: 3000, stdio: QUIET })
   } catch {
     // Deliberate fail-open: the process table is best-effort telemetry, so a
     // missing/blocked `ps`/`tasklist` (or the 3 s timeout) reports "no agents"
-    // rather than failing the poll. Nothing after this point can run without it.
-    return []
+    // rather than failing the poll, unless Linux can answer from /proc.
+    if (process.platform !== 'linux') return []
+    rawOutput = readProcTable().map((p) => p.command).join('\n')
   }
 
   const lines = rawOutput.split('\n').filter((line) => line.trim().length > 0)

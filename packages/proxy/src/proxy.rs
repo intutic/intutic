@@ -3592,6 +3592,14 @@ fn retain_findings_outside_break_glass_scope(
     findings
 }
 
+/// [`handle_proxy`] behind a named type, so it can call itself for a continuation.
+fn handle_proxy_boxed(
+    state: AppState,
+    request: Request<Body>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> {
+    Box::pin(handle_proxy(State(state), request))
+}
+
 pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>) -> Response {
     let start = Instant::now();
 
@@ -3622,6 +3630,11 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     // because most harnesses accept a base URL and nothing else. Strip it first
     // so provider detection, protocol detection and the upstream URL below all
     // see the path the caller actually meant.
+    let refusal_round = request
+        .extensions()
+        .get::<crate::plugins::response_gate::RefusalRound>()
+        .map_or(0, |r| r.0);
+    let request_uri = request.uri().clone();
     let (path_identity, uri_path) = crate::graph::split_identity_path(request.uri().path());
     let provider = Provider::from_path(&uri_path);
     let protocol = crate::protocol::detect(&uri_path);
@@ -3726,6 +3739,8 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             );
         }
     };
+    // As the client sent it: a continuation goes through every step again.
+    let client_body = body_bytes.clone();
 
     let mut body_str = String::from_utf8_lossy(&body_bytes).into_owned();
     let mut body_json: serde_json::Value = serde_json::from_str(&body_str).unwrap_or_default();
@@ -4940,6 +4955,20 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             );
         }
     }
+    // A tool result that talks to the agent is marked and forwarded, not refused:
+    // it stays in the history, so a refusal could only end the session.
+    {
+        let marked = crate::injection::mark_agent_directed_tool_output(&mut body_json);
+        if !marked.is_empty() {
+            body_str = serde_json::to_string(&body_json).unwrap_or(body_str);
+            body_bytes = axum::body::Bytes::from(body_str.clone().into_bytes());
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                patterns = ?marked,
+                "Tool output addressed the agent as instructions: marked as data before forwarding"
+            );
+        }
+    }
 
     // ── Step 4b: WASM custom rules ───────────────────────────────────
     let session_id = headers
@@ -5348,7 +5377,16 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                 .map(|s| crate::refusal::tool_rule_id("allow_commands", &s.title))
                 .unwrap_or_else(|| "allow_commands".to_string()),
         }
-    }));
+    }))
+    .with_ordering(
+        crate::plugins::anomaly::outcome::plain_rules(&gov.requires_before),
+        gov.forbid_after.clone(),
+        if gov.requires_before.is_empty() && gov.forbid_after.is_empty() {
+            Vec::new()
+        } else {
+            tool_sequence.clone()
+        },
+    );
     // Hook-rule guardrails, enforcing and shadow together: each rule carries
     // its SOP's mode. Enforced on the response's tool calls below, and on the
     // calls of the turn this request reports on. A rule scoped to workspace
@@ -11057,6 +11095,35 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     } else {
         final_body
     };
+    if let Some(next) = response_denial
+        .as_ref()
+        .filter(|_| {
+            state
+                .config
+                .intutic_settings
+                .response_gate
+                .continue_after_refusal
+        })
+        .and_then(|d| {
+            crate::plugins::response_gate::continuation_request(
+                d,
+                intervention_mode,
+                refusal_round,
+                &method,
+                &request_uri,
+                &headers,
+                &client_body,
+            )
+        })
+    {
+        tracing::info!(
+            workspace_id = %workspace_id,
+            session_id = %session_id,
+            round = refusal_round + 1,
+            "Refused call: asking the model to continue without it"
+        );
+        return handle_proxy_boxed(state.clone(), next).await;
+    }
     response.body(Body::from(final_body)).unwrap_or_else(|_| {
         json_error(
             StatusCode::INTERNAL_SERVER_ERROR,

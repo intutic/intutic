@@ -33,7 +33,7 @@ real time and return a verdict: **BYPASS**, **HIJACK**, **REASK** or **KILL** fr
 
 | Requirement | Version |
 |---|---|
-| **Node.js** | 20.19 or later |
+| **Node.js** | 22.15 or later |
 | **npm** | 10 or later |
 | **AI coding agent** | Any of the [43 supported harnesses](/integrations/) (Cursor, Claude Code, Aider, Windsurf, Antigravity, etc.) |
 | **Valkey** (or Redis) | *Optional.* 8.x — a shared, durable cache. `intutic start` provisions one if it can, and runs without it if it cannot |
