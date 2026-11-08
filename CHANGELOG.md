@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A public container image of the proxy.** `ghcr.io/intutic/intutic-proxy`, for linux/amd64 and linux/arm64, built from `packages/proxy/Dockerfile` on every release (`.github/workflows/publish-image.yml`). It is the open-core proxy, standalone. Each architecture must start and report its version on `/health` before the version tag is written, and the image carries a GitHub build provenance attestation (`gh attestation verify oci://ghcr.io/intutic/intutic-proxy:<version> --owner intutic`).
+- **A public container image of the proxy.** `ghcr.io/intutic/intutic-proxy`, for linux/amd64 and linux/arm64, built from `packages/proxy/Dockerfile` on every release (`.github/workflows/publish-image.yml`). It is the open-core proxy, standalone. Each architecture must start and report its version on `/health` before the version tag is written, and the image carries a GitHub build provenance attestation (`gh attestation verify oci://ghcr.io/intutic/intutic-proxy:<version> --owner intutic`). The README quickstart and the standalone proxy page use it, with the SOP folder mounted through `INTUTIC_SOPS_DIR`.
 
 ## [3.2.1] - 2026-11-07
 
