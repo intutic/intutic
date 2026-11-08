@@ -280,10 +280,10 @@ for (const overlay of overlays) {
   }
 
   // gateway.intutic.ai rides the primary `intutic-ingress` (one load balancer fewer)
-  // on its OWN ManagedCertificate, `intutic-gateway-cert`, listed beside the six-domain
-  // one. The invariant: the gateway domain never joins the six-domain cert. A domain
-  // change re-issues a ManagedCertificate, which would put the six live domains
-  // (api/app/docs/intutic.ai/releases/www) in the blast radius of the seventh.
+  // on its OWN ManagedCertificate, `intutic-gateway-cert`, listed beside the primary
+  // one. The invariant: the gateway domain never joins the primary cert. A domain
+  // change re-issues a ManagedCertificate, which would put the domains already on it
+  // (api/app) in the blast radius of the gateway's.
   const docs = rendered.split('---')
   const primary = docs.find((d) => /kind:\s*Ingress/.test(d) && /name:\s*intutic-ingress\s*$/m.test(d)) ?? ''
   if (/host:\s*gateway\.intutic\.ai\b/.test(primary)) {
@@ -299,7 +299,7 @@ for (const overlay of overlays) {
         && /^\s*-\s*gateway\.intutic\.ai\s*$/m.test(doc)) {
         failures.push(
           `overlay "${overlay}" adds gateway.intutic.ai to another ManagedCertificate — it must ` +
-            `stay on intutic-gateway-cert alone, so the six-domain cert is never re-issued for it.`,
+            `stay on intutic-gateway-cert alone, so the primary cert is never re-issued for it.`,
         )
       }
     }
