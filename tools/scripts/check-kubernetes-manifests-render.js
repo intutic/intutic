@@ -279,36 +279,29 @@ for (const overlay of overlays) {
     }
   }
 
-  // The hosted-gateway ingress must stay on its
-  // OWN dedicated cert (`intutic-gateway-cert`), never merged into the
-  // primary `intutic-ingress`'s pre-shared cert — that resource already
-  // serves six live production domains (api/app/docs/intutic.ai/releases/www)
-  // and a merge would put an edit meant only for the new seventh domain in
-  // the blast radius of all of them. This is deliberately narrow — it checks
-  // the isolation invariant, not whether the gateway is "done" (it is not;
-  // see gateway-ingress.yaml's header for the remaining operator steps).
-  if (/kind:\s*Ingress/.test(rendered) && /name:\s*intutic-gateway-ingress\b/.test(rendered)) {
+  // gateway.intutic.ai rides the primary `intutic-ingress` (one load balancer fewer)
+  // on its OWN ManagedCertificate, `intutic-gateway-cert`, listed beside the six-domain
+  // one. The invariant: the gateway domain never joins the six-domain cert. A domain
+  // change re-issues a ManagedCertificate, which would put the six live domains
+  // (api/app/docs/intutic.ai/releases/www) in the blast radius of the seventh.
+  const docs = rendered.split('---')
+  const primary = docs.find((d) => /kind:\s*Ingress/.test(d) && /name:\s*intutic-ingress\s*$/m.test(d)) ?? ''
+  if (/host:\s*gateway\.intutic\.ai\b/.test(primary)) {
     gatewayChecked = true
-    if (!/networking\.gke\.io\/managed-certificates:\s*intutic-gateway-cert\b/.test(rendered)) {
+    if (!/networking\.gke\.io\/managed-certificates:[^\n]*\bintutic-gateway-cert\b/.test(primary)) {
       failures.push(
-        `overlay "${overlay}" renders intutic-gateway-ingress without its dedicated ` +
-          `intutic-gateway-cert annotation — it may have been merged onto the primary ` +
-          `ingress's pre-shared cert, risking the six already-live production domains.`,
+        `overlay "${overlay}" routes gateway.intutic.ai on intutic-ingress without listing ` +
+          `intutic-gateway-cert in its managed-certificates — the gateway would have no valid TLS.`,
       )
     }
-    if (/networking\.gke\.io\/managed-certificates:\s*intutic-gateway-cert\b/.test(rendered)
-      && /ingress\.gcp\.kubernetes\.io\/pre-shared-cert/.test(
-        // Scope this specific check to the gateway Ingress document only —
-        // the primary intutic-ingress document in the SAME rendered output
-        // legitimately carries pre-shared-cert, so a whole-output substring
-        // search would always "find" it and never fail.
-        rendered.split('---').find((doc) => /name:\s*intutic-gateway-ingress\b/.test(doc)) ?? '',
-      )
-    ) {
-      failures.push(
-        `overlay "${overlay}"'s intutic-gateway-ingress carries a pre-shared-cert ` +
-          `annotation — it should use ONLY the dedicated managed-certificates annotation.`,
-      )
+    for (const doc of docs) {
+      if (/kind:\s*ManagedCertificate/.test(doc) && !/name:\s*intutic-gateway-cert\b/.test(doc)
+        && /^\s*-\s*gateway\.intutic\.ai\s*$/m.test(doc)) {
+        failures.push(
+          `overlay "${overlay}" adds gateway.intutic.ai to another ManagedCertificate — it must ` +
+            `stay on intutic-gateway-cert alone, so the six-domain cert is never re-issued for it.`,
+        )
+      }
     }
   }
   if (/kind:\s*ManagedCertificate/.test(rendered) && /name:\s*intutic-gateway-cert\b/.test(rendered)) {
@@ -606,8 +599,8 @@ if (!proxyChecked) {
 }
 if (!gatewayChecked) {
   failures.push(
-    'no overlay rendered an intutic-gateway-ingress — the gateway cert-isolation ' +
-      'check never ran. A vacuous pass here is worse than no check.',
+    'no overlay rendered intutic-ingress with a gateway.intutic.ai rule — the gateway ' +
+      'cert-isolation check never ran. A vacuous pass here is worse than no check.',
   )
 }
 
