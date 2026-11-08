@@ -82,6 +82,9 @@ npm install -g @intutic/cli @intutic/proxy
 
 # Or run the native proxy directly on-demand
 npx @intutic/proxy
+
+# Or run it as a container (linux/amd64, linux/arm64)
+docker run -p 4000:4000 ghcr.io/intutic/intutic-proxy:latest
 ```
 
 ### 2. Install the Gates
@@ -219,6 +222,7 @@ Because Intutic evaluates prompts pre-flight, you can run interactive governance
   * [`@intutic/shared-types`](https://www.npmjs.com/package/@intutic/shared-types) — Zod-validated shared TypeScript types
   * [`@intutic/logger`](https://www.npmjs.com/package/@intutic/logger) and [`@intutic/id`](https://www.npmjs.com/package/@intutic/id) — Structured logging and prefixed IDs used across the packages
 * 🐍 **Python:** [`intutic-clawde`](https://pypi.org/project/intutic-clawde/) — Client SDK and in-process gates for Python agent frameworks (LangGraph, CrewAI, Google ADK, Pydantic AI and the rest of the SDK-gated list above)
+* 🐳 **Container:** [`ghcr.io/intutic/intutic-proxy`](https://github.com/intutic/intutic/pkgs/container/intutic-proxy) — The proxy as an image for Docker and Kubernetes; see [Standalone proxy](https://docs.intutic.ai/integrations/standalone)
 
 ---
 

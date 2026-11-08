@@ -46,9 +46,10 @@ Intutic Proxy supports three deployment topologies, depending on whether you req
   ```yaml
   services:
     intutic-proxy:
-      # Built from this repository's packages/proxy/Dockerfile:
-      #   docker build -t intutic-proxy packages/proxy
-      image: intutic-proxy
+      # The open-core proxy, linux/amd64 and linux/arm64, published on every
+      # release. Pin a version tag (3.2.1) or a digest in production. To
+      # build it yourself instead: docker build -t intutic-proxy packages/proxy
+      image: ghcr.io/intutic/intutic-proxy:latest
       ports:
         - "4000:4000"
       environment:
@@ -79,6 +80,13 @@ Intutic Proxy supports three deployment topologies, depending on whether you req
   export ANTHROPIC_BASE_URL="http://localhost:4000"      # Anthropic SDKs append /v1/messages
   export OPENAI_BASE_URL="http://localhost:4000/v1"      # OpenAI SDKs append /chat/completions
   ```
+* **In a container:** the same proxy is published as `ghcr.io/intutic/intutic-proxy` (linux/amd64 and linux/arm64), tagged with each release's version and `latest`. Mount your SOPs and name the folder with `INTUTIC_SOPS_DIR`:
+  ```bash
+  docker run -p 4000:4000 \
+    -v "$PWD/.intutic/sops:/etc/intutic/sops:ro" -e INTUTIC_SOPS_DIR=/etc/intutic/sops \
+    ghcr.io/intutic/intutic-proxy:latest
+  ```
+  The image listens on every interface and runs as a non-root user. Each version carries a build provenance attestation: `gh attestation verify oci://ghcr.io/intutic/intutic-proxy:<version> --owner intutic`.
 * **Keys:** A proxy with no `CONTROL_PLANE_URL` runs standalone whether or not a local Valkey is up. It forwards the provider key the client sends, and accepts a virtual key (`vk_…`) by sending the provider key from its own environment upstream.
 * **Approved models:** With no control plane to publish a workspace allowlist, the standalone proxy reads `allowedModels` from `~/.intutic/config.json` and enforces it the same way. See [Settings → Standalone allowlist](/guide/settings#standalone-allowedmodels-in-intutic-config-json).
 
