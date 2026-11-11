@@ -2,8 +2,8 @@
 //
 // Regenerate with tools/scripts/build-offline-pricing-bundle.ts —
 // the same fetch that produces packages/proxy/src/pricing/offline_bundle.json.
-// Source: https://raw.githubusercontent.com/BerriAI/litellm/408a67efd7d0fe1978a7360bdf105ffaca454912/model_prices_and_context_window.json
-// Generated: 2026-11-10
+// Source: https://raw.githubusercontent.com/BerriAI/litellm/ebd5a15b22ba012d2f5a5ee654afc93cd51add5e/model_prices_and_context_window.json
+// Generated: 2026-11-11
 //
 // See packages/shared-types/src/modelCatalog.ts for the ModelCatalogEntry type
 // and the helpers (findCatalogModel, normalizeModelRef, selfHostedJudgeModelChoices) that
@@ -18,6 +18,7 @@ export const MODEL_CATALOG_GENERATED = [
   { ref: "anthropic/claude-haiku-5-5", id: "claude-haiku-5-5", provider: "anthropic", displayName: "claude-haiku-5-5", contextWindow: 1000000, maxOutputTokens: 128000, inputCostPer1k: 0.0001, outputCostPer1k: 0.0005, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "anthropic/claude-mythos-5", id: "claude-mythos-5", provider: "anthropic", displayName: "claude-mythos-5", contextWindow: 1000000, maxOutputTokens: 128000, inputCostPer1k: 0.01, outputCostPer1k: 0.05, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "anthropic/claude-mythos-5-1", id: "claude-mythos-5-1", provider: "anthropic", displayName: "claude-mythos-5-1", contextWindow: 1000000, maxOutputTokens: 128000, inputCostPer1k: 0.01, outputCostPer1k: 0.05, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
+  { ref: "anthropic/claude-mythos-5-2", id: "claude-mythos-5-2", provider: "anthropic", displayName: "claude-mythos-5-2", contextWindow: 1000000, maxOutputTokens: 128000, inputCostPer1k: 0.008, outputCostPer1k: 0.04, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "anthropic/claude-mythos-preview", id: "claude-mythos-preview", provider: "anthropic", displayName: "claude-mythos-preview", contextWindow: 1000000, maxOutputTokens: 128000, inputCostPer1k: 0.01, outputCostPer1k: 0.05, supportsFunctionCalling: true, supportsVision: true, judgeCapable: false, deprecated: true },
   { ref: "anthropic/claude-opus-4-5", id: "claude-opus-4-5", provider: "anthropic", displayName: "claude-opus-4-5", contextWindow: 200000, maxOutputTokens: 64000, inputCostPer1k: 0.005, outputCostPer1k: 0.025, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "anthropic/claude-opus-4-5-20251101", id: "claude-opus-4-5-20251101", provider: "anthropic", displayName: "claude-opus-4-5-20251101", contextWindow: 200000, maxOutputTokens: 64000, inputCostPer1k: 0.005, outputCostPer1k: 0.025, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
@@ -361,6 +362,7 @@ export const MODEL_CATALOG_GENERATED = [
   { ref: "gemini/gemini-3.7-flash", id: "gemini-3.7-flash", provider: "gemini", displayName: "gemini-3.7-flash", contextWindow: 1048576, maxOutputTokens: 65536, inputCostPer1k: 0.00075, outputCostPer1k: 0.00375, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "gemini/gemini-3.8-flash", id: "gemini-3.8-flash", provider: "gemini", displayName: "gemini-3.8-flash", contextWindow: 1048576, maxOutputTokens: 65536, inputCostPer1k: 0.00075, outputCostPer1k: 0.00375, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "gemini/gemini-4-argon", id: "gemini-4-argon", provider: "gemini", displayName: "gemini-4-argon", contextWindow: 1048576, maxOutputTokens: 1048576, inputCostPer1k: 0.002, outputCostPer1k: 0.01, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
+  { ref: "gemini/gemini-4-carbon", id: "gemini-4-carbon", provider: "gemini", displayName: "gemini-4-carbon", contextWindow: 1048576, maxOutputTokens: 1048576, inputCostPer1k: 0.002, outputCostPer1k: 0.01, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "gemini/gemini-exp-1114", id: "gemini-exp-1114", provider: "gemini", displayName: "gemini-exp-1114", contextWindow: 1048576, maxOutputTokens: 8192, inputCostPer1k: 0, outputCostPer1k: 0, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "gemini/gemini-exp-1206", id: "gemini-exp-1206", provider: "gemini", displayName: "gemini-exp-1206", contextWindow: 1048576, maxOutputTokens: 65535, inputCostPer1k: 0.0003, outputCostPer1k: 0.0025, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },
   { ref: "gemini/gemini-flash-latest", id: "gemini-flash-latest", provider: "gemini", displayName: "gemini-flash-latest", contextWindow: 1048576, maxOutputTokens: 65536, inputCostPer1k: 0.00075, outputCostPer1k: 0.00375, supportsFunctionCalling: true, supportsVision: true, judgeCapable: true, deprecated: false },

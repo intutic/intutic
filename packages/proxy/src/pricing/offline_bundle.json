@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/408a67efd7d0fe1978a7360bdf105ffaca454912/model_prices_and_context_window.json",
-    "generated_at": "2026-11-10",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/ebd5a15b22ba012d2f5a5ee654afc93cd51add5e/model_prices_and_context_window.json",
+    "generated_at": "2026-11-11",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -940,6 +940,12 @@
       "cache_read_cost_per_1k": 0.00025,
       "cache_write_cost_per_1k": 0.0125
     },
+    "claude-mythos-5-2": {
+      "input_cost_per_1k": 0.008,
+      "output_cost_per_1k": 0.04,
+      "cache_read_cost_per_1k": 0.0002,
+      "cache_write_cost_per_1k": 0.01
+    },
     "claude-mythos-preview": {
       "input_cost_per_1k": 0.01,
       "output_cost_per_1k": 0.05,
@@ -1051,6 +1057,11 @@
       "output_cost_per_1k": 0.04,
       "cache_read_cost_per_1k": 0.0002,
       "cache_write_cost_per_1k": 0.01
+    },
+    "gemini/gemini-4-carbon": {
+      "input_cost_per_1k": 0.002,
+      "output_cost_per_1k": 0.01,
+      "cache_read_cost_per_1k": 0.0001
     },
     "claude-3-7-sonnet-20250219": {
       "input_cost_per_1k": 0.003,
