@@ -70,7 +70,9 @@ overrides:
   uuid: '^11.1.1' # CVE-2026-41907
   # @modelcontextprotocol/sdk pins hono ^4.11.4 and resolves it to a version
   # below the fix. 4.12.31 satisfies that range, so this needs no SDK bump.
-  hono: '^4.13.11' # CVE-2026-59895/6/7, + ReDoS in CORS middleware via Access-Control-Request-Headers; CVE-2026-84363/84364/84365 (query parser past the fragment, unbounded dot-notation nesting in parseBody, toSSG incomplete fix); + the 2026-10-20 advisories fixed in 4.13.11
+  hono: '^4.13.16' # 2026-11 advisories fixed in 4.13.16: GHSA-46wx-v44x-9hh2, GHSA-4m76-xfj5-7975, GHSA-3gg2-335m-rxc6, GHSA-h7mg-cq63-vhpq, GHSA-4h7h-rv7c-7m2v; earlier: CVE-2026-59895/6/7, + ReDoS in CORS middleware via Access-Control-Request-Headers; CVE-2026-84363/84364/84365 (query parser past the fragment, unbounded dot-notation nesting in parseBody, toSSG incomplete fix); + the 2026-10-20 advisories fixed in 4.13.11
+  # Via @modelcontextprotocol/sdk, which asks for 2.x and resolved 2.1.5.
+  '@hono/node-server': '^2.1.6' # GHSA-qv5m-9pm6-hqp3 (unhandled ECONNRESET), GHSA-jpvv-r467-5p4w (backslash parsed as a path separator)
   qs: '^6.16.0' # CVE-2026-82417 (DoS via attacker-controlled isBuffer), CVE-2026-82562 (array-limit bypass via bracket-key comma parsing)
   devalue: '^5.9.2' # CVE-2026-81176 (DoS via malformed input)
   '@grpc/grpc-js': '^1.14.5' # GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4 — via @opentelemetry/sdk-node's OTLP gRPC exporters and @a2a-js/sdk
