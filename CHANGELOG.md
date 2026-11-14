@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`intutic-clawde[google-adk]` needs Python 3.11 and google-adk 2.14.1.** Every google-adk release that allows opentelemetry-api 1.45.2 (GHSA-mf5v-w3w3-f6cg, a ReDoS in `traceparent` parsing) requires Python 3.11, so on 3.10 the extra no longer installs google-adk, as with the autogen and smolagents extras. The rest of the package still supports 3.10.
 
+### Fixed
+
+- **`INTUTIC_LOCAL_BUDGET_ENFORCE=0` now stops every refusal from the local daily cap.** It switched off the budget gate, but the `budget_exhaustion` detector read the same headroom and still ended the session once the day's local spend passed the cap (default $10), and `spend_trajectory` kept warning on it. The same held behind a control plane, where the machine cap is meant not to apply. Unseen until 3.2.0 began counting streaming spend. The request context now carries the machine cap's headroom only while that cap is in force; the gate's "would have blocked" warning still fires with the hatch set.
+
 ## [3.2.1] - 2026-11-07
 
 ### Changed

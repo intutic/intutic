@@ -12,7 +12,6 @@
 //!
 //! Latency target: steps 1-5 < 10ms P99 (Valkey + single HTTP round-trip).
 
-use crate::plugins::IntuticPlugin;
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -3499,6 +3498,25 @@ fn machine_budget_applies_with(control_plane_url: Option<&str>) -> bool {
     control_plane_url.is_none_or(|v| v.trim().is_empty())
 }
 
+/// "No budget bounds this request", as `RequestContext::budget_remaining_usd`.
+const NO_MACHINE_CAP_USD: f64 = f64::MAX;
+
+/// The headroom a request's context carries: the machine cap's, only while that cap
+/// is in force (standalone, and not switched off with `INTUTIC_LOCAL_BUDGET_ENFORCE=0`).
+///
+/// The budget gate was not the only reader. `budget_exhaustion` kills at zero
+/// headroom and `spend_trajectory` warns on the rate, both from this field, so
+/// with the escape hatch set (or behind a control plane) they kept enforcing a
+/// cap the gate had already been told to ignore. Unnoticed until streaming spend
+/// was accrued (3.2.0): a standalone run with the cap off was refused at $10.
+fn context_budget_remaining(local_headroom: f64, applies: bool, enforced: bool) -> f64 {
+    if applies && enforced {
+        local_headroom
+    } else {
+        NO_MACHINE_CAP_USD
+    }
+}
+
 /// Accrue one completed request's cost against every ceiling the proxy owns.
 ///
 /// # Why this is a function and not three lines in a branch
@@ -4977,13 +4995,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
         .unwrap_or("unknown")
         .to_string();
 
-    let local_max = crate::local_spend::get_max_daily_budget();
-    let local_spent = crate::local_spend::get_local_spend();
-    let local_budget_remaining = if local_max > local_spent {
-        local_max - local_spent
-    } else {
-        0.0
-    };
+    let local_headroom = (crate::local_spend::get_max_daily_budget()
+        - crate::local_spend::get_local_spend())
+    .max(0.0);
+    let local_budget_remaining = context_budget_remaining(
+        local_headroom,
+        machine_budget_applies(),
+        local_budget_enforced(),
+    );
 
     // Signature of the tool set this request advertises. Compared against the
     // one the session opened with, so a harness quietly presenting a different
@@ -5735,9 +5754,14 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
             wasm_ctx.estimated_input_tokens,
             wasm_ctx.budget_remaining_usd,
         ));
-    let budget_plugin = crate::plugins::budget_gate::BudgetGatePlugin::new();
+    // Judged on the real headroom even when the cap is switched off, so the
+    // "would have blocked" warning below still fires; the context says "no cap".
     let machine_verdict = if machine_budget_applies() {
-        budget_plugin.evaluate(&wasm_ctx)
+        crate::plugins::budget_gate::BudgetGatePlugin::verdict(
+            &wasm_ctx.model,
+            wasm_ctx.estimated_input_tokens,
+            local_headroom,
+        )
     } else {
         crate::wasm::context::Verdict::Bypass
     };
@@ -14835,6 +14859,32 @@ mod tests {
             );
         }
         std::env::remove_var("INTUTIC_LOCAL_BUDGET_ENFORCE");
+    }
+
+    /// A machine cap that is switched off, or that does not apply, leaves no
+    /// headroom in the context for the budget detectors to act on.
+    #[test]
+    fn budget_detectors_see_no_cap_when_the_machine_cap_is_not_in_force() {
+        use crate::plugins::anomaly::detectors::{
+            test_support::base_ctx, BudgetExhaustionDetector,
+        };
+        use crate::plugins::anomaly::AnomalyDetector;
+        assert_eq!(context_budget_remaining(0.0, true, true), 0.0);
+        assert_eq!(context_budget_remaining(2.5, true, true), 2.5);
+        for (applies, enforced) in [(true, false), (false, true), (false, false)] {
+            let mut ctx = base_ctx();
+            ctx.budget_remaining_usd = context_budget_remaining(0.0, applies, enforced);
+            assert!(
+                BudgetExhaustionDetector.detect(&ctx).is_none(),
+                "applies={applies} enforced={enforced}: an exhausted cap that is not in force must not kill"
+            );
+        }
+        let mut ctx = base_ctx();
+        ctx.budget_remaining_usd = context_budget_remaining(0.0, true, true);
+        assert!(
+            BudgetExhaustionDetector.detect(&ctx).is_some(),
+            "an enforced, exhausted cap still kills"
+        );
     }
 
     /// A proxy with a control plane is never refused by the machine-wide cap.
