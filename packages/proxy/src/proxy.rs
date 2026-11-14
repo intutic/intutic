@@ -9313,7 +9313,25 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         };
                         let _ = cache_store_clone.publish_trace(&trace).await;
 
-                        let _ = tx.send(Err(std::io::Error::other(e.to_string()))).await;
+                        // End the stream the way a provider does when it fails
+                        // part-way, with an error event the client's SDK raises as
+                        // an API error, and say why. An `Err` here reset the client
+                        // connection, so harnesses saw only "incomplete chunked
+                        // read" and the proxy logged nothing.
+                        let cause = error_chain(&e);
+                        tracing::warn!(
+                            workspace_id = %workspace_id_clone,
+                            session_id = %session_id_clone,
+                            model = %actual_model_clone,
+                            error = %cause,
+                            "Upstream stream broke mid-response; ending the client's stream with an error event"
+                        );
+                        let _ = tx
+                            .send(Ok(mid_stream_error_event(
+                                &protocol_clone,
+                                &format!("Upstream connection failed mid-response: {cause}"),
+                            )))
+                            .await;
                         return;
                     }
                 }
@@ -12182,6 +12200,49 @@ pub fn get_terminal_stream_event(protocol: &crate::protocol::Protocol, model: &s
     }
 }
 
+/// An error and its sources, for a log line: reqwest's own message ("error decoding
+/// response body") says little without the transport error under it.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(s) = src {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        src = s.source();
+    }
+    out
+}
+
+/// The SSE event a provider sends when its stream fails part-way, in the
+/// client's protocol, starting on a fresh line whatever the last chunk ended
+/// with. Anthropic and the Responses API name the event `error`; Chat
+/// Completions and Gemini send an `error` object as a data chunk.
+fn mid_stream_error_event(
+    protocol: &crate::protocol::Protocol,
+    message: &str,
+) -> axum::body::Bytes {
+    use crate::protocol::Protocol;
+    let text = match protocol {
+        Protocol::Anthropic => format!(
+            "\nevent: error\ndata: {}\n\n",
+            serde_json::json!({"type": "error", "error": {"type": "api_error", "message": message}})
+        ),
+        Protocol::OpenAIResponses => format!(
+            "\nevent: error\ndata: {}\n\n",
+            serde_json::json!({"type": "error", "code": "server_error", "message": message, "param": null})
+        ),
+        Protocol::Gemini => format!(
+            "\ndata: {}\n\n",
+            serde_json::json!({"error": {"code": 502, "message": message, "status": "UNAVAILABLE"}})
+        ),
+        _ => format!(
+            "\ndata: {}\n\n",
+            serde_json::json!({"error": {"message": message, "type": "server_error", "param": null, "code": null}})
+        ),
+    };
+    axum::body::Bytes::from(text)
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -13192,6 +13253,43 @@ mod tests {
         let done_pos = client.find("data: [DONE]").expect("[DONE] must survive");
         assert!(flush_pos < done_pos, "the tail was emitted after [DONE]");
         assert!(client.trim_end().ends_with("data: [DONE]"));
+    }
+
+    #[test]
+    fn a_mid_stream_error_event_takes_the_client_protocol_shape() {
+        use crate::protocol::Protocol;
+        let parse = |p: Protocol| {
+            let text = String::from_utf8(mid_stream_error_event(&p, "boom").to_vec()).unwrap();
+            assert!(text.starts_with('\n') && text.ends_with("\n\n"), "{text:?}");
+            let event = text
+                .lines()
+                .find(|l| l.starts_with("event: "))
+                .map(str::to_string);
+            let data = text.lines().find(|l| l.starts_with("data: ")).unwrap();
+            (
+                event,
+                serde_json::from_str::<serde_json::Value>(&data[6..]).unwrap(),
+            )
+        };
+        let (ev, v) = parse(Protocol::Anthropic);
+        assert_eq!(ev.as_deref(), Some("event: error"));
+        assert_eq!(v["error"]["type"], "api_error");
+        assert_eq!(v["error"]["message"], "boom");
+        let (ev, v) = parse(Protocol::OpenAIResponses);
+        assert_eq!(ev.as_deref(), Some("event: error"));
+        assert_eq!(v["type"], "error");
+        let (ev, v) = parse(Protocol::OpenAIChatCompletions);
+        assert_eq!(ev, None);
+        assert_eq!(v["error"]["type"], "server_error");
+        let (_, v) = parse(Protocol::Gemini);
+        assert_eq!(v["error"]["status"], "UNAVAILABLE");
+    }
+
+    #[test]
+    fn an_error_chain_names_every_cause() {
+        let inner = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Broken pipe");
+        let outer = std::io::Error::other(inner);
+        assert!(error_chain(&outer).contains("Broken pipe"));
     }
 
     #[test]
