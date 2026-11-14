@@ -235,12 +235,15 @@ class TestFullAgentLoop:
         assert ran == [ALLOWED_COMMAND]
 
 
-#: A minimal FastMCP stdio server exposing a `shell` tool, run as a child
+#: A minimal MCP stdio server exposing a `shell` tool, run as a child
 #: python process — no network, no extra dependency (`mcp` is a hard
-#: dependency of strands-agents itself).
+#: dependency of strands-agents itself). mcp 2.x renamed FastMCP to MCPServer.
 _MCP_SERVER = textwrap.dedent("""
-    from mcp.server.fastmcp import FastMCP
-    mcp = FastMCP("intutic-test")
+    try:
+        from mcp.server.mcpserver import MCPServer
+    except ImportError:  # mcp 1.x
+        from mcp.server.fastmcp import FastMCP as MCPServer
+    mcp = MCPServer("intutic-test")
 
     @mcp.tool()
     def shell(command: str) -> str:
