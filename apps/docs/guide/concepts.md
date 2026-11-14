@@ -77,7 +77,7 @@ The **Policy Compliance and Action System** evaluates every LLM request against 
 | **KILL** | Request is blocked entirely | Budget exceeded, unauthorized tool call, or policy violation |
 
 ::: info HIJACK is applied, not proposed
-A HIJACK takes effect without waiting for anyone: the steered or redacted call proceeds. A tool call the response DLP rewrote is recorded as an enforced decision, for audit, with nothing to approve. A call that must wait for a person's approval is a hold (a `REQUIRE_APPROVAL:` rule), not a HIJACK.
+A HIJACK takes effect without waiting for anyone: the steered or redacted call proceeds. A tool call the response DLP rewrote (a secret in its arguments) is recorded as an enforced decision, for audit, with nothing to approve. PII in a tool call's arguments, such as the IBAN a payment goes to, is left as written: it is what the client runs. A detector set to `block` still refuses the call. A call that must wait for a person's approval is a hold (a `REQUIRE_APPROVAL:` rule), not a HIJACK.
 :::
 
 ## Traces

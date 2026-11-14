@@ -729,6 +729,47 @@ fn scan_patterns<'a>(
     findings
 }
 
+/// Whether a finding comes from a PII detector (`pii.card`, `pii.iban`, ...).
+pub fn is_pii(f: &DlpFinding) -> bool {
+    f.pattern_name.starts_with("pii.")
+}
+
+/// `findings` without the PII `redact` ones whose matched value is part of a
+/// tool call's arguments, and those values (intutic/intutic#438).
+///
+/// Redacting a response rewrites what the client is about to execute, not text
+/// anyone reads: a payment ran to `[REDACTED_PII]`. The arguments go to the
+/// user's own tool, so rewriting them protects nothing and changes the action.
+/// Secrets and operator patterns are still redacted there (a model that puts a
+/// cloud key into a call is the case output redaction exists for, recorded as a
+/// substituted call), and `block` findings still refuse. The same value in the
+/// model's prose is left too: the client receives it in the call either way.
+pub fn without_tool_argument_pii(
+    text: &str,
+    findings: Vec<DlpFinding>,
+    tool_arguments: &[String],
+) -> (Vec<DlpFinding>, Vec<String>) {
+    if tool_arguments.is_empty() {
+        return (findings, Vec::new());
+    }
+    let mut kept_values = Vec::new();
+    let findings = findings
+        .into_iter()
+        .filter(|f| {
+            if !is_pii(f) || f.action != "redact" {
+                return true;
+            }
+            let value = text.get(f.offset..f.offset + f.length).unwrap_or_default();
+            let in_args = !value.is_empty() && tool_arguments.iter().any(|a| a.contains(value));
+            if in_args && !kept_values.contains(&f.pattern_name) {
+                kept_values.push(f.pattern_name.clone());
+            }
+            !in_args
+        })
+        .collect();
+    (findings, kept_values)
+}
+
 /// Scrub one unit of streamed text.
 ///
 /// # What this covers, and what it does not
@@ -785,6 +826,44 @@ pub fn scrub_stream_text(text: &str, pii: Option<&PiiPolicy>) -> Option<(String,
         }
     }
     Some((redact(text, &findings), names))
+}
+
+/// Whether a raw SSE line carries a fragment of a tool call's arguments
+/// (Anthropic `input_json_delta`, OpenAI `tool_calls[].function.arguments`,
+/// Responses `function_call_arguments`, Gemini `functionCall`).
+pub fn is_tool_argument_line(line: &str) -> bool {
+    line.contains("\"input_json_delta\"")
+        || (line.contains("\"tool_calls\"") && line.contains("\"arguments\""))
+        || line.contains("function_call_arguments")
+        || line.contains("\"functionCall\"")
+}
+
+/// [`scrub_stream_text`] for a line of tool-call arguments: PII `redact`
+/// findings are left as written (`without_tool_argument_pii`); everything else
+/// is scrubbed as usual. Returns the scrub, if any, and the PII names left.
+pub fn scrub_stream_argument_line(
+    text: &str,
+    pii: Option<&PiiPolicy>,
+) -> (Option<(String, Vec<String>)>, Vec<String>) {
+    let (findings, left): (Vec<_>, Vec<_>) = scan_with(text, pii)
+        .into_iter()
+        .partition(|f| !(is_pii(f) && f.action == "redact"));
+    let mut left_names: Vec<String> = Vec::new();
+    for f in left {
+        if !left_names.contains(&f.pattern_name) {
+            left_names.push(f.pattern_name);
+        }
+    }
+    if findings.is_empty() {
+        return (None, left_names);
+    }
+    let mut names: Vec<String> = Vec::new();
+    for f in &findings {
+        if !names.contains(&f.pattern_name) {
+            names.push(f.pattern_name.clone());
+        }
+    }
+    (Some((redact(text, &findings), names)), left_names)
 }
 
 /// Redact all findings in text, replacing matches with [REDACTED_{CATEGORY}]
@@ -1270,6 +1349,10 @@ pub struct StreamScrubber {
     redactions: Vec<String>,
     /// The request's workspace PII policy; `None` scans with this machine's.
     pii: Option<std::sync::Arc<PiiPolicy>>,
+    /// Set for a tool call's buffered arguments: PII `redact` findings are left
+    /// as written (`without_tool_argument_pii`), and their names kept here.
+    tool_arguments: bool,
+    pii_left: Vec<String>,
 }
 
 impl StreamScrubber {
@@ -1279,7 +1362,37 @@ impl StreamScrubber {
             pending: String::new(),
             redactions: Vec::new(),
             pii: None,
+            tool_arguments: false,
+            pii_left: Vec::new(),
         }
+    }
+
+    /// For a tool call's arguments: PII the client is about to execute is not
+    /// rewritten (intutic/intutic#438); secrets still are.
+    pub fn for_tool_arguments(mut self) -> Self {
+        self.tool_arguments = true;
+        self
+    }
+
+    /// PII detector names left unredacted in tool arguments.
+    pub fn pii_left(&self) -> &[String] {
+        &self.pii_left
+    }
+
+    fn findings(&mut self) -> Vec<DlpFinding> {
+        let findings = scan_with(&self.pending, self.pii.as_deref());
+        if !self.tool_arguments {
+            return findings;
+        }
+        let (kept, left): (Vec<_>, Vec<_>) = findings
+            .into_iter()
+            .partition(|f| !(is_pii(f) && f.action == "redact"));
+        for f in left {
+            if !self.pii_left.contains(&f.pattern_name) {
+                self.pii_left.push(f.pattern_name);
+            }
+        }
+        kept
     }
 
     /// Scan with a workspace's PII detector actions (`workspace_pii_policy`).
@@ -1313,7 +1426,7 @@ impl StreamScrubber {
         if self.pending.is_empty() {
             return None;
         }
-        let findings = scan_with(&self.pending, self.pii.as_deref());
+        let findings = self.findings();
         self.note(&findings);
         let held = std::mem::take(&mut self.pending);
         Some(if findings.is_empty() {
@@ -1335,7 +1448,7 @@ impl StreamScrubber {
         if self.pending.len() <= self.holdback {
             return String::new();
         }
-        let findings = scan_with(&self.pending, self.pii.as_deref());
+        let findings = self.findings();
         let mut cut = self.pending.len() - self.holdback;
 
         // The straddle clamp. A finding that starts before the cut and ends
@@ -2690,5 +2803,75 @@ mod holdback_tests {
         assert_eq!(resolve_holdback(&cfg), 0);
         cfg.stream_holdback_bytes = Some(256);
         assert_eq!(resolve_holdback(&cfg), 256);
+    }
+}
+
+/// intutic/intutic#438: PII in a tool call's arguments is what the client
+/// runs, so output redaction leaves it as written; secrets are still removed.
+#[cfg(test)]
+mod tool_argument_pii_tests {
+    use super::*;
+
+    const IBAN: &str = "GB29NWBK60161331926819";
+    const OTHER_IBAN: &str = "DE89370400440532013000";
+    const KEY: &str = "AKIAIOSFODNN7EXAMPLE";
+
+    #[test]
+    fn a_response_keeps_pii_in_tool_arguments_and_redacts_the_rest() {
+        let body = format!(
+            r#"{{"content":[{{"type":"text","text":"Paying {OTHER_IBAN} later."}},{{"type":"tool_use","name":"send_money","input":{{"recipient":"{IBAN}","note":"{KEY}"}}}}]}}"#
+        );
+        let args = vec![format!(r#"{{"note":"{KEY}","recipient":"{IBAN}"}}"#)];
+        let (kept, left) = without_tool_argument_pii(&body, scan(&body), &args);
+        let out = redact(&body, &kept);
+        assert!(
+            out.contains(IBAN),
+            "the payee the client will pay is left as written"
+        );
+        assert!(
+            !out.contains(KEY),
+            "a secret in the same call is still redacted"
+        );
+        assert!(
+            !out.contains(OTHER_IBAN),
+            "PII that is not in a call is still redacted"
+        );
+        assert_eq!(left, vec!["pii.iban".to_string()]);
+    }
+
+    #[test]
+    fn without_tool_calls_nothing_changes() {
+        let body = format!("Paying {IBAN}");
+        let (kept, left) = without_tool_argument_pii(&body, scan(&body), &[]);
+        assert!(!redact(&body, &kept).contains(IBAN));
+        assert!(left.is_empty());
+    }
+
+    #[test]
+    fn buffered_tool_arguments_keep_pii_and_lose_secrets() {
+        let mut sc = StreamScrubber::new(usize::MAX).for_tool_arguments();
+        sc.push(&format!(r#"{{"recipient":"{IBAN}","#));
+        sc.push(&format!(r#""note":"{KEY}"}}"#));
+        let out = sc.flush().unwrap();
+        assert!(out.contains(IBAN));
+        assert!(!out.contains(KEY));
+        assert_eq!(sc.pii_left(), &["pii.iban".to_string()]);
+    }
+
+    #[test]
+    fn a_streamed_argument_line_keeps_pii_and_a_text_line_does_not() {
+        let arg_line = format!(
+            r#"data: {{"type":"content_block_delta","index":1,"delta":{{"type":"input_json_delta","partial_json":"{{\"recipient\":\"{IBAN}\"}}"}}}}"#
+        );
+        assert!(is_tool_argument_line(&arg_line));
+        let (scrub, left) = scrub_stream_argument_line(&arg_line, None);
+        assert!(scrub.is_none());
+        assert_eq!(left, vec!["pii.iban".to_string()]);
+
+        let text_line = format!(
+            r#"data: {{"type":"content_block_delta","index":0,"delta":{{"type":"text_delta","text":"{IBAN}"}}}}"#
+        );
+        assert!(!is_tool_argument_line(&text_line));
+        assert!(scrub_stream_text(&text_line, None).is_some());
     }
 }

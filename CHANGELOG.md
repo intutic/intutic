@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`INTUTIC_LOCAL_BUDGET_ENFORCE=0` now stops every refusal from the local daily cap.** It switched off the budget gate, but the `budget_exhaustion` detector read the same headroom and still ended the session once the day's local spend passed the cap (default $10), and `spend_trajectory` kept warning on it. The same held behind a control plane, where the machine cap is meant not to apply. Unseen until 3.2.0 began counting streaming spend. The request context now carries the machine cap's headroom only while that cap is in force; the gate's "would have blocked" warning still fires with the hatch set.
+- **Output DLP no longer rewrites PII in a tool call's arguments** (#438). With `pii.iban: redact` (the default) a checksum-valid IBAN in a model's tool call reached the client as `[REDACTED_PII]`, so a payment ran to that string, and a declared allowlist rule that named the real IBAN refused the call. On the response path, PII `redact` findings inside a tool call's arguments are now left as written and logged, on non-streaming and streaming responses: the arguments go to the user's own tool, so rewriting them protected nothing and changed the action. Secrets and operator patterns in arguments are still redacted, and a PII detector set to `block` still refuses. Requests to the provider and stored traces are redacted as before.
 
 ## [3.2.1] - 2026-11-07
 
