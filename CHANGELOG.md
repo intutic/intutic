@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-11-14
+
+### Fixed
+
+- **A provider connection that breaks mid-answer now ends the stream with an error event, and is logged.** The proxy reset the client's connection on this path and logged nothing, so a harness saw only "incomplete chunked read" (six Harvey LAB tasks on 2026-11-14, when a network event broke every upstream connection at once). The client now receives the text produced so far, then the error event a provider sends when its own stream fails, in the client's protocol (Anthropic and Responses `event: error`, Chat Completions and Gemini an `error` chunk), and a cleanly ended body, so its SDK raises an ordinary API error. The proxy logs a warning with the workspace, session, model and the full error chain.
+
 ## [3.2.2] - 2026-11-14
 
 ### Added
