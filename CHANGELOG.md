@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A public container image of the proxy.** `ghcr.io/intutic/intutic-proxy`, for linux/amd64 and linux/arm64, built from `packages/proxy/Dockerfile` on every release (`.github/workflows/publish-image.yml`). It is the open-core proxy, standalone. Each architecture must start and report its version on `/health` before the version tag is written, and the image carries a GitHub build provenance attestation (`gh attestation verify oci://ghcr.io/intutic/intutic-proxy:<version> --owner intutic`). The README quickstart and the standalone proxy page use it, with the SOP folder mounted through `INTUTIC_SOPS_DIR`.
 
+### Changed
+
+- **`intutic-clawde[google-adk]` needs Python 3.11 and google-adk 2.14.1.** Every google-adk release that allows opentelemetry-api 1.45.2 (GHSA-mf5v-w3w3-f6cg, a ReDoS in `traceparent` parsing) requires Python 3.11, so on 3.10 the extra no longer installs google-adk, as with the autogen and smolagents extras. The rest of the package still supports 3.10.
+
 ## [3.2.1] - 2026-11-07
 
 ### Changed
