@@ -7930,7 +7930,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     .request(reqwest::Method::POST, &f_url)
                     .headers(f_headers)
                     .body(f_body)
-                    .timeout(std::time::Duration::from_secs(120))
+                    .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
                     .send()
                     .await
                 {
@@ -8482,10 +8482,24 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                             // previously bypassed output DLP entirely — the
                             // branch returned before Step 7.
                             if dlp_scan_output && !replayed {
-                                if let Some((scrubbed, names)) = crate::dlp::scrub_stream_text(
-                                    &line,
-                                    output_pii_clone.as_deref(),
-                                ) {
+                                // A tool call's arguments are what the client
+                                // runs: PII there is left as written (#438).
+                                let scrub = if crate::dlp::is_tool_argument_line(&line) {
+                                    let (scrub, left) = crate::dlp::scrub_stream_argument_line(
+                                        &line,
+                                        output_pii_clone.as_deref(),
+                                    );
+                                    if !left.is_empty() {
+                                        tracing::info!(patterns = ?left, "DLP: PII in a streamed tool-call argument left as written (intutic#438)");
+                                    }
+                                    scrub
+                                } else {
+                                    crate::dlp::scrub_stream_text(
+                                        &line,
+                                        output_pii_clone.as_deref(),
+                                    )
+                                };
+                                if let Some((scrubbed, names)) = scrub {
                                     line = scrubbed;
                                     for n in names {
                                         if !dlp_stream_redactions.contains(&n) {
@@ -9381,6 +9395,13 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                         patterns = ?ah.redactions(),
                         "DLP redacted secrets from streamed tool-call arguments; \
                          the harness received the redacted arguments"
+                    );
+                }
+                if !ah.pii_left().is_empty() {
+                    tracing::info!(
+                        workspace_id = %workspace_id_clone,
+                        patterns = ?ah.pii_left(),
+                        "DLP: PII in streamed tool-call arguments left as written (the client runs them; intutic#438)"
                     );
                 }
             }
@@ -10357,6 +10378,25 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
     let final_body = if let Some(output_pii) = &output_dlp {
         let resp_str = String::from_utf8_lossy(&final_body_bytes);
         let findings = dlp::scan_with(&resp_str, output_pii.as_deref());
+        let tool_arguments: Vec<String> = if findings.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str::<serde_json::Value>(&resp_str)
+                .map(|body| {
+                    crate::routing::integrity::response_tool_calls(&body)
+                        .into_iter()
+                        .map(|(_, args, raw)| {
+                            raw.unwrap_or_else(|| args.map(|a| a.to_string()).unwrap_or_default())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let (findings, pii_left) =
+            dlp::without_tool_argument_pii(&resp_str, findings, &tool_arguments);
+        if !pii_left.is_empty() {
+            tracing::info!(workspace_id = %workspace_id, patterns = ?pii_left, "DLP: PII in tool-call arguments left as written (the client runs them; intutic#438)");
+        }
         if !findings.is_empty() {
             output_dlp_redacted = true;
             tracing::info!(workspace_id = %workspace_id, findings = findings.len(), "DLP findings in response — redacting");
@@ -11857,7 +11897,9 @@ impl ArgHoldback {
     /// `pii` is the request's workspace PII policy, `None` for this machine's.
     fn new(pii: Option<Arc<crate::dlp::PiiPolicy>>) -> Self {
         Self {
-            scrubber: crate::dlp::StreamScrubber::new(usize::MAX).with_pii(pii),
+            scrubber: crate::dlp::StreamScrubber::new(usize::MAX)
+                .with_pii(pii)
+                .for_tool_arguments(),
             index: 0,
             item_id: String::new(),
             active: false,
@@ -11867,6 +11909,11 @@ impl ArgHoldback {
     /// Distinct pattern names redacted out of buffered arguments.
     fn redactions(&self) -> &[String] {
         self.scrubber.redactions()
+    }
+
+    /// PII detector names left as written in buffered arguments (#438).
+    fn pii_left(&self) -> &[String] {
+        self.scrubber.pii_left()
     }
 
     /// Feed one SSE line. Returns `(flush_for_previous_block, rewritten_line)`.

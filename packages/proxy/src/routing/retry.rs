@@ -233,9 +233,30 @@ const QUOTA_EXHAUSTED_CODES: [&str; 6] = [
     "organization_usage_limit_exceeded",
 ];
 
-/// Every call the proxy makes to a target is capped by this, matching the
-/// timeout the single-attempt send always had.
-pub const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(120);
+/// Backstop on one whole call to a target, response body included.
+///
+/// reqwest's request timeout runs until the body has finished, so the 120 s it
+/// was cut every streamed response longer than two minutes mid-body (the
+/// client saw an incomplete chunked read): long drafts on large contexts do
+/// that routinely. A hung or stalled upstream is caught by
+/// [`READ_IDLE_TIMEOUT`] instead; this only bounds a stream that never ends.
+pub const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// Longest silence on an upstream connection: waiting for the response head,
+/// or between two reads of its body. Providers send keep-alive events while a
+/// model thinks, so a live stream is never this quiet.
+pub const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The shared client for upstream model calls: idle and connect timeouts, and
+/// [`ATTEMPT_TIMEOUT`] as the whole-call backstop.
+pub fn upstream_client(read_idle: Duration, whole_call: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .read_timeout(read_idle)
+        .timeout(whole_call)
+        .build()
+        .expect("Failed to build reqwest client")
+}
 
 /// One upstream call, as recorded on the execution trace.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -952,5 +973,68 @@ mod tests {
         assert_eq!(cfg.max_attempts, 5);
         assert!(cfg.enabled);
         assert_eq!(cfg.on_status, DEFAULT_RETRY_STATUSES.to_vec());
+    }
+}
+
+/// A streamed body longer than the idle timeout completes as long as it keeps
+/// arriving; a stalled one still fails. The old whole-call 120 s cut the first.
+#[cfg(test)]
+mod upstream_timeout_tests {
+    use super::upstream_client;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Serves one chunked response: `chunks` pieces, `gap` apart, then a stall
+    /// of `stall` before the terminating chunk.
+    async fn serve(chunks: usize, gap: Duration, stall: Duration) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let _ = sock
+                .write_all(b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n")
+                .await;
+            for _ in 0..chunks {
+                tokio::time::sleep(gap).await;
+                let _ = sock.write_all(b"5\r\nhello\r\n").await;
+            }
+            tokio::time::sleep(stall).await;
+            let _ = sock.write_all(b"0\r\n\r\n").await;
+        });
+        format!("http://{addr}/")
+    }
+
+    #[tokio::test]
+    async fn a_stream_longer_than_the_idle_timeout_completes_while_it_keeps_arriving() {
+        let url = serve(8, Duration::from_millis(60), Duration::ZERO).await;
+        let client = upstream_client(Duration::from_millis(200), Duration::from_secs(10));
+        let body = client.get(&url).send().await.unwrap().text().await.unwrap();
+        assert_eq!(
+            body.len(),
+            40,
+            "about 0.5 s of body against a 0.2 s idle limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_whole_call_limit_shorter_than_the_stream_cuts_it_mid_body() {
+        // The 3.2.1 shape: the limit covered the body, so a live stream died.
+        let url = serve(8, Duration::from_millis(60), Duration::ZERO).await;
+        let client = upstream_client(Duration::from_secs(10), Duration::from_millis(200));
+        let resp = client.get(&url).send().await.unwrap();
+        assert!(resp.text().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_stalled_stream_still_fails() {
+        let url = serve(1, Duration::ZERO, Duration::from_millis(800)).await;
+        let client = upstream_client(Duration::from_millis(200), Duration::from_secs(10));
+        let resp = client.get(&url).send().await.unwrap();
+        assert!(
+            resp.text().await.is_err(),
+            "0.8 s of silence must hit the 0.2 s idle limit"
+        );
     }
 }

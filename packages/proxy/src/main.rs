@@ -655,12 +655,10 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Build HTTP client for upstream LLM forwarding (shared, connection-pooled)
-    let http_client = std::sync::Arc::new(
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .expect("Failed to build reqwest client"),
-    );
+    let http_client = std::sync::Arc::new(intutic_proxy::routing::retry::upstream_client(
+        intutic_proxy::routing::retry::READ_IDLE_TIMEOUT,
+        intutic_proxy::routing::retry::ATTEMPT_TIMEOUT,
+    ));
 
     // Sampled `context_snapshot` capture rate for the replay corpus. Default
     // 5%: enough to reach `MIN_REPLAY_CONTEXTS` (50) within a day of modest
