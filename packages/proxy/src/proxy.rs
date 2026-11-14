@@ -7930,7 +7930,7 @@ pub async fn handle_proxy(State(state): State<AppState>, request: Request<Body>)
                     .request(reqwest::Method::POST, &f_url)
                     .headers(f_headers)
                     .body(f_body)
-                    .timeout(std::time::Duration::from_secs(120))
+                    .timeout(crate::routing::retry::ATTEMPT_TIMEOUT)
                     .send()
                     .await
                 {
