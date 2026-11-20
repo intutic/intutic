@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "source": "https://raw.githubusercontent.com/BerriAI/litellm/b435dac805c4f197659a8cf7e654db883beb78f1/model_prices_and_context_window.json",
-    "generated_at": "2026-11-19",
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/1ff582fc2be18890687f05a9973066e5fec17dab/model_prices_and_context_window.json",
+    "generated_at": "2026-11-20",
     "refresh_script": "tools/scripts/build-offline-pricing-bundle.ts",
     "note": "Baked into the proxy binary via include_str!(), so editing this file does nothing until the image is rebuilt. Regenerate with tools/scripts/build-offline-pricing-bundle.ts; drift against published rates is reported monthly by .github/workflows/pricing-drift.yml. Override with OFFLINE_PRICING_PATH."
   },
@@ -1072,6 +1072,10 @@
       "input_cost_per_1k": 0.003,
       "output_cost_per_1k": 0.015,
       "cache_read_cost_per_1k": 0.00015
+    },
+    "gemini/genie-4": {
+      "input_cost_per_1k": 0.0015,
+      "output_cost_per_1k": 0.009
     },
     "claude-3-7-sonnet-20250219": {
       "input_cost_per_1k": 0.003,
