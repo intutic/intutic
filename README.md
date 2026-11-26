@@ -12,7 +12,24 @@
 
 [Quickstart](#-30-second-quickstart) • [Architecture](#%EF%B8%8F-architecture) • [Key Features](#-key-features) • [Supported Harnesses](#-supported-harnesses--frameworks) • [Docs](https://docs.intutic.ai)
 
-<br>
+</div>
+
+**AI coding agents run shell commands, write files and call APIs on your machine, and model gateways never see
+those tool calls: nothing stands between the agent and the `rm -rf`, the leaked secret or the loop that keeps
+spending.** Intutic puts a policy gate in front of every tool call.
+
+* **Rules are Markdown files in git.** Write them in `.intutic/sops/`; `intutic gates install` compiles them into a
+  gate for each harness.
+* **Checked before every tool call.** Deterministic rules run in-process, with no model call or network round-trip;
+  `decide:` rules ask a self-hosted model before the tool runs.
+* **Refuses what your rules name, redacts secrets.** Commands, paths and SQL your rules forbid are refused; API keys,
+  AWS credentials and tokens are masked in prompts and tool payloads.
+* **Stops runaway loops.** Per-session spend ceilings and loop caps end an agent that keeps going.
+* **43 agent harnesses.** Claude Code, Cursor, Codex, Aider, LangGraph, CrewAI and more: 36 through a gate at the
+  tool call, the rest through the proxy.
+* **Open source, runs locally.** A Rust proxy under the MIT license, with no control plane required.
+
+<div align="center">
 
 <img src="assets/demo.gif" alt="A hook gate allows an in-scope edit and refuses an out-of-scope edit and an irreversible kubectl delete, from one SOP" width="100%">
 
