@@ -20,8 +20,8 @@ spending.** Intutic puts a policy gate in front of every tool call.
 
 * **Rules are Markdown files in git.** Write them in `.intutic/sops/`; `intutic gates install` compiles them into a
   gate for each harness.
-* **Checked before every tool call, with no model call.** The rule engine runs in-process, so it adds no network
-  round-trip.
+* **Checked before every tool call.** Deterministic rules run in-process, with no model call or network round-trip;
+  `decide:` rules ask a self-hosted model before the tool runs.
 * **Refuses what your rules name, redacts secrets.** Commands, paths and SQL your rules forbid are refused; API keys,
   AWS credentials and tokens are masked in prompts and tool payloads.
 * **Stops runaway loops.** Per-session spend ceilings and loop caps end an agent that keeps going.
